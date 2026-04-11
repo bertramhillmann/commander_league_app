@@ -1,0 +1,243 @@
+// ─── Types ────────────────────────────────────────────────────────────────────
+
+export type AchievementScope = 'player' | 'commander'
+
+export interface AchievementDef {
+  id: string
+  name: string
+  description: string
+  icon: string
+  points: number
+  /** Can be earned multiple times (e.g. once per week) */
+  repeatable: boolean
+  scope: AchievementScope
+}
+
+export interface EarnedAchievement {
+  id: string
+  /** The game this was earned in. 'post' for tier/rock-bottom achievements. */
+  gameId: string
+  /** For commander-scoped achievements */
+  commander?: string
+}
+
+// ─── Definitions ─────────────────────────────────────────────────────────────
+
+export const ACHIEVEMENTS: Record<string, AchievementDef> = {
+  weekly_win: {
+    id: 'weekly_win',
+    name: 'Weekly Win',
+    description: 'Win a game this week',
+    icon: '🏆',
+    points: 0.5,
+    repeatable: true,
+    scope: 'player',
+  },
+  weekly_variety: {
+    id: 'weekly_variety',
+    name: 'Jack of All Trades',
+    description: 'Play 3 different commanders in one week',
+    icon: '🎭',
+    points: 1,
+    repeatable: true,
+    scope: 'player',
+  },
+  first_blood: {
+    id: 'first_blood',
+    name: 'First Blood',
+    description: 'First win with this commander',
+    icon: '🩸',
+    points: 1,
+    repeatable: false,
+    scope: 'commander',
+  },
+  killing_the_table: {
+    id: 'killing_the_table',
+    name: 'Flipping the Table',
+    description: '1st place while all opponents tie 2nd (killing the table)',
+    icon: '☠️',
+    points: 3,
+    repeatable: false,
+    scope: 'player',
+  },
+  born_a_star: {
+    id: 'born_a_star',
+    name: 'Born a Star',
+    description: 'Win a 5-player game',
+    icon: '⭐',
+    points: 1,
+    repeatable: false,
+    scope: 'player',
+  },
+  gold_tier: {
+    id: 'gold_tier',
+    name: 'Touch of Midas',
+    description: 'Reach Gold tier with a commander',
+    icon: '🥇',
+    points: 1,
+    repeatable: false,
+    scope: 'commander',
+  },
+  platinum_tier: {
+    id: 'platinum_tier',
+    name: 'Platinum Standard',
+    description: 'Reach Platinum tier with a commander',
+    icon: '💿',
+    points: 1,
+    repeatable: false,
+    scope: 'commander',
+  },
+  diamond_tier: {
+    id: 'diamond_tier',
+    name: 'Diamond in the Rough',
+    description: 'Reach Diamond tier with a commander',
+    icon: '💎',
+    points: 3,
+    repeatable: false,
+    scope: 'commander',
+  },
+  hit_rock_bottom: {
+    id: 'hit_rock_bottom',
+    name: 'Hit Rock Bottom',
+    description: '0 pts after 5+ games with a commander',
+    icon: '🪨',
+    points: 3,
+    repeatable: false,
+    scope: 'commander',
+  },
+  sleeper: {
+    id: 'sleeper',
+    name: 'Sleeper',
+    description: 'Return after not playing for 2+ weeks',
+    icon: '😴',
+    points: 3,
+    repeatable: true,
+    scope: 'player',
+  },
+  grinder: {
+    id: 'grinder',
+    name: 'Grinder',
+    description: 'Play 10+ games in one week',
+    icon: '⚙️',
+    points: 1,
+    repeatable: true,
+    scope: 'player',
+  },
+  beat_leader: {
+    id: 'beat_leader',
+    name: 'Giant Slayer',
+    description: 'Win a game against the current league leader',
+    icon: '👑',
+    points: 0.5,
+    repeatable: true,
+    scope: 'player',
+  },
+  returning_wanderer: {
+    id: 'returning_wanderer',
+    name: 'Returning Wanderer',
+    description: 'Play a game after 10+ league games were played without you',
+    icon: '🧭',
+    points: 2,
+    repeatable: true,
+    scope: 'player',
+  },
+  straggler: {
+    id: 'straggler',
+    name: 'Straggler',
+    description: 'Win a game against a player with 10+ more games played',
+    icon: '🐢',
+    points: 2,
+    repeatable: true,
+    scope: 'player',
+  },
+  hyper_straggler: {
+    id: 'hyper_straggler',
+    name: 'Hyper Straggler',
+    description: 'Win a game against a player with 20+ more games played',
+    icon: '🐌',
+    points: 3,
+    repeatable: true,
+    scope: 'player',
+  },
+  king_maker: {
+    id: 'king_maker',
+    name: 'King Maker',
+    description: 'Lose a game that propels someone else to first place in the league',
+    icon: '🤴',
+    points: 0.5,
+    repeatable: true,
+    scope: 'player',
+  },
+  reach_level_7: {
+    id: 'reach_level_7',
+    name: 'Rising Force',
+    description: 'Reach level 7 with a commander',
+    icon: '🌟',
+    points: 1,
+    repeatable: false,
+    scope: 'commander',
+  },
+  reach_level_10: {
+    id: 'reach_level_10',
+    name: 'Seasoned Veteran',
+    description: 'Reach level 10 with a commander',
+    icon: '💫',
+    points: 2,
+    repeatable: false,
+    scope: 'commander',
+  },
+  reach_level_20: {
+    id: 'reach_level_20',
+    name: 'Ascendant',
+    description: 'Reach level 20 with a commander',
+    icon: '🔱',
+    points: 3,
+    repeatable: false,
+    scope: 'commander',
+  },
+  diversify: {
+    id: 'diversify',
+    name: 'Diversify',
+    description: 'Play a game with your fifth unique commander',
+    icon: '🎲',
+    points: 1,
+    repeatable: false,
+    scope: 'player',
+  },
+  hyper_fixation: {
+    id: 'hyper_fixation',
+    name: 'Hyper Fixation',
+    description: 'Play 15 games in a row with the same commander',
+    icon: '🔒',
+    points: 2,
+    repeatable: false,
+    scope: 'player',
+  },
+  old_memory: {
+    id: 'old_memory',
+    name: 'Old Memory',
+    description: 'Play a commander you haven\'t used in 15+ of your own games',
+    icon: '🕰️',
+    points: 2,
+    repeatable: true,
+    scope: 'player',
+  },
+  losing_streak: {
+    id: 'losing_streak',
+    name: 'Losing Streak',
+    description: 'Play 15 games without ever finishing first',
+    icon: '📉',
+    points: 7,
+    repeatable: false,
+    scope: 'player',
+  },
+  win_streak: {
+    id: 'win_streak',
+    name: 'Win Streak',
+    description: 'Win 3 games in a row with the same commander',
+    icon: '🔥',
+    points: 1,
+    repeatable: true,
+    scope: 'player',
+  },
+}

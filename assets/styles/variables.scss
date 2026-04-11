@@ -1,0 +1,94 @@
+// === Colors ===
+$color-primary: #6c3fc5;
+$color-primary-light: #9b6ee8;
+$color-primary-dark: #4a2a8a;
+
+$color-secondary: #2c9c6a;
+$color-accent: #e8a030;
+
+$color-bg: #0f0f1a;
+$color-bg-card: #1a1a2e;
+$color-bg-elevated: #242438;
+
+$color-text: #f0f0f0;
+$color-text-muted: #8888aa;
+$color-text-inverse: #0f0f1a;
+
+$color-danger: #e05050;
+$color-success: #3cb87a;
+$color-warning: #e8a030;
+
+// === Typography ===
+$font-family-base: 'Inter', system-ui, sans-serif;
+$font-family-display: 'Cinzel', serif;
+
+$font-size-xs: 0.75rem;
+$font-size-sm: 0.875rem;
+$font-size-base: 1rem;
+$font-size-lg: 1.125rem;
+$font-size-xl: 1.25rem;
+$font-size-2xl: 1.5rem;
+$font-size-3xl: 1.875rem;
+$font-size-4xl: 2.25rem;
+
+$font-weight-normal: 400;
+$font-weight-medium: 500;
+$font-weight-semibold: 600;
+$font-weight-bold: 700;
+
+// === Spacing ===
+$spacing-1: 0.25rem;
+$spacing-2: 0.5rem;
+$spacing-3: 0.75rem;
+$spacing-4: 1rem;
+$spacing-6: 1.5rem;
+$spacing-8: 2rem;
+$spacing-12: 3rem;
+$spacing-16: 4rem;
+
+// === Borders ===
+$border-radius-sm: 4px;
+$border-radius-md: 8px;
+$border-radius-lg: 12px;
+$border-radius-xl: 16px;
+$border-radius-full: 9999px;
+
+$border-color: #2e2e4a;
+
+// === Shadows ===
+$shadow-sm: 0 1px 3px rgba(0, 0, 0, 0.4);
+$shadow-md: 0 4px 12px rgba(0, 0, 0, 0.5);
+$shadow-lg: 0 8px 24px rgba(0, 0, 0, 0.6);
+$shadow-glow-primary: 0 0 16px rgba(108, 63, 197, 0.4);
+
+// === Breakpoints ===
+$breakpoint-sm: 640px;
+$breakpoint-md: 768px;
+$breakpoint-lg: 1024px;
+$breakpoint-xl: 1280px;
+
+// === Transitions ===
+$transition-fast: 150ms ease;
+$transition-base: 250ms ease;
+$transition-slow: 400ms ease;
+
+// === Commander Tiers ===
+$tier-diamond-color:  #b9f2ff; // ice cyan
+$tier-diamond-bg:     rgba(185, 242, 255, 0.12);
+$tier-platinum-color: #e8e8f0; // cool silver-white
+$tier-platinum-bg:    rgba(232, 232, 240, 0.12);
+$tier-gold-color:     #ffd700; // gold
+$tier-gold-bg:        rgba(255, 215, 0, 0.12);
+$tier-silver-color:   #a0a0b8; // muted silver
+$tier-silver-bg:      rgba(160, 160, 184, 0.10);
+$tier-bronze-color:   #cd7f32; // bronze brown
+$tier-bronze-bg:      rgba(205, 127, 50, 0.12);
+$tier-trash-color:    #4a3a3a; // dark muted red-grey
+$tier-trash-bg:       rgba(74, 58, 58, 0.12);
+
+// Tier thresholds (ratio of player-commander rate vs avg commander rate)
+$tier-diamond-threshold:  2.0;
+$tier-platinum-threshold: 1.5;
+$tier-gold-threshold:     1.2;
+$tier-silver-min:         0.7; // silver: 0.7 – 1.2× avg
+// below 0.7× avg = bronze

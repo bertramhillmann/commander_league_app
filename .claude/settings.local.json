@@ -1,0 +1,13 @@
+{
+  "permissions": {
+    "allow": [
+      "Bash(dir \"c:\\\\Users\\\\bertr\\\\Desktop\\\\Work\\\\cmd_app\")",
+      "Bash(printf '\\\\n')",
+      "Bash(npx nuxi@latest init --template minimal .)",
+      "Bash(yes)",
+      "Bash(npm install:*)",
+      "Bash(npx nuxt:*)",
+      "Bash(npx nuxi:*)"
+    ]
+  }
+}
