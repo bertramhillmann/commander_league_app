@@ -278,7 +278,8 @@ function rankDelta(playerName: string): number {
 <style lang="scss" scoped>
 .game-card {
   display: flex;
-  background: $color-bg-card;
+  background: rgba(16, 16, 16, 0.25);
+  backdrop-filter:blur(3px);
   border: 1px solid $border-color;
   border-radius: $border-radius-lg;
   overflow: hidden;
@@ -299,17 +300,20 @@ function rankDelta(playerName: string): number {
 
   &__art-winner {
     flex: 1;
+    padding:10px;
     overflow: hidden;
   }
 
   &__art-others {
     display: flex;
-    height: 38px;
+    padding:5px;
+    height: 58px;
     border-top: 1px solid $border-color;
   }
 
   &__art-other {
     flex: 1;
+    margin:3px;
     overflow: hidden;
 
     & + & {
@@ -320,12 +324,13 @@ function rankDelta(playerName: string): number {
   &__art-img {
     width: 100%;
     height: 100%;
+    border-radius:3px;
     object-fit: cover;
     object-position: center top;
     display: block;
 
     &--gray {
-      filter: grayscale(100%) brightness(0.75);
+      filter: grayscale(80%) brightness(0.75);
     }
   }
 
@@ -384,6 +389,10 @@ function rankDelta(playerName: string): number {
     align-items: center;
     gap: $spacing-3;
     font-size: $font-size-sm;
+
+    &:nth-child(even) {
+      background:rgba(0,0,0,0.15);
+    }
 
     &--place-1 .game-card__name {
       color: $color-accent;

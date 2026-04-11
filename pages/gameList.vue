@@ -1,5 +1,25 @@
 <script setup lang="ts">
 const { games, loading, error } = useLeagueState()
+
+const sortedGames = computed(() =>
+  [...games.value].sort((a, b) => {
+    const dateDiff = new Date(b.date).getTime() - new Date(a.date).getTime()
+    if (dateDiff !== 0) return dateDiff
+    return compareGameIds(a.gameId, b.gameId) * -1;
+  }),
+)
+
+function compareGameIds(a: string, b: string) {
+  const aNum = extractGameIdNumber(a)
+  const bNum = extractGameIdNumber(b)
+  if (aNum !== bNum) return aNum - bNum
+  return a.localeCompare(b, undefined, { numeric: true, sensitivity: 'base' })
+}
+
+function extractGameIdNumber(gameId: string) {
+  const match = gameId.match(/\d+/)
+  return match ? Number(match[0]) : Number.POSITIVE_INFINITY
+}
 </script>
 
 <template>
@@ -7,14 +27,14 @@ const { games, loading, error } = useLeagueState()
     <header class="game-list__header">
       <NuxtLink to="/" class="back-link">← Home</NuxtLink>
       <h1>Games</h1>
-      <span class="game-list__count">{{ games.length }} games</span>
+      <span class="game-list__count">{{ sortedGames.length }} games</span>
     </header>
 
     <div v-if="loading" class="state-msg">Loading…</div>
     <div v-else-if="error" class="state-msg state-msg--error">Failed to load games.</div>
 
     <div v-else class="game-list__grid">
-      <GamesGame v-for="game in games" :key="game.gameId" :game="game" />
+      <GamesGame v-for="game in sortedGames" :key="game.gameId" :game="game" />
     </div>
   </div>
 </template>

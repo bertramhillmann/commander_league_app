@@ -11,6 +11,8 @@
 html {
   font-size: 16px;
   scroll-behavior: smooth;
+  background:
+    linear-gradient(180deg, #1a1424 0%, #100b17 46%, #09070d 100%);
 }
 
 body {
@@ -18,9 +20,38 @@ body {
   font-size: $font-size-base;
   font-weight: $font-weight-normal;
   color: $color-text;
-  background-color: $color-bg;
+  background:
+    linear-gradient(-120deg, rgba(28, 18, 40, 0.9), rgba(12, 9, 20, 0.7)),
+    url('~/assets/img/grunge_bg.jpg') center top / cover fixed no-repeat;
   line-height: 1.6;
   min-height: 100vh;
+  position: relative;
+}
+
+body::before {
+  content: '';
+  position: fixed;
+  inset: 0;
+  pointer-events: none;
+  background:
+    linear-gradient(rgba(126, 88, 170, 0.22), rgba(126, 88, 170, 0.22)),
+    linear-gradient(rgba(34, 20, 52, 0.18), rgba(34, 20, 52, 0.18)),
+    rgba(0, 0, 0, 0.08);
+  mix-blend-mode: saturation;
+  opacity: 0.74;
+  z-index: -1;
+}
+
+body::after {
+  content: '';
+  position: fixed;
+  inset: 0;
+  pointer-events: none;
+  background:
+    linear-gradient(rgba(38, 22, 64, 0.08), rgba(38, 22, 64, 0.08));
+  backdrop-filter: saturate(0.92) contrast(1.14);
+  opacity: 0.36;
+  z-index: -1;
 }
 
 h1,

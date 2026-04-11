@@ -40,7 +40,7 @@ export const BASE_RATINGS: Record<number, PlacementRating[]> = {
     { points: 0,    lPoints: 3 }, // 3rd
   ],
   4: [
-    { points: 1, lPoints: 0 }, // 1st
+    { points: 1.1, lPoints: 0 }, // 1st
     { points: 0.66, lPoints: 2 }, // 2nd
     { points: 0.33, lPoints: 3 }, // 3rd
     { points: 0,    lPoints: 4 }, // 4th

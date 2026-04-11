@@ -85,16 +85,19 @@ function onLeave() {
 
 .ach-page__grid {
   display: flex;
-  flex-direction: column;
+  flex-flow: row wrap;
   gap: $spacing-2;
-  max-width: 680px;
+  max-width: 100%;
 }
 
 .ach-card {
   display: flex;
   align-items: center;
   gap: $spacing-3;
-  background: $color-bg-card;
+  flex: 0 0 33%;
+  height: 100px;
+  background: rgba(16,16,16,0.4);
+  backdrop-filter:blur(3px);
   border: 1px solid $border-color;
   border-radius: $border-radius-lg;
   padding: $spacing-3 $spacing-4;

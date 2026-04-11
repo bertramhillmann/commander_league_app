@@ -24,7 +24,11 @@
           v-for="row in table"
           :key="row.name"
           class="standings__row"
-          :class="{ 'standings__row--top3': row.rank <= 3 }"
+          :class="{
+            'standings__row--top1': row.rank === 1,
+            'standings__row--top2': row.rank === 2,
+            'standings__row--top3': row.rank === 3
+          }"
         >
           <td class="standings__td standings__td--rank">
             <span class="standings__rank" :class="`standings__rank--${row.rank}`">
@@ -79,6 +83,8 @@
         </tr>
       </tbody>
     </table>
+
+    <CommandersTopCommander />
 
     <Teleport to="body">
       <div
@@ -437,8 +443,17 @@ function onMultLeave() {
     }
 
     &--top3 {
-      background: rgba($color-primary, 0.04);
+      background: rgba($color-primary, 0.05);
     }
+
+    &--top2 {
+      background: rgba($color-primary, 0.1);
+    }
+
+    &--top1 {
+      background: rgba($color-primary, 0.15);
+    }
+
   }
 
   &__td {
@@ -472,6 +487,7 @@ function onMultLeave() {
     white-space: nowrap;
 
     &:hover {
+      cursor:pointer;
       color: $color-primary-light;
       text-decoration: underline dotted;
     }
