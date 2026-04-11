@@ -159,24 +159,16 @@
 
 <script setup lang="ts">
 import { computed, reactive } from 'vue'
-import { xpToLevel } from '~/utils/commanderExperience'
 import {
   EXPECTED_WIN_RATE,
   PERF_BASE_WEIGHT,
   PERF_WIN_RATE_WEIGHT,
   PERF_AVG_WEIGHT,
-  PERF_MULT_MIN,
-  PERF_MULT_MAX,
 } from '~/utils/placements'
 
 const { players, gameRecords, standings } = useLeagueState()
 
 // ── Commander XP points: 1 pt per level per commander ────────────────────────
-
-function xpPoints(playerName: string): number {
-  const xpMap = players.value[playerName]?.commanderXP ?? {}
-  return Object.values(xpMap).reduce((s, xp) => s + xpToLevel(xp), 0)
-}
 
 // ── Most played commander ─────────────────────────────────────────────────────
 
@@ -199,13 +191,7 @@ const table = computed(() => {
   const leagueAvgPerGame = totalGames > 0 ? totalPoints / totalGames : 1
 
   return allPlayers.map((p) => {
-    const xp   = xpPoints(p.name)
-    const achv = p.achievementPoints
-    const base = p.totalPoints + achv + xp
-
-    const avg = p.gamesPlayed > 0
-      ? Math.round((p.totalPoints / p.gamesPlayed) * 1000) / 1000
-      : 0
+    const avg = p.avgPerGame
     const winRate = p.gamesPlayed > 0
       ? Math.round((p.baseWins / p.gamesPlayed) * 100)
       : 0
@@ -216,25 +202,20 @@ const table = computed(() => {
     const winRateTerm     = r3(PERF_WIN_RATE_WEIGHT * (winRateFraction / EXPECTED_WIN_RATE))
     const avgTerm         = r3(PERF_AVG_WEIGHT * avgFraction)
     const multRaw         = r3(PERF_BASE_WEIGHT + winRateTerm + avgTerm)
-    const mult            = p.gamesPlayed > 0
-      ? Math.min(PERF_MULT_MAX, Math.max(PERF_MULT_MIN, multRaw))
-      : 1
-
-    const total = Math.round(base * mult * 1000) / 1000
 
     const tc = topCommander(p.name)
     return {
       rank: p.rank,
       name: p.name,
-      totalScore: total,
+      totalScore: p.totalScore,
       totalPoints: p.totalPoints,
-      achievementPoints: achv,
-      xpPoints: xp,
+      achievementPoints: p.achievementPoints,
+      xpPoints: p.xpPoints,
       gamesPlayed: p.gamesPlayed,
       winRate,
       avgPerGame: avg,
       leagueAvgPerGame: r3(leagueAvgPerGame),
-      perfMult: r3(mult),
+      perfMult: p.perfMult,
       perfMultRaw: multRaw,
       winRateFraction: r3(winRateFraction),
       winRateTerm,
@@ -244,7 +225,7 @@ const table = computed(() => {
       topCommanderTier: tc ? (players.value[p.name]?.commanderTiers?.[tc] ?? null) : null,
       totalLPoints: p.totalLPoints,
     }
-  }).sort((a, b) => b.totalScore - a.totalScore).map((r, i) => ({ ...r, rank: i + 1 }))
+  })
 })
 
 function r3(n: number): number { return Math.round(n * 1000) / 1000 }

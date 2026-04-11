@@ -136,13 +136,13 @@ function buildChartConfig(): ChartConfiguration<'line' | 'scatter'> {
           label: 'Tier shifts',
           data: markerData,
           showLine: false,
-          pointRadius: (ctx) => markerRadius(ctx.dataIndex),
-          pointHoverRadius: (ctx) => markerRadius(ctx.dataIndex) + 1.5,
+          pointRadius: 0,
+          pointHoverRadius: 0,
           pointStyle: 'triangle',
           pointRotation: (ctx) => markerRotation(ctx.dataIndex),
-          pointBackgroundColor: (ctx) => markerColor(ctx.dataIndex),
-          pointBorderColor: (ctx) => markerOutline(ctx.dataIndex),
-          pointBorderWidth: 1.2,
+          pointBackgroundColor: 'rgba(0, 0, 0, 0)',
+          pointBorderColor: 'rgba(0, 0, 0, 0)',
+          pointBorderWidth: 0,
         },
       ],
     },
@@ -286,26 +286,8 @@ const tierPointLabelPlugin: Plugin<'line' | 'scatter'> = {
   },
 }
 
-function markerRadius(index: number) {
-  return props.points[index]?.tierChange ? (props.compact ? 4.2 : 5.5) : 0
-}
-
 function markerRotation(index: number) {
   return props.points[index]?.tierChange === 'drop' ? 180 : 0
-}
-
-function markerColor(index: number) {
-  const point = props.points[index]
-  if (!point?.tierChange) return 'rgba(0, 0, 0, 0)'
-  return tierPalette[point.tier]
-}
-
-function markerOutline(index: number) {
-  const point = props.points[index]
-  if (!point?.tierChange) return 'rgba(0, 0, 0, 0)'
-  return point.tier === 'diamond' || point.tier === 'platinum'
-    ? '#242438'
-    : 'rgba(243, 243, 255, 0.9)'
 }
 
 function ordinal(value: number) {

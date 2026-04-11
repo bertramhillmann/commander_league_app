@@ -1,4 +1,12 @@
-import { computeGamePoints } from '~/utils/placements'
+import {
+  computeGamePoints,
+  EXPECTED_WIN_RATE,
+  PERF_BASE_WEIGHT,
+  PERF_WIN_RATE_WEIGHT,
+  PERF_AVG_WEIGHT,
+  PERF_MULT_MIN,
+  PERF_MULT_MAX,
+} from '~/utils/placements'
 import { applyModifiers, type ModifierResult } from '~/utils/modifiers'
 import { calculateXPGained, xpToLevel } from '~/utils/commanderExperience'
 import { getTier, smoothedTierScore, blendScore, type Tier } from '~/utils/tiers'
@@ -69,6 +77,25 @@ export interface CommanderState {
   uniquePlayers: string[]
 }
 
+export interface LeagueStanding {
+  name: string
+  totalScore: number
+  rank: number
+  totalPoints: number
+  achievementPoints: number
+  xpPoints: number
+  perfMult: number
+  gamesPlayed: number
+  baseWins: number
+  avgPerGame: number
+  totalLPoints: number
+}
+
+export interface LeagueSnapshotEntry {
+  rank: number
+  totalScore: number
+}
+
 // ─── Shared state ─────────────────────────────────────────────────────────────
 
 const useGamesState = () => useState<ProcessedGame[]>('league:games', () => [])
@@ -76,6 +103,8 @@ const usePlayersState = () => useState<Record<string, PlayerState>>('league:play
 const useCommandersState = () => useState<Record<string, CommanderState>>('league:commanders', () => ({}))
 const useGameRecordsState = () =>
   useState<Record<string, Record<string, PlayerGameRecord>>>('league:gameRecords', () => ({}))
+const useLeagueSnapshotsState = () =>
+  useState<Record<string, Record<string, LeagueSnapshotEntry>>>('league:leagueSnapshots', () => ({}))
 const useLoadedState = () => useState<boolean>('league:loaded', () => false)
 
 // ─── Composable ───────────────────────────────────────────────────────────────
@@ -85,6 +114,7 @@ export function useLeagueState() {
   const players = usePlayersState()
   const commanders = useCommandersState()
   const gameRecords = useGameRecordsState()
+  const leagueSnapshots = useLeagueSnapshotsState()
   const loaded = useLoadedState()
   const loading = ref(false)
   const error = ref<string | null>(null)
@@ -106,6 +136,7 @@ export function useLeagueState() {
       const playerMap: Record<string, PlayerState> = {}
       const commanderMap: Record<string, CommanderState> = {}
       const recordsMap: Record<string, Record<string, PlayerGameRecord>> = {}
+      const snapshotMap: Record<string, Record<string, LeagueSnapshotEntry>> = {}
 
       // ── Achievement tracking state ──────────────────────────────────────────
 
@@ -169,16 +200,12 @@ export function useLeagueState() {
         // All other players finished 2nd (killing the table check)
         const allOthers2nd = computed.every((p) => p.placement === 1 || p.placement === 2)
 
-        // Snapshot league ranks before this game
-        // Sort matches dashboard: totalPoints + achievementPoints + Σ xpToLevel(commanderXP)
-        const fullScore = (p: PlayerState) =>
-          p.totalPoints + p.achievementPoints +
-          Object.values(p.commanderXP).reduce((s, xp) => s + xpToLevel(xp), 0)
-        const rankBeforeList = Object.values(playerMap).sort((a, b) => fullScore(b) - fullScore(a))
+        // Snapshot league ranks before this game using the shared dashboard metric.
+        const rankBeforeList = buildLeagueStandings(playerMap)
         const rankBeforeMap: Record<string, number> = {}
         for (const p of game.players) {
-          const idx = rankBeforeList.findIndex((pl) => pl.name === p.name)
-          rankBeforeMap[p.name] = idx === -1 ? rankBeforeList.length + 1 : idx + 1
+          const entry = rankBeforeList.find((pl) => pl.name === p.name)
+          rankBeforeMap[p.name] = entry?.rank ?? (rankBeforeList.length + 1)
         }
 
         for (const p of computed) {
@@ -475,11 +502,17 @@ export function useLeagueState() {
           }
         }
 
-        // Compute league ranks after this game (same scoring as dashboard)
-        const rankAfterList = Object.values(playerMap).sort((a, b) => fullScore(b) - fullScore(a))
+        // Compute league ranks after this game with the centralized dashboard metric.
+        const rankAfterList = buildLeagueStandings(playerMap)
+        snapshotMap[game.gameId] = Object.fromEntries(
+          rankAfterList.map((entry) => [
+            entry.name,
+            { rank: entry.rank, totalScore: entry.totalScore },
+          ]),
+        )
         for (const p of computed) {
           recordsMap[p.name][game.gameId].rankAfter =
-            rankAfterList.findIndex((pl) => pl.name === p.name) + 1
+            snapshotMap[game.gameId][p.name]?.rank ?? 0
         }
 
         globalGameIdx++
@@ -563,6 +596,7 @@ export function useLeagueState() {
       players.value = playerMap
       commanders.value = commanderMap
       gameRecords.value = recordsMap
+      leagueSnapshots.value = snapshotMap
       loaded.value = true
     } catch (e: any) {
       error.value = e.message ?? 'Failed to load league data'
@@ -571,13 +605,9 @@ export function useLeagueState() {
     }
   }
 
-  const standings = computed(() =>
-    Object.values(players.value)
-      .sort((a, b) => b.totalPoints - a.totalPoints)
-      .map((p, i) => ({ ...p, rank: i + 1 })),
-  )
+  const standings = computed(() => buildLeagueStandings(players.value))
 
-  return { games, players, commanders, gameRecords, standings, loaded, loading, error, init }
+  return { games, players, commanders, gameRecords, leagueSnapshots, standings, loaded, loading, error, init }
 }
 
 function round3(n: number): number {
@@ -593,4 +623,52 @@ function isoWeek(date: Date): number {
 
 function absWeek(date: Date): number {
   return date.getUTCFullYear() * 53 + isoWeek(date)
+}
+
+function buildLeagueStandings(playerMap: Record<string, PlayerState>): LeagueStanding[] {
+  const allPlayers = Object.values(playerMap)
+  const totalGames = allPlayers.reduce((sum, player) => sum + player.gamesPlayed, 0)
+  const totalPoints = allPlayers.reduce((sum, player) => sum + player.totalPoints, 0)
+  const leagueAvgPerGame = totalGames > 0 ? totalPoints / totalGames : 1
+
+  return allPlayers
+    .map((player) => {
+      const xpPoints = getXpPoints(player)
+      const avgPerGame = player.gamesPlayed > 0 ? round3(player.totalPoints / player.gamesPlayed) : 0
+      const winRateFraction = player.gamesPlayed > 0
+        ? player.baseWins / player.gamesPlayed
+        : EXPECTED_WIN_RATE
+      const avgFraction = leagueAvgPerGame > 0 ? avgPerGame / leagueAvgPerGame : 1
+      const winRateTerm = round3(PERF_WIN_RATE_WEIGHT * (winRateFraction / EXPECTED_WIN_RATE))
+      const avgTerm = round3(PERF_AVG_WEIGHT * avgFraction)
+      const perfMultRaw = round3(PERF_BASE_WEIGHT + winRateTerm + avgTerm)
+      const perfMult = player.gamesPlayed > 0
+        ? Math.min(PERF_MULT_MAX, Math.max(PERF_MULT_MIN, perfMultRaw))
+        : 1
+      const baseScore = player.totalPoints + player.achievementPoints + xpPoints
+      const totalScore = round3(baseScore * perfMult)
+
+      return {
+        name: player.name,
+        totalScore,
+        rank: 0,
+        totalPoints: player.totalPoints,
+        achievementPoints: player.achievementPoints,
+        xpPoints,
+        perfMult: round3(perfMult),
+        gamesPlayed: player.gamesPlayed,
+        baseWins: player.baseWins,
+        avgPerGame,
+        totalLPoints: player.totalLPoints,
+      }
+    })
+    .sort((a, b) => {
+      if (b.totalScore !== a.totalScore) return b.totalScore - a.totalScore
+      return a.name.localeCompare(b.name)
+    })
+    .map((player, index) => ({ ...player, rank: index + 1 }))
+}
+
+function getXpPoints(player: PlayerState) {
+  return Object.values(player.commanderXP).reduce((sum, xp) => sum + xpToLevel(xp), 0)
 }

@@ -1,4 +1,8 @@
-import type { PlayerGameRecord, ProcessedGame } from '~/composables/useLeagueState'
+import type {
+  LeagueSnapshotEntry,
+  PlayerGameRecord,
+  ProcessedGame,
+} from '~/composables/useLeagueState'
 
 export interface LeagueRankTimelinePoint {
   gameId: string
@@ -6,42 +10,30 @@ export interface LeagueRankTimelinePoint {
   rank: number
   playerCount: number
   totalPlayers: number
-  totalPoints: number
+  totalScore: number
   participated: boolean
 }
 
 export function buildPlayerLeagueTimeline(
   games: ProcessedGame[],
   gameRecords: Record<string, Record<string, PlayerGameRecord>>,
+  leagueSnapshots: Record<string, Record<string, LeagueSnapshotEntry>>,
   playerName: string,
 ): LeagueRankTimelinePoint[] {
-  const allPlayers = Object.keys(gameRecords)
-  const runningTotals = Object.fromEntries(allPlayers.map((name) => [name, 0])) as Record<string, number>
   const timeline: LeagueRankTimelinePoint[] = []
 
   for (const game of games) {
-    for (const participant of game.players) {
-      const record = gameRecords[participant.name]?.[game.gameId]
-      if (!record) continue
-      runningTotals[participant.name] = round3((runningTotals[participant.name] ?? 0) + record.finalPoints)
-    }
-
-    const sortedNames = [...allPlayers].sort((a, b) => {
-      const pointsDiff = (runningTotals[b] ?? 0) - (runningTotals[a] ?? 0)
-      if (pointsDiff !== 0) return pointsDiff
-      return a.localeCompare(b)
-    })
-
-    const rank = sortedNames.findIndex((name) => name === playerName) + 1
+    const snapshot = leagueSnapshots[game.gameId] ?? {}
+    const entry = snapshot[playerName]
     const participated = !!gameRecords[playerName]?.[game.gameId]
 
     timeline.push({
       gameId: game.gameId,
       dateLabel: formatGameDate(game.date),
-      rank,
+      rank: entry?.rank ?? 0,
       playerCount: game.players.length,
-      totalPlayers: allPlayers.length,
-      totalPoints: runningTotals[playerName] ?? 0,
+      totalPlayers: Object.keys(snapshot).length,
+      totalScore: entry?.totalScore ?? 0,
       participated,
     })
   }
@@ -55,8 +47,4 @@ function formatGameDate(date: string | Date) {
     month: '2-digit',
     year: '2-digit',
   })
-}
-
-function round3(n: number) {
-  return Math.round(n * 1000) / 1000
 }

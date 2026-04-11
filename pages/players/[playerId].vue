@@ -51,8 +51,31 @@
         </div>
       </div>
 
-      <div v-if="leagueTimeline.length > 0" class="player__league-chart">
-        <ChartsLeagueRankTimeline :points="leagueTimeline" />
+      <div v-if="leagueTimeline.length > 0" class="player__league-panel">
+        <div class="player__league-chart">
+          <ChartsLeagueRankTimeline :points="leagueTimeline" />
+        </div>
+
+        <div v-if="playerAchievements.length > 0" class="player__league-achievements">
+          <div class="player__league-achievements-title">Player Achievements</div>
+          <div class="player__league-achievements-list">
+            <button
+              v-for="achievement in playerAchievements"
+              :key="achievement.id"
+              type="button"
+              class="player__league-achievement"
+              @mouseenter="onAchievementEnter(achievement.id, $event)"
+              @mousemove="onAchievementMove($event)"
+              @mouseleave="onAchievementLeave"
+            >
+              <span class="player__league-achievement-icon">{{ achievement.icon }}</span>
+              <span class="player__league-achievement-name">{{ achievement.name }}</span>
+              <span class="player__league-achievement-meta">
+                +{{ achievement.points }} pts<span v-if="achievement.count > 1"> · x{{ achievement.count }}</span>
+              </span>
+            </button>
+          </div>
+        </div>
       </div>
 
       <!-- ── Commanders ──────────────────────────────────────── -->
@@ -80,10 +103,24 @@
             <div class="cmd-row__card-wrap">
               <div
                 class="cmd-row__card"
+                :title="getCommanderIndicatorTitle(cmd)"
                 @mouseenter="onCardPreviewEnter(cmd.name, $event)"
                 @mousemove="onCardPreviewMove($event)"
                 @mouseleave="onCardPreviewLeave"
               >
+                <div
+                  v-if="getCommanderIndicator(cmd)"
+                  class="cmd-row__indicator"
+                  :class="`cmd-row__indicator--${getCommanderIndicator(cmd)?.direction}`"
+                >
+                  <span
+                    v-for="n in getCommanderIndicator(cmd)?.strength ?? 0"
+                    :key="`${cmd.name}-${n}`"
+                    class="cmd-row__indicator-icon"
+                  >
+                    {{ getCommanderIndicator(cmd)?.direction === 'up' ? '▲' : '▼' }}
+                  </span>
+                </div>
                 <img
                   v-if="artUrls.get(cmd.name)"
                   :src="artUrls.get(cmd.name)"
@@ -175,16 +212,19 @@
 
               <!-- Commander-scoped achievements -->
               <div v-if="cmd.achievements.length > 0" class="cmd-row__achievements">
-                <div
+                <button
                   v-for="ach in cmd.achievements"
                   :key="ach.id"
+                  type="button"
                   class="cmd-row__ach"
-                  :title="ach.description"
+                  @mouseenter="onAchievementEnter(ach.id, $event)"
+                  @mousemove="onAchievementMove($event)"
+                  @mouseleave="onAchievementLeave"
                 >
                   <span class="cmd-row__ach-icon">{{ ach.icon }}</span>
                   <span class="cmd-row__ach-name">{{ ach.name }}</span>
                   <span class="cmd-row__ach-pts">+{{ ach.points }}</span>
-                </div>
+                </button>
               </div>
 
             </div>
@@ -211,6 +251,16 @@
       />
     </div>
   </Teleport>
+
+  <Teleport to="body">
+    <div
+      v-if="achievementPreview.visible"
+      class="floating-panel"
+      :style="{ top: `${achievementPreview.y}px`, left: `${achievementPreview.x}px` }"
+    >
+      <AchievementsAchievementMetaInformation :achievement-id="achievementPreview.id" />
+    </div>
+  </Teleport>
 </template>
 
 <script setup lang="ts">
@@ -225,13 +275,35 @@ import type { Tier } from '~/utils/tiers'
 const route = useRoute()
 const playerId = computed(() => route.params.playerId as string)
 
-const { games, commanders, players, gameRecords } = useLeagueState()
+const { games, commanders, players, gameRecords, leagueSnapshots } = useLeagueState()
 
 const player = computed(() => players.value[playerId.value] ?? null)
 const chronologicalGames = computed(() => [...games.value].reverse())
 const leagueTimeline = computed(() =>
-  buildPlayerLeagueTimeline(chronologicalGames.value, gameRecords.value, playerId.value),
+  buildPlayerLeagueTimeline(chronologicalGames.value, gameRecords.value, leagueSnapshots.value, playerId.value),
 )
+const playerAchievements = computed(() => {
+  const counts = new Map<string, number>()
+  for (const achievement of player.value?.earnedAchievements ?? []) {
+    const def = ACHIEVEMENTS[achievement.id]
+    if (!def || def.scope !== 'player') continue
+    counts.set(def.id, (counts.get(def.id) ?? 0) + 1)
+  }
+
+  return [...counts.entries()]
+    .map(([id, count]) => {
+      const def = ACHIEVEMENTS[id]
+      return {
+        id: def.id,
+        name: def.name,
+        icon: def.icon,
+        description: def.description,
+        points: def.points,
+        count,
+      }
+    })
+    .sort((a, b) => (b.points * b.count) - (a.points * a.count) || a.name.localeCompare(b.name))
+})
 
 // ── Player-level stats ────────────────────────────────────────────────────────
 
@@ -290,6 +362,14 @@ interface CommanderRow {
   xpScorePts: number
   timeline: PlacementTimelinePoint[]
   achievements: Array<{ id: string; name: string; description: string; icon: string; points: number }>
+}
+
+type CommanderIndicatorDirection = 'up' | 'down'
+type CommanderIndicator = {
+  direction: CommanderIndicatorDirection
+  strength: 1 | 2
+  metricLabel: string
+  deltaRatio: number
 }
 
 const commanderRows = computed((): CommanderRow[] => {
@@ -402,6 +482,12 @@ const cardPreview = reactive({
   x: 0,
   y: 0,
 })
+const achievementPreview = reactive({
+  visible: false,
+  id: '',
+  x: 0,
+  y: 0,
+})
 
 function calcPreviewPosition(e: MouseEvent, width: number, height: number) {
   let x = e.clientX + PREVIEW_OFFSET_X
@@ -430,6 +516,25 @@ function onCardPreviewLeave() {
   cardPreview.visible = false
 }
 
+function onAchievementEnter(id: string, e: MouseEvent) {
+  achievementPreview.id = id
+  achievementPreview.visible = true
+  const pos = calcPreviewPosition(e, 240, 220)
+  achievementPreview.x = pos.x
+  achievementPreview.y = pos.y
+}
+
+function onAchievementMove(e: MouseEvent) {
+  if (!achievementPreview.visible) return
+  const pos = calcPreviewPosition(e, 240, 220)
+  achievementPreview.x = pos.x
+  achievementPreview.y = pos.y
+}
+
+function onAchievementLeave() {
+  achievementPreview.visible = false
+}
+
 // ── Sort ──────────────────────────────────────────────────────────────────────
 
 const sortOptions = [
@@ -439,7 +544,11 @@ const sortOptions = [
   { key: 'alpha',     label: 'A–Z' },
 ]
 
-const sortKey = ref<string>('plays')
+const sortKey = ref<string>('avgPoints')
+
+const activeIndicatorMetric = computed<'avgPoints' | 'winRate'>(() =>
+  sortKey.value === 'winRate' ? 'winRate' : 'avgPoints',
+)
 
 const sortedCommanders = computed(() => {
   const rows = [...commanderRows.value]
@@ -456,6 +565,35 @@ const sortedCommanders = computed(() => {
 function fmt(n: number): string {
   if (n === 0) return '0'
   return n % 1 === 0 ? String(n) : n.toFixed(3).replace(/\.?0+$/, '')
+}
+
+function getRelativeDelta(value: number, baseline: number) {
+  if (baseline <= 0) return value > 0 ? 1 : 0
+  return (value - baseline) / baseline
+}
+
+function getCommanderIndicator(cmd: CommanderRow): CommanderIndicator | null {
+  const metric = activeIndicatorMetric.value
+  const baseline = metric === 'winRate' ? winRate.value : avgPerGame.value
+  const value = metric === 'winRate' ? cmd.winRate : cmd.avgPoints
+  const deltaRatio = getRelativeDelta(value, baseline)
+
+  if (Math.abs(deltaRatio) < 0.1) return null
+
+  return {
+    direction: deltaRatio > 0 ? 'up' : 'down',
+    strength: Math.abs(deltaRatio) >= 0.3 ? 2 : 1,
+    metricLabel: metric === 'winRate' ? 'player win rate' : 'player avg points',
+    deltaRatio,
+  }
+}
+
+function getCommanderIndicatorTitle(cmd: CommanderRow) {
+  const indicator = getCommanderIndicator(cmd)
+  if (!indicator) return ''
+  const pct = Math.round(Math.abs(indicator.deltaRatio) * 100)
+  const relation = indicator.direction === 'up' ? 'above' : 'below'
+  return `${pct}% ${relation} ${indicator.metricLabel}`
 }
 </script>
 
@@ -522,8 +660,82 @@ function fmt(n: number): string {
     margin-top: $spacing-6;
   }
 
-  &__league-chart {
+  &__league-panel {
+    display: flex;
+    align-items: stretch;
+    gap: $spacing-3;
     margin-bottom: $spacing-8;
+    min-width: 0;
+  }
+
+  &__league-chart {
+    flex: 0 0 600px;
+    height:300px;
+    min-width: 0;
+  }
+
+  &__league-achievements {
+    width: 220px;
+    flex: 1 0 220px;
+    height:300px;
+    display: flex;
+    flex-direction: column;
+    gap: $spacing-2;
+    border-radius: $border-radius-md;
+    padding: $spacing-3;
+  }
+
+  &__league-achievements-title {
+    font-size: 10px;
+    font-weight: $font-weight-semibold;
+    color: $color-text-muted;
+    text-transform: uppercase;
+    letter-spacing: 0.06em;
+  }
+
+  &__league-achievements-list {
+    display: grid;
+    grid-template-columns: repeat(4, minmax(0, 1fr));
+    gap: $spacing-2;
+    align-content: start;
+  }
+
+  &__league-achievement {
+    appearance: none;
+    display: flex;
+    flex-direction: column;
+    align-items: flex-start;
+    gap: 3px;
+    min-width: 0;
+    text-align: left;
+    padding: 7px 8px;
+    background: rgba($color-bg-elevated, 0.88);
+    border: 1px solid rgba($border-color, 0.72);
+    border-radius: $border-radius-sm;
+    cursor: default;
+    transition: border-color $transition-fast, background $transition-fast;
+
+    &:hover {
+      border-color: rgba($color-accent, 0.35);
+      background: rgba($color-bg-elevated, 1);
+    }
+  }
+
+  &__league-achievement-icon {
+    font-size: 12px;
+    line-height: 1;
+  }
+
+  &__league-achievement-name {
+    font-size: 10px;
+    color: $color-text;
+    line-height: 1.2;
+  }
+
+  &__league-achievement-meta {
+    font-size: 9px;
+    color: $color-accent;
+    line-height: 1.2;
   }
 
   &__section-header {
@@ -608,6 +820,7 @@ function fmt(n: number): string {
   }
 
   &__card {
+    position: relative;
     border-radius: $border-radius-md;
     overflow: hidden;
     box-shadow: $shadow-md;
@@ -628,6 +841,35 @@ function fmt(n: number): string {
     height: 170px;
     background: $color-bg-elevated;
     border-radius: $border-radius-md;
+  }
+
+  &__indicator {
+    position: absolute;
+    top: 8px;
+    left: 8px;
+    z-index: 2;
+    display: inline-flex;
+    align-items: center;
+    gap: 2px;
+    padding: 4px 6px;
+    border-radius: $border-radius-full;
+    backdrop-filter: blur(6px);
+    box-shadow: 0 8px 18px rgba(0, 0, 0, 0.28);
+
+    &--up {
+      background: rgba(44, 156, 106, 0.82);
+      color: #f3fff8;
+    }
+
+    &--down {
+      background: rgba(176, 72, 72, 0.82);
+      color: #fff3f3;
+    }
+  }
+
+  &__indicator-icon {
+    font-size: 10px;
+    line-height: 1;
   }
 
   &__card-xp {
@@ -841,6 +1083,7 @@ function fmt(n: number): string {
   }
 
   &__ach {
+    appearance: none;
     display: inline-flex;
     align-items: center;
     gap: 5px;
@@ -849,6 +1092,15 @@ function fmt(n: number): string {
     border-radius: $border-radius-full;
     padding: 2px $spacing-2;
     cursor: default;
+    color: inherit;
+    font: inherit;
+    text-align: left;
+    transition: border-color $transition-fast, background $transition-fast;
+
+    &:hover {
+      background: rgba($color-accent, 0.12);
+      border-color: rgba($color-accent, 0.34);
+    }
   }
 
   &__ach-icon {
@@ -869,6 +1121,21 @@ function fmt(n: number): string {
 }
 
 @media (max-width: 1180px) {
+  .player {
+    &__league-panel {
+      flex-direction: column;
+    }
+
+    &__league-achievements {
+      width: 100%;
+      flex-basis: auto;
+    }
+
+    &__league-achievements-list {
+      grid-template-columns: repeat(auto-fit, minmax(140px, 1fr));
+    }
+  }
+
   .cmd-row {
     &__timeline {
       width: 100%;

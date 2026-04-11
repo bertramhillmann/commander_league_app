@@ -224,7 +224,7 @@ export const ACHIEVEMENTS: Record<string, AchievementDef> = {
   },
   losing_streak: {
     id: 'losing_streak',
-    name: 'Losing Streak',
+    name: 'YOU SUCK, DUDE',
     description: 'Play 15 games without ever finishing first',
     icon: '📉',
     points: 7,

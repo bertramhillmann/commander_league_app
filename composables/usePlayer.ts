@@ -1,13 +1,12 @@
-import type { PlayerState } from './useLeagueState'
+import { useLeagueState, type LeagueStanding, type PlayerState } from './useLeagueState'
 
-export type { PlayerState }
+export type { LeagueStanding, PlayerState }
 
 export function usePlayer() {
   const players = useState<Record<string, PlayerState>>('league:players', () => ({}))
+  const { standings } = useLeagueState()
 
-  const playerList = computed(() =>
-    Object.values(players.value).sort((a, b) => b.totalPoints - a.totalPoints),
-  )
+  const playerList = computed(() => standings.value)
 
   function getPlayer(name: string): PlayerState | undefined {
     return players.value[name]

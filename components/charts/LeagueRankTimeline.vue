@@ -128,7 +128,7 @@ function buildConfig(): ChartConfiguration<'line' | 'scatter'> {
             label(item: TooltipItem<'line' | 'scatter'>) {
               const point = props.points[item.dataIndex]
               if (!point) return ''
-              const bits = [`Rank ${point.rank} of ${point.totalPlayers}`, `${fmt(point.totalPoints)} pts`]
+              const bits = [`Rank ${point.rank} of ${point.totalPlayers}`, `${fmt(point.totalScore)} score`]
               if (!point.participated) bits.push('Did not participate')
               return bits.join(' • ')
             },
@@ -206,8 +206,6 @@ function fmt(n: number) {
 
 <style lang="scss" scoped>
 .league-chart {
-  width:600px;
-  height:300px;
   background: rgba($color-bg-elevated, 0.68);
   border: 1px solid rgba($border-color, 0.8);
   border-radius: $border-radius-md;
@@ -237,7 +235,7 @@ function fmt(n: number) {
   }
 
   &__frame {
-    min-height: 128px;
+    min-height: 106px;
   }
 
   &__canvas {
