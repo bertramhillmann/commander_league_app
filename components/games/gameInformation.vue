@@ -4,7 +4,15 @@
       <span class="game-info__player">{{ playerName }}</span>
       <span class="game-info__game-id">{{ gameId }}</span>
     </div>
-    <div class="game-info__commander">{{ record.commander }}</div>
+    <div class="game-info__commander-row">
+      <div class="game-info__commander">{{ record.commander }}</div>
+      <span v-if="commanderTier" class="game-info__tier">
+        <IconsTierIcon :tier="commanderTier" :size="13" />
+        <span class="game-info__tier-label" :class="`tier-text--${commanderTier}`">
+          {{ TIER_META[commanderTier].label }}
+        </span>
+      </span>
+    </div>
 
     <div class="game-info__section">
       <div class="game-info__row">
@@ -41,15 +49,15 @@
 
     <div class="game-info__section">
       <div class="game-info__row">
-        <span class="game-info__label">Rating before</span>
+        <span class="game-info__label">Score before game</span>
         <span class="game-info__value">{{ fmt(record.ratingBefore) }}</span>
       </div>
       <div class="game-info__row">
-        <span class="game-info__label">Rating after</span>
+        <span class="game-info__label">Score after game</span>
         <span class="game-info__value">{{ fmt(record.ratingAfter) }}</span>
       </div>
       <div class="game-info__row">
-        <span class="game-info__label">League rank</span>
+        <span class="game-info__label">Rank at that time</span>
         <span class="game-info__rank-change">
           <span class="game-info__rank-before">#{{ record.rankBefore }}</span>
           <span class="game-info__rank-arrow" :class="rankChangeClass">{{ rankArrow }}</span>
@@ -58,6 +66,10 @@
             ({{ rankDelta > 0 ? '+' : '' }}{{ rankDelta }})
           </span>
         </span>
+      </div>
+      <div class="game-info__row">
+        <span class="game-info__label">Current rank</span>
+        <span class="game-info__value">{{ currentRank > 0 ? `#${currentRank}` : '—' }}</span>
       </div>
     </div>
 
@@ -95,13 +107,15 @@
 <script setup lang="ts">
 import { computed } from 'vue'
 import { ACHIEVEMENTS } from '~/utils/achievements'
+import { TIER_META, blendScore, getTier, type Tier } from '~/utils/tiers'
+import { getLeagueStandingMetrics } from '~/composables/useLeagueState'
 
 const props = defineProps<{
   playerName: string
   gameId: string
 }>()
 
-const { players, gameRecords } = useLeagueState()
+const { players, commanders, gameRecords, standings } = useLeagueState()
 
 const record = computed(() => gameRecords.value[props.playerName]?.[props.gameId])
 
@@ -111,12 +125,18 @@ const gameAchievements = computed(() =>
     .filter(Boolean),
 )
 const playerState = computed(() => players.value[props.playerName])
+const playerStanding = computed(() =>
+  playerState.value ? getLeagueStandingMetrics(playerState.value, players.value) : null,
+)
 
-const currentRating = computed(() => playerState.value?.totalPoints ?? 0)
+const currentRating = computed(() => playerStanding.value?.totalScore ?? 0)
+const currentRank = computed(() => {
+  if (!playerState.value) return 0
+  return standings.value.find((entry) => entry.name === props.playerName)?.rank ?? 0
+})
 
 const avgRating = computed(() => {
-  if (!playerState.value || playerState.value.gamesPlayed === 0) return 0
-  return round3(playerState.value.totalPoints / playerState.value.gamesPlayed)
+  return playerStanding.value?.avgPerGame ?? 0
 })
 
 const commanderPlayerAvg = computed(() => {
@@ -126,6 +146,33 @@ const commanderPlayerAvg = computed(() => {
   )
   if (all.length === 0) return 0
   return round3(all.reduce((s, r) => s + r.finalPoints, 0) / all.length)
+})
+
+const globalCommanderBaseline = computed(() => {
+  const scores = Object.values(commanders.value)
+    .filter((commander) => commander.gamesPlayed > 0)
+    .map((commander) => blendScore(
+      commander.totalBasePoints / commander.gamesPlayed,
+      commander.wins / commander.gamesPlayed,
+    ))
+
+  if (scores.length === 0) return 0
+  return scores.reduce((sum, score) => sum + score, 0) / scores.length
+})
+
+const commanderTier = computed((): Tier | null => {
+  if (!record.value) return null
+
+  const commanderRecords = Object.values(gameRecords.value[props.playerName] ?? {}).filter(
+    (currentRecord) => currentRecord.commander === record.value!.commander,
+  )
+  if (commanderRecords.length === 0) return null
+
+  const totalBasePoints = commanderRecords.reduce((sum, currentRecord) => sum + currentRecord.basePoints, 0)
+  const wins = commanderRecords.filter((currentRecord) => currentRecord.basePoints === 1).length
+  const rawScore = blendScore(totalBasePoints / commanderRecords.length, wins / commanderRecords.length)
+
+  return getTier(rawScore, globalCommanderBaseline.value, commanderRecords.length)
 })
 
 // ── Rank change ───────────────────────────────────────────────────────────────
@@ -190,7 +237,37 @@ function round3(n: number): number {
   &__commander {
     color: $color-primary-light;
     font-size: $font-size-xs;
+  }
+
+  &__commander-row {
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    gap: $spacing-2;
     margin-bottom: $spacing-3;
+  }
+
+  &__tier {
+    display: inline-flex;
+    align-items: center;
+    gap: 5px;
+    flex-shrink: 0;
+  }
+
+  &__tier-label {
+    font-size: 10px;
+    font-weight: $font-weight-medium;
+    text-transform: uppercase;
+    letter-spacing: 0.06em;
+
+    &.tier-text--god      { color: $tier-god-color; }
+    &.tier-text--legend   { color: $tier-legend-color; }
+    &.tier-text--diamond  { color: $tier-diamond-color; }
+    &.tier-text--platinum { color: $tier-platinum-color; }
+    &.tier-text--gold     { color: $tier-gold-color; }
+    &.tier-text--silver   { color: $tier-silver-color; }
+    &.tier-text--bronze   { color: $tier-bronze-color; }
+    &.tier-text--trash    { color: $tier-trash-color; }
   }
 
   &__section {

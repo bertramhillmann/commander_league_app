@@ -9,8 +9,23 @@
     :class="`tier-icon--${tier}`"
     :aria-label="label"
   >
+    <!-- God: radiant 8-point starburst -->
+    <g v-if="tier === 'god'">
+      <polygon points="8,1 9.2,6.2 14.5,5 10.5,9 14,13.2 9,10.6 8,15.5 7,10.6 2,13.2 5.5,9 1.5,5 6.8,6.2"/>
+      <circle cx="8" cy="8" r="2.2" opacity="0.5"/>
+    </g>
+
+    <!-- Legend: ornate crown with gems -->
+    <g v-else-if="tier === 'legend'">
+      <path d="M1,12.5 L1,8 L4.5,10.5 L8,2 L11.5,10.5 L15,8 L15,12.5 Z"/>
+      <rect x="1" y="12.5" width="14" height="2.5" rx="1"/>
+      <circle cx="4.8" cy="12.5" r="1.1" opacity="0.75"/>
+      <circle cx="8"   cy="11.5" r="1.3" opacity="0.9"/>
+      <circle cx="11.2" cy="12.5" r="1.1" opacity="0.75"/>
+    </g>
+
     <!-- Diamond: classic gem cut -->
-    <g v-if="tier === 'diamond'">
+    <g v-else-if="tier === 'diamond'">
       <polygon points="8,0 15,5 8,16 1,5" opacity="0.9"/>
       <polygon points="8,0 15,5 8,7 1,5" opacity="0.6"/>
       <polygon points="8,7 15,5 8,16" opacity="0.75"/>
@@ -74,6 +89,8 @@ const label = computed(() => TIER_META[props.tier].label)
   vertical-align: middle;
   flex-shrink: 0;
 
+  &--god      { color: $tier-god-color;      filter: drop-shadow(0 0 4px $tier-god-color); }
+  &--legend   { color: $tier-legend-color;   filter: drop-shadow(0 0 4px $tier-legend-color); }
   &--diamond  { color: $tier-diamond-color;  filter: drop-shadow(0 0 3px $tier-diamond-color); }
   &--platinum { color: $tier-platinum-color; }
   &--gold     { color: $tier-gold-color;     filter: drop-shadow(0 0 2px rgba(255,215,0,0.5)); }

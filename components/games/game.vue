@@ -59,7 +59,7 @@
               v-if="rankDelta(player.name) !== 0"
               class="game-card__rank-delta"
               :class="rankDelta(player.name) > 0 ? 'game-card__rank-delta--up' : 'game-card__rank-delta--down'"
-              :title="`Rank: #${rankBefore(player.name)} → #${rankAfter(player.name)}`"
+              :title="`Rank at game time: #${rankBefore(player.name)} → #${rankAfter(player.name)}`"
             >{{ rankDelta(player.name) > 0 ? '▲' : '▼' }}{{ Math.abs(rankDelta(player.name)) }}</span>
           </span>
           <span class="game-card__commander-cell">
@@ -118,13 +118,13 @@
 </template>
 
 <script setup lang="ts">
-import { computed, reactive, onMounted, ref } from 'vue'
-import { fetchCardByName, getCardImageUrl } from '~/services/scryfallService'
+import { computed, reactive, ref, watch } from 'vue'
 import type { ProcessedGame, ProcessedGamePlayer } from '~/composables/useLeagueState'
-import { TIER_META } from '~/utils/tiers'
+import { TIER_META, blendScore, getTier, type Tier } from '~/utils/tiers'
 import { ACHIEVEMENTS } from '~/utils/achievements'
 
 const props = defineProps<{ game: ProcessedGame }>()
+const { preloadCommanderImages, getCachedCommanderImage } = useImageCache()
 
 const formattedDate = computed(() =>
   new Date(props.game.date).toLocaleDateString('de-DE', {
@@ -142,10 +142,31 @@ function placementLabel(p: number) {
   return ['🥇', '🥈', '🥉'][p - 1] ?? `${p}.`
 }
 
-const { players, gameRecords } = useLeagueState()
+const { commanders, gameRecords } = useLeagueState()
 
-function playerTier(playerName: string, commander: string) {
-  return players.value[playerName]?.commanderTiers?.[commander] ?? null
+const globalCommanderBaseline = computed(() => {
+  const scores = Object.values(commanders.value)
+    .filter((commander) => commander.gamesPlayed > 0)
+    .map((commander) => blendScore(
+      commander.totalBasePoints / commander.gamesPlayed,
+      commander.wins / commander.gamesPlayed,
+    ))
+
+  if (scores.length === 0) return 0
+  return scores.reduce((sum, score) => sum + score, 0) / scores.length
+})
+
+function playerTier(playerName: string, commander: string): Tier | null {
+  const records = Object.values(gameRecords.value[playerName] ?? {}).filter(
+    (record) => record.commander === commander,
+  )
+  if (records.length === 0) return null
+
+  const totalBasePoints = records.reduce((sum, record) => sum + record.basePoints, 0)
+  const wins = records.filter((record) => record.basePoints === 1).length
+  const rawScore = blendScore(totalBasePoints / records.length, wins / records.length)
+
+  return getTier(rawScore, globalCommanderBaseline.value, records.length)
 }
 
 function getTierMeta(playerName: string, commander: string) {
@@ -181,16 +202,20 @@ const otherCommanders = computed(() => {
 
 const artUrls = ref(new Map<string, string>())
 
-onMounted(async () => {
-  const allCommanders = [winnerCommander.value, ...otherCommanders.value].filter(Boolean)
-  const cards = await Promise.all(allCommanders.map((c) => fetchCardByName(c)))
-  cards.forEach((card, i) => {
-    if (card) {
-      const url = getCardImageUrl(card, 'art_crop')
-      if (url) artUrls.value.set(allCommanders[i], url)
+watch(
+  () => [winnerCommander.value, ...otherCommanders.value],
+  async (commanders) => {
+    const names = commanders.filter(Boolean)
+    await preloadCommanderImages(names, ['art_crop'])
+
+    const nextArtUrls = new Map<string, string>()
+    for (const name of names) {
+      nextArtUrls.set(name, getCachedCommanderImage(name, 'art_crop') ?? '')
     }
-  })
-})
+    artUrls.value = nextArtUrls
+  },
+  { immediate: true },
+)
 
 // ── Shared mouse helpers ───────────────────────────────────────────────────────
 
@@ -284,9 +309,13 @@ function rankDelta(playerName: string): number {
   border-radius: $border-radius-lg;
   overflow: hidden;
   transition: border-color $transition-fast;
+    transition:0.15s;
 
   &:hover {
     border-color: $color-primary;
+    transform:scale(1.05);
+    @include dropshadow();
+    transition:0.3s;
   }
 
   // ── Art panel ──────────────────────────────────────────────────────────────
@@ -470,6 +499,8 @@ function rankDelta(playerName: string): number {
   font-size: 9px;
   line-height: 1;
 
+  &.tier--god      { color: $tier-god-color; }
+  &.tier--legend   { color: $tier-legend-color; }
   &.tier--diamond  { color: $tier-diamond-color; }
   &.tier--platinum { color: $tier-platinum-color; }
   &.tier--gold     { color: $tier-gold-color; }

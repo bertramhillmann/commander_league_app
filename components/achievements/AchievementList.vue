@@ -22,7 +22,7 @@
 import { computed } from 'vue'
 import { ACHIEVEMENTS } from '~/utils/achievements'
 
-const props = defineProps<{ playerName: string }>()
+const props = defineProps<{ playerName: string; commanderName?: string }>()
 
 const { players } = useLeagueState()
 
@@ -33,6 +33,10 @@ const rows = computed(() => {
   for (const e of earned) {
     const def = ACHIEVEMENTS[e.id]
     if (!def) continue
+    if (props.commanderName) {
+      if (def.scope !== 'commander') continue
+      if (e.commander !== props.commanderName) continue
+    }
     if (!grouped[e.id]) grouped[e.id] = { count: 0, pointsEach: def.points }
     grouped[e.id].count++
   }

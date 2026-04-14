@@ -23,6 +23,15 @@
             {{ topEntry.commander }}
           </NuxtLink>
         </h2>
+        <button
+          type="button"
+          class="top-commander__title-badge"
+          @mouseenter="onTitleEnter(topEntry.title, $event)"
+          @mousemove="onTitleMove($event)"
+          @mouseleave="onTitleLeave"
+        >
+          {{ topEntry.title.name }}
+        </button>
 
         <p class="top-commander__summary">
           Best-performing commander pairing in the league based on win rate, average points,
@@ -103,6 +112,15 @@
             {{ entry.commander }}
           </NuxtLink>
         </div>
+        <button
+          type="button"
+          class="top-commander__runner-title"
+          @mouseenter="onTitleEnter(entry.title, $event)"
+          @mousemove="onTitleMove($event)"
+          @mouseleave="onTitleLeave"
+        >
+          {{ entry.title.name }}
+        </button>
 
         <div class="top-commander__runner-stats">
           <span>{{ entry.plays }} games</span>
@@ -127,10 +145,21 @@
       />
     </div>
   </Teleport>
+
+  <Teleport to="body">
+    <div
+      v-if="titlePreview.visible && titlePreview.title"
+      class="floating-panel"
+      :style="{ top: `${titlePreview.y}px`, left: `${titlePreview.x}px` }"
+    >
+      <TitlesTitleMetaInformation :title="titlePreview.title" />
+    </div>
+  </Teleport>
 </template>
 
 <script setup lang="ts">
-import { fetchCardByName, getCardImageUrl } from '~/services/scryfallService'
+import { compareGamesChronological } from '~/composables/useLeagueState'
+import { getCommanderPerformanceTitle, type CommanderTitleResult } from '~/utils/titles'
 
 type PairStats = {
   player: string
@@ -144,9 +173,11 @@ type PairStats = {
   winRateDiff: number
   avgPointsDiff: number
   zeroPointAvoidanceDiff: number
+  title: CommanderTitleResult
 }
 
-const { gameRecords } = useLeagueState()
+const { gameRecords, games, standings } = useLeagueState()
+const { preloadCommanderImages, getCachedCommanderImage } = useImageCache()
 
 const artUrls = reactive<Record<string, string>>({})
 const previewUrls = reactive<Record<string, string>>({})
@@ -156,13 +187,26 @@ const preview = reactive({
   x: 0,
   y: 0,
 })
+const titlePreview = reactive<{
+  visible: boolean
+  title: CommanderTitleResult | null
+  x: number
+  y: number
+}>({
+  visible: false,
+  title: null,
+  x: 0,
+  y: 0,
+})
 
 const PREVIEW_OFFSET_X = 18
 const PREVIEW_OFFSET_Y = 18
+const chronologicalGames = computed(() => [...games.value].sort(compareGamesChronological))
+const allLeagueRecords = computed(() => Object.values(gameRecords.value).flatMap((records) => Object.values(records)))
 
 const rankedEntries = computed<PairStats[]>(() => {
   const pairStats: PairStats[] = []
-  const allRecords = Object.values(gameRecords.value).flatMap((records) => Object.values(records))
+  const allRecords = allLeagueRecords.value
   if (allRecords.length === 0) return []
 
   const leagueWinRate = allRecords.filter((record) => record.placement === 1).length / allRecords.length
@@ -209,6 +253,15 @@ const rankedEntries = computed<PairStats[]>(() => {
         winRateDiff: relativeDiff(winRate, leagueWinRate),
         avgPointsDiff: relativeDiff(avgPoints, leagueAvgPoints),
         zeroPointAvoidanceDiff: relativeDiff(zeroPointAvoidance, leagueZeroPointAvoidance),
+        title: getCommanderPerformanceTitle({
+          playerName: player,
+          commanderName: commander,
+          commanderRecords,
+          playerRecords: Object.values(records),
+          allRecords,
+          games: chronologicalGames.value,
+          standings: standings.value,
+        }),
       })
     }
   }
@@ -226,13 +279,13 @@ const runnerUps = computed(() => rankedEntries.value.slice(1, 3))
 watch(
   rankedEntries,
   async (entries) => {
-    const targets = entries.slice(0, 3).map((entry) => entry.commander).filter((name) => !artUrls[name])
-    if (targets.length === 0) return
-    const cards = await Promise.all(targets.map((name) => fetchCardByName(name)))
-    cards.forEach((card, index) => {
-      artUrls[targets[index]] = card ? (getCardImageUrl(card, 'art_crop') ?? '') : ''
-      previewUrls[targets[index]] = card ? (getCardImageUrl(card, 'normal') ?? '') : ''
-    })
+    const targets = entries.slice(0, 3).map((entry) => entry.commander)
+    await preloadCommanderImages(targets, ['art_crop', 'normal'])
+
+    for (const name of targets) {
+      artUrls[name] = getCachedCommanderImage(name, 'art_crop') ?? ''
+      previewUrls[name] = getCachedCommanderImage(name, 'normal') ?? ''
+    }
   },
   { immediate: true },
 )
@@ -282,6 +335,25 @@ function onPreviewMove(e: MouseEvent) {
 
 function onPreviewLeave() {
   preview.visible = false
+}
+
+function onTitleEnter(title: CommanderTitleResult, e: MouseEvent) {
+  titlePreview.title = title
+  titlePreview.visible = true
+  const pos = calcPreviewPosition(e, 250, 180)
+  titlePreview.x = pos.x
+  titlePreview.y = pos.y
+}
+
+function onTitleMove(e: MouseEvent) {
+  if (!titlePreview.visible) return
+  const pos = calcPreviewPosition(e, 250, 180)
+  titlePreview.x = pos.x
+  titlePreview.y = pos.y
+}
+
+function onTitleLeave() {
+  titlePreview.visible = false
 }
 </script>
 
@@ -354,8 +426,10 @@ function onPreviewLeave() {
     display: flex;
     align-items: baseline;
     flex-wrap: wrap;
+    text-transform: none;
     gap: $spacing-2;
     font-size: $font-size-2xl;
+    font-family: $font-family-display;
     color: $color-text;
   }
 
@@ -381,6 +455,34 @@ function onPreviewLeave() {
     font-size: $font-size-sm;
   }
 
+  &__title-badge,
+  &__runner-title {
+    appearance: none;
+    border: 1px solid rgba(196, 148, 72, 0.36);
+    background:
+      linear-gradient(180deg, rgba(28, 21, 17, 0.98), rgba(13, 10, 8, 0.98));
+    padding: 4px 11px;
+    font: inherit;
+    color: #d8b06a;
+    font-weight: $font-weight-semibold;
+    letter-spacing: 0.08em;
+    text-transform: uppercase;
+    cursor: help;
+    text-align: left;
+    border-radius: 3px;
+    box-shadow:
+      inset 0 0 0 1px rgba(255, 226, 160, 0.04),
+      0 8px 18px rgba(0, 0, 0, 0.2);
+  }
+
+  &__title-badge {
+    align-self: flex-start;
+    justify-self: start;
+    width: fit-content;
+    max-width: 100%;
+    font-size: 10px;
+  }
+
   &__metrics {
     display: grid;
     grid-template-columns: repeat(2, minmax(0, 1fr));
@@ -393,7 +495,7 @@ function onPreviewLeave() {
     gap: 4px;
     padding: $spacing-3;
     border-radius: $border-radius-lg;
-    background: rgba($color-bg-elevated, 0.58);
+    background: rgba(10,0,30,0.25);
     border: 1px solid rgba($border-color, 0.72);
   }
 
@@ -495,6 +597,14 @@ function onPreviewLeave() {
     gap: $spacing-2 $spacing-3;
     font-size: $font-size-xs;
     color: $color-text-muted;
+  }
+
+  &__runner-title {
+    grid-column: 2;
+    justify-self: start;
+    width: fit-content;
+    max-width: 100%;
+    font-size: 10px;
   }
 }
 

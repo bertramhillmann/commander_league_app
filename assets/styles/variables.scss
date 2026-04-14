@@ -7,7 +7,8 @@ $color-secondary: #2c9c6a;
 $color-accent: #e8a030;
 
 $color-bg: #0f0f1a;
-$color-bg-card: #1a1a2e;
+// $color-bg-card: #1a1a2e;
+$color-bg-card: rgba(16,16,16,0.15);
 $color-bg-elevated: #242438;
 
 $color-text: #f0f0f0;
@@ -17,6 +18,8 @@ $color-text-inverse: #0f0f1a;
 $color-danger: #e05050;
 $color-success: #3cb87a;
 $color-warning: #e8a030;
+$color-xp-start: #ff9e2c;
+$color-xp-end: #ffd36a;
 
 // === Typography ===
 $font-family-base: 'Inter', system-ui, sans-serif;
@@ -73,6 +76,10 @@ $transition-base: 250ms ease;
 $transition-slow: 400ms ease;
 
 // === Commander Tiers ===
+$tier-god-color:      #fde68a; // divine pale gold
+$tier-god-bg:         rgba(253, 230, 138, 0.15);
+$tier-legend-color:   #e879f9; // legendary fuchsia
+$tier-legend-bg:      rgba(232, 121, 249, 0.13);
 $tier-diamond-color:  #b9f2ff; // ice cyan
 $tier-diamond-bg:     rgba(185, 242, 255, 0.12);
 $tier-platinum-color: #e8e8f0; // cool silver-white
@@ -92,3 +99,8 @@ $tier-platinum-threshold: 1.5;
 $tier-gold-threshold:     1.2;
 $tier-silver-min:         0.7; // silver: 0.7 – 1.2× avg
 // below 0.7× avg = bronze
+
+@mixin dropshadow {
+    -webkit-box-shadow: 0px 5px 25px -10px #000000; 
+    box-shadow: 0px 5px 25px -10px #000000;
+}

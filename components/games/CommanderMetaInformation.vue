@@ -13,13 +13,18 @@
 
     <!-- Name + tier -->
     <div class="cmd-meta__header">
-      <span class="cmd-meta__name">{{ commanderName }}</span>
-      <span v-if="tier" class="cmd-meta__tier">
-        <IconsTierIcon :tier="tier" :size="13" />
-        <span class="cmd-meta__tier-label" :class="`tier-text--${tier}`">
-          {{ TIER_META[tier].label }}
-        </span>
+      <span class="cmd-meta__name">{{ playerName }} × {{ commanderName }}</span>
+      <span class="cmd-meta__title">{{ commanderTitle.name }}</span>
+      <span v-if="tierDetail" class="cmd-meta__tier">
+        <UITierBadge :detail="tierDetail" :context="tierContext" />
       </span>
+    </div>
+
+    <div class="cmd-meta__divider" />
+
+    <div class="cmd-meta__title-copy">
+      <div class="cmd-meta__title-description">{{ commanderTitle.description }}</div>
+      <div class="cmd-meta__title-reason">{{ commanderTitle.reason }}</div>
     </div>
 
     <div class="cmd-meta__divider" />
@@ -38,7 +43,7 @@
       </span>
     </div>
     <div class="cmd-meta__xp-label">
-      {{ commanderXP }} / {{ isMaxLevel ? maxXP : nextLevelXP }} XP
+      {{ currentLevelXP }} / {{ levelSpanXP }} XP
     </div>
 
     <div class="cmd-meta__divider" />
@@ -78,31 +83,65 @@
 </template>
 
 <script setup lang="ts">
-import { computed, onMounted, ref } from 'vue'
-import { fetchCardByName, getCardImageUrl } from '~/services/scryfallService'
-import { TIER_META } from '~/utils/tiers'
-import { xpToLevel, LEVEL_THRESHOLDS, MAX_LEVEL } from '~/utils/commanderExperience'
+import { computed, ref, watch } from 'vue'
+import { compareGamesChronological } from '~/composables/useLeagueState'
+import { computeGlobalCommanderBaseline, computePlayerCommanderTier, type TierDetail, type TierContext } from '~/utils/tiers'
+import { getCommanderLevelProgress } from '~/utils/commanderExperience'
+import { getCommanderPerformanceTitle } from '~/utils/titles'
 
 const props = defineProps<{
   playerName: string
   commanderName: string
 }>()
 
-const { players, gameRecords } = useLeagueState()
+const { players, commanders, gameRecords, games, standings } = useLeagueState()
+const { getCommanderImage } = useImageCache()
 
 // ── Card image ─────────────────────────────────────────────────────────────────
 
 const imageUrl = ref<string | null>(null)
 
-onMounted(async () => {
-  const card = await fetchCardByName(props.commanderName)
-  if (card) imageUrl.value = getCardImageUrl(card, 'art_crop')
-})
+watch(
+  () => props.commanderName,
+  async (name) => {
+    imageUrl.value = await getCommanderImage(name, 'art_crop')
+  },
+  { immediate: true },
+)
+
+// ── Records (shared by tier + stats) ──────────────────────────────────────────
+
+const commanderRecords = computed(() =>
+  Object.values(gameRecords.value[props.playerName] ?? {}).filter(
+    (r) => r.commander === props.commanderName,
+  ),
+)
 
 // ── Tier ───────────────────────────────────────────────────────────────────────
 
-const tier = computed(() =>
-  players.value[props.playerName]?.commanderTiers?.[props.commanderName] ?? null,
+const globalCommanderBaseline = computed(() =>
+  computeGlobalCommanderBaseline(commanders.value),
+)
+
+const tierComputed = computed(() =>
+  computePlayerCommanderTier(commanderRecords.value, globalCommanderBaseline.value),
+)
+
+const tierDetail = computed((): TierDetail | null => tierComputed.value.detail)
+const tierContext = computed((): TierContext | undefined =>
+  tierComputed.value.detail ? tierComputed.value.context : undefined,
+)
+
+const commanderTitle = computed(() =>
+  getCommanderPerformanceTitle({
+    playerName: props.playerName,
+    commanderName: props.commanderName,
+    commanderRecords: commanderRecords.value,
+    playerRecords: Object.values(gameRecords.value[props.playerName] ?? {}),
+    allRecords: Object.values(gameRecords.value).flatMap((entry) => Object.values(entry)),
+    games: [...games.value].sort(compareGamesChronological),
+    standings: standings.value,
+  }),
 )
 
 // ── Level & XP progress ────────────────────────────────────────────────────────
@@ -111,27 +150,14 @@ const commanderXP = computed(
   () => players.value[props.playerName]?.commanderXP?.[props.commanderName] ?? 0,
 )
 
-const level = computed(() => xpToLevel(commanderXP.value))
-const isMaxLevel = computed(() => level.value >= MAX_LEVEL)
-const maxXP = LEVEL_THRESHOLDS[LEVEL_THRESHOLDS.length - 1]
-
-const levelStartXP = computed(() => LEVEL_THRESHOLDS[level.value - 1] ?? 0)
-const nextLevelXP = computed(() => LEVEL_THRESHOLDS[level.value] ?? maxXP)
-
-const progressPct = computed(() => {
-  if (isMaxLevel.value) return 100
-  const range = nextLevelXP.value - levelStartXP.value
-  if (range === 0) return 100
-  return Math.min(100, Math.round(((commanderXP.value - levelStartXP.value) / range) * 100))
-})
+const levelProgress = computed(() => getCommanderLevelProgress(commanderXP.value))
+const level = computed(() => levelProgress.value.level)
+const isMaxLevel = computed(() => levelProgress.value.isMaxLevel)
+const currentLevelXP = computed(() => levelProgress.value.currentLevelXP)
+const levelSpanXP = computed(() => levelProgress.value.levelSpanXP)
+const progressPct = computed(() => levelProgress.value.progressPct)
 
 // ── Game stats ─────────────────────────────────────────────────────────────────
-
-const commanderRecords = computed(() =>
-  Object.values(gameRecords.value[props.playerName] ?? {}).filter(
-    (r) => r.commander === props.commanderName,
-  ),
-)
 
 const totalGames = computed(() => commanderRecords.value.length)
 const firstPlaces = computed(() => commanderRecords.value.filter((r) => r.placement === 1).length)
@@ -195,30 +221,53 @@ const winRatePct = computed(() =>
     text-overflow: ellipsis;
   }
 
+  &__title {
+    align-self: flex-start;
+    font-size: 10px;
+    font-weight: $font-weight-semibold;
+    text-transform: uppercase;
+    letter-spacing: 0.08em;
+    color: #d8b06a;
+    border: 1px solid rgba(196, 148, 72, 0.36);
+    border-radius: 3px;
+    padding: 4px 11px;
+    background:
+      linear-gradient(180deg, rgba(29, 22, 18, 0.98), rgba(14, 10, 8, 0.98));
+    box-shadow: inset 0 0 0 1px rgba(255, 224, 154, 0.04);
+  }
+
   &__tier {
     display: flex;
     align-items: center;
     gap: 5px;
   }
 
-  &__tier-label {
-    font-size: $font-size-xs;
-    font-weight: $font-weight-medium;
-    text-transform: uppercase;
-    letter-spacing: 0.06em;
-
-    &.tier-text--diamond  { color: $tier-diamond-color; }
-    &.tier-text--platinum { color: $tier-platinum-color; }
-    &.tier-text--gold     { color: $tier-gold-color; }
-    &.tier-text--silver   { color: $tier-silver-color; }
-    &.tier-text--bronze   { color: $tier-bronze-color; }
-    &.tier-text--trash    { color: $tier-trash-color; }
-  }
 
   &__divider {
     height: 1px;
     background: $border-color;
     margin: $spacing-1 0;
+  }
+
+  &__title-copy {
+    padding: 0 $spacing-3 $spacing-2;
+    display: flex;
+    flex-direction: column;
+    gap: 4px;
+  }
+
+  &__title-description,
+  &__title-reason {
+    font-size: 10px;
+    line-height: 1.45;
+  }
+
+  &__title-description {
+    color: $color-text;
+  }
+
+  &__title-reason {
+    color: $color-text-muted;
   }
 
   &__level-row {
@@ -250,7 +299,7 @@ const winRatePct = computed(() =>
 
   &__bar-fill {
     height: 100%;
-    background: linear-gradient(90deg, $color-primary, $color-primary-light);
+    background: linear-gradient(90deg, $color-xp-start, $color-xp-end);
     border-radius: $border-radius-full;
     transition: width $transition-slow;
   }

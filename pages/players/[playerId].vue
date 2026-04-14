@@ -3,9 +3,81 @@
     <NuxtLink class="player__back" to="/">← Standings</NuxtLink>
 
     <template v-if="player">
-      <h1 class="player__title">{{ playerId }}</h1>
+      <h1 class="player__title">{{ displayPlayerName }}</h1>
 
-      <!-- ── Stats cards ──────────────────────────────────────── -->
+      <div class="player__placement-overview">
+        <div class="player__placement-cards">
+          <div class="player__placement-card player__placement-card--current">
+            <span class="player__placement-rank">#{{ currentLeagueRank }}</span>
+            <span class="player__placement-label">League Standing</span>
+            <span class="player__placement-meta">out of {{ standings.length }} players</span>
+          </div>
+
+          <div
+            class="player__placement-card player__placement-card--prognosis"
+            @mouseenter="onPrognosisEnter($event)"
+            @mousemove="onPrognosisMove($event)"
+            @mouseleave="onPrognosisLeave"
+          >
+            <template v-if="placementPrognosis.hasEnoughData && placementPrognosis.segments">
+              <span class="player__placement-rank">#{{ placementPrognosis.projectedRank }}</span>
+              <span class="player__placement-label">Prognosis</span>
+              <div class="player__placement-breakdown">
+                <span class="player__placement-breakdown-chip">Weighted <strong>{{ fmt(placementPrognosis.weightedRating ?? 0) }}</strong></span>
+                <span class="player__placement-breakdown-chip">L10 <strong>{{ fmt(placementPrognosis.segments.last10.rating) }}</strong></span>
+                <span class="player__placement-breakdown-chip">L20 <strong>{{ fmt(placementPrognosis.segments.last20.rating) }}</strong></span>
+                <span class="player__placement-breakdown-chip">All <strong>{{ fmt(placementPrognosis.segments.overall.rating) }}</strong></span>
+              </div>
+            </template>
+            <template v-else>
+              <span class="player__placement-label">Prognosis</span>
+              <span class="player__placement-message">not enough data</span>
+            </template>
+          </div>
+
+          <div
+            v-if="placementPrognosis.hasEnoughData && placementPrognosis.commanderSuggestions?.length > 0"
+            class="player__placement-picks"
+          >
+            <div class="player__placement-picks-label">Suggested Picks</div>
+            <div class="player__placement-picks-list">
+              <button
+                v-for="suggestion in placementPrognosis.commanderSuggestions"
+                :key="suggestion.commander"
+                type="button"
+                class="player__placement-pick"
+                @mouseenter="onPlacementPickEnter(suggestion, $event)"
+                @mousemove="onPlacementPickMove($event)"
+                @mouseleave="onPlacementPickLeave"
+              >
+                <img
+                  v-if="artUrls.get(suggestion.commander)"
+                  :src="artUrls.get(suggestion.commander)"
+                  :alt="suggestion.commander"
+                  class="player__placement-pick-art"
+                />
+                <div v-else class="player__placement-pick-art player__placement-pick-art--empty" />
+              </button>
+            </div>
+          </div>
+        </div>
+
+        <div v-if="playerSuggestion" class="player__focus-tip">
+          <span class="player__focus-tip-label">Focus Tip</span>
+          <div class="player__focus-tip-title">{{ playerSuggestion.title }}</div>
+          <p class="player__focus-tip-summary">{{ playerSuggestion.summary }}</p>
+          <ul class="player__focus-tip-reasons">
+            <li
+              v-for="reason in playerSuggestion.reasons"
+              :key="reason"
+              class="player__focus-tip-reason"
+            >
+              {{ reason }}
+            </li>
+          </ul>
+        </div>
+      </div>
+
       <div class="player__stats">
         <div class="player__stat">
           <span class="player__stat-val player__stat-val--total" :title="'Points + Achievement Points + XP Points'">
@@ -138,7 +210,7 @@
                   <span class="cmd-row__level-next">{{ cmd.isMaxLevel ? 'MAX' : `Lv ${cmd.level + 1}` }}</span>
                 </div>
                 <div class="cmd-row__xp-detail">
-                  <span class="cmd-row__xp-current">{{ cmd.xp }} XP</span>
+                  <span class="cmd-row__xp-current">{{ cmd.currentLevelXP }} / {{ cmd.levelSpanXP }} XP</span>
                   <span v-if="!cmd.isMaxLevel" class="cmd-row__xp-remaining">· {{ cmd.xpToNext }} to next</span>
                   <span class="cmd-row__xp-pts" title="Score points contributed by XP levels">+{{ cmd.xpScorePts }} pts</span>
                 </div>
@@ -151,21 +223,24 @@
               <!-- Name + tier -->
               <div class="cmd-row__header">
                 <NuxtLink class="cmd-row__name" :to="`/commanders/${encodeURIComponent(cmd.name)}`">{{ cmd.name }}</NuxtLink>
-                <span v-if="cmd.tier" class="cmd-row__tier">
-                  <IconsTierIcon :tier="cmd.tier" :size="13" />
-                  <span class="cmd-row__tier-label" :class="`tier-text--${cmd.tier}`">
-                    {{ TIER_META[cmd.tier].label }}
-                  </span>
+                <button
+                  type="button"
+                  class="cmd-row__title-badge"
+                  @mouseenter="onTitleEnter(cmd.title, $event)"
+                  @mousemove="onTitleMove($event)"
+                  @mouseleave="onTitleLeave"
+                >
+                  {{ cmd.title.name }}
+                </button>
+                <span v-if="cmd.tierDetail" class="cmd-row__tier">
+                  <UITierBadge :detail="cmd.tierDetail" :context="cmd.tierContext" />
                 </span>
                 <span
-                  v-if="cmd.plays < 20 && cmd.projectedTier"
+                  v-if="cmd.plays < 20 && cmd.projectedTierDetail"
                   class="cmd-row__tier cmd-row__tier--projected"
                 >
-                  <IconsTierIcon :tier="cmd.projectedTier" :size="13" />
                   <span class="cmd-row__tier-prefix">Projected</span>
-                  <span class="cmd-row__tier-label" :class="`tier-text--${cmd.projectedTier}`">
-                    {{ TIER_META[cmd.projectedTier].label }}
-                  </span>
+                  <UITierBadge :detail="cmd.projectedTierDetail" />
                 </span>
               </div>
 
@@ -234,7 +309,7 @@
     </template>
 
     <div v-else class="player__not-found">
-      Player "{{ playerId }}" not found.
+      Player "{{ displayPlayerName }}" not found.
     </div>
   </div>
 
@@ -261,26 +336,83 @@
       <AchievementsAchievementMetaInformation :achievement-id="achievementPreview.id" />
     </div>
   </Teleport>
+
+  <Teleport to="body">
+    <div
+      v-if="titlePreview.visible && titlePreview.title"
+      class="floating-panel"
+      :style="{ top: `${titlePreview.y}px`, left: `${titlePreview.x}px` }"
+    >
+      <TitlesTitleMetaInformation :title="titlePreview.title" />
+    </div>
+  </Teleport>
+
+  <Teleport to="body">
+    <div
+      v-if="prognosisPreview.visible"
+      class="floating-panel"
+      :style="{ top: `${prognosisPreview.y}px`, left: `${prognosisPreview.x}px` }"
+    >
+      <div class="prognosis-tooltip">
+        <div class="prognosis-tooltip__title">How prognosis works</div>
+        <p class="prognosis-tooltip__line">{{ placementPrognosis.explanation.summary }}</p>
+        <p class="prognosis-tooltip__line">{{ placementPrognosis.explanation.trend }}</p>
+        <p class="prognosis-tooltip__line">{{ placementPrognosis.explanation.formula }}</p>
+        <p class="prognosis-tooltip__line prognosis-tooltip__line--muted">{{ placementPrognosis.explanation.recencyNote }}</p>
+      </div>
+    </div>
+  </Teleport>
+
+  <Teleport to="body">
+    <div
+      v-if="placementPickPreview.visible && placementPickPreview.suggestion"
+      class="floating-panel"
+      :style="{ top: `${placementPickPreview.y}px`, left: `${placementPickPreview.x}px` }"
+    >
+      <div class="prognosis-pick-tooltip">
+        <div class="prognosis-pick-tooltip__name">{{ placementPickPreview.suggestion.commander }}</div>
+        <div class="prognosis-pick-tooltip__focus">{{ placementPickPreview.suggestion.title }}</div>
+        <p class="prognosis-pick-tooltip__summary">{{ placementPickPreview.suggestion.summary }}</p>
+      </div>
+    </div>
+  </Teleport>
 </template>
 
 <script setup lang="ts">
-import { fetchCardByName, getCardImageUrl } from '~/services/scryfallService'
-import { xpToLevel, LEVEL_THRESHOLDS, MAX_LEVEL } from '~/utils/commanderExperience'
+import { compareGamesChronological, getLeagueStandingMetrics, getPlayerCommanderMetrics } from '~/composables/useLeagueState'
+import { xpToLevel, getCommanderLevelProgress } from '~/utils/commanderExperience'
 import { buildCommanderPlacementTimeline, type PlacementTimelinePoint } from '~/utils/commanderTimeline'
 import { buildPlayerLeagueTimeline } from '~/utils/playerLeagueTimeline'
-import { TIER_META, blendScore, getTier, smoothedTierScore } from '~/utils/tiers'
+import { buildPlacementPrognosis } from '~/utils/placementPrognosis'
+import { formatPlayerName } from '~/utils/playerNames'
+import { buildPlayerSuggestion, type PlayerCommanderPickSuggestion } from '~/utils/playerSuggestions'
+import { computeGlobalCommanderBaseline, computePlayerCommanderTier, smoothedTierScore, getTierDetail, type TierDetail, type TierContext } from '~/utils/tiers'
 import { ACHIEVEMENTS } from '~/utils/achievements'
-import type { Tier } from '~/utils/tiers'
+import { getCommanderPerformanceTitle, type CommanderTitleResult } from '~/utils/titles'
 
 const route = useRoute()
 const playerId = computed(() => route.params.playerId as string)
+const displayPlayerName = computed(() => formatPlayerName(playerId.value))
 
-const { games, commanders, players, gameRecords, leagueSnapshots } = useLeagueState()
+const { games, commanders, players, gameRecords, leagueSnapshots, standings } = useLeagueState()
+const { preloadCommanderImages, getCachedCommanderImage } = useImageCache()
 
 const player = computed(() => players.value[playerId.value] ?? null)
-const chronologicalGames = computed(() => [...games.value].reverse())
+const playerStanding = computed(() =>
+  player.value ? getLeagueStandingMetrics(player.value, players.value) : null,
+)
+const chronologicalGames = computed(() => [...games.value].sort(compareGamesChronological))
 const leagueTimeline = computed(() =>
   buildPlayerLeagueTimeline(chronologicalGames.value, gameRecords.value, leagueSnapshots.value, playerId.value),
+)
+const currentLeagueRank = computed(() =>
+  standings.value.find((entry) => entry.name === playerId.value)?.rank ?? standings.value.length,
+)
+const placementPrognosis = computed(() =>
+  buildPlacementPrognosis(playerId.value, chronologicalGames.value, gameRecords.value, players.value, commanders.value),
+)
+const playerSuggestion = computed(() =>
+  buildPlayerSuggestion(playerId.value, chronologicalGames.value, gameRecords.value, players.value),
 )
 const playerAchievements = computed(() => {
   const counts = new Map<string, number>()
@@ -315,8 +447,7 @@ function xpPoints(playerName: string): number {
 const xpPts = computed(() => xpPoints(playerId.value))
 
 const totalScore = computed(() => {
-  if (!player.value) return 0
-  return Math.round((player.value.totalPoints + player.value.achievementPoints + xpPts.value) * 1000) / 1000
+  return playerStanding.value?.totalScore ?? 0
 })
 
 const winRate = computed(() => {
@@ -352,15 +483,19 @@ interface CommanderRow {
   avgPoints: number
   avgPlacement: number
   bestGame: number
-  tier: Tier | null
-  projectedTier: Tier | null
+  tierDetail: TierDetail | null
+  tierContext: TierContext
+  projectedTierDetail: TierDetail | null
   level: number
   levelPct: number
   xp: number
+  currentLevelXP: number
+  levelSpanXP: number
   xpToNext: number
   isMaxLevel: boolean
   xpScorePts: number
   timeline: PlacementTimelinePoint[]
+  title: CommanderTitleResult
   achievements: Array<{ id: string; name: string; description: string; icon: string; points: number }>
 }
 
@@ -373,12 +508,7 @@ type CommanderIndicator = {
 }
 
 const commanderRows = computed((): CommanderRow[] => {
-  const allCommanderScores = Object.values(commanders.value)
-    .filter((c) => c.gamesPlayed > 0)
-    .map((c) => blendScore(c.totalBasePoints / c.gamesPlayed, c.wins / c.gamesPlayed))
-  const globalAvgScore = allCommanderScores.length
-    ? allCommanderScores.reduce((sum, score) => sum + score, 0) / allCommanderScores.length
-    : 0
+  const globalAvgScore = computeGlobalCommanderBaseline(commanders.value)
 
   const byCommander: Record<string, typeof allRecords.value> = {}
   for (const r of allRecords.value) {
@@ -396,38 +526,30 @@ const commanderRows = computed((): CommanderRow[] => {
   }
 
   return Object.entries(byCommander).map(([name, records]) => {
-    const plays = records.length
-    const first = records.filter((r) => r.placement === 1).length
-    const second = records.filter((r) => r.placement === 2).length
-    const last = records.filter((r) => r.placement === r.playerCount).length
-    const totalPts = records.reduce((s, r) => s + r.basePoints, 0)
-    const avgPoints = plays > 0 ? Math.round((totalPts / plays) * 1000) / 1000 : 0
-    const winRatePct = plays > 0 ? Math.round((first / plays) * 100) : 0
-    const sumPlace = records.reduce((s, r) => s + r.placement, 0)
-    const avgPlacement = plays > 0 ? Math.round((sumPlace / plays) * 100) / 100 : 0
-    const bestGame = Math.max(...records.map((r) => r.basePoints), 0)
+    const metrics = getPlayerCommanderMetrics(playerId.value, name, gameRecords.value, players.value)
+    if (!metrics) return null
 
-    const rawScore = plays > 0 ? blendScore(totalPts / plays, first / plays) : 0
-    const tier = plays > 0 ? getTier(rawScore, globalAvgScore) : null
+    const { detail: tierDetail, context: tierContext } = computePlayerCommanderTier(records, globalAvgScore)
+
     const playerAvgPts = player.value && player.value.gamesPlayed > 0
       ? player.value.totalBasePoints / player.value.gamesPlayed
       : 0
     const playerWinRate = player.value && player.value.gamesPlayed > 0
       ? player.value.baseWins / player.value.gamesPlayed
       : 0
-    const projectedScore = plays > 0
-      ? smoothedTierScore(totalPts, first, plays, playerAvgPts, playerWinRate)
+    const projectedScore = metrics.plays > 0
+      ? smoothedTierScore(metrics.totalBasePoints, metrics.first, metrics.plays, playerAvgPts, playerWinRate)
       : 0
-    const projectedTier = plays > 0 ? getTier(projectedScore, globalAvgScore) : null
+    const projectedTierDetail = metrics.plays > 0 ? getTierDetail(projectedScore, globalAvgScore, metrics.plays) : null
     const xp = player.value?.commanderXP?.[name] ?? 0
-    const level = xpToLevel(xp)
-    const isMaxLevel = level >= MAX_LEVEL
-    const maxXP = LEVEL_THRESHOLDS[LEVEL_THRESHOLDS.length - 1]
-    const levelStart = LEVEL_THRESHOLDS[level - 1] ?? 0
-    const levelEnd = isMaxLevel ? maxXP : (LEVEL_THRESHOLDS[level] ?? maxXP)
-    const levelPct = isMaxLevel ? 100 : levelEnd === levelStart ? 100
-      : Math.min(100, Math.round(((xp - levelStart) / (levelEnd - levelStart)) * 100))
-    const xpToNext = isMaxLevel ? 0 : levelEnd - xp
+    const {
+      level,
+      isMaxLevel,
+      currentLevelXP,
+      levelSpanXP,
+      progressPct,
+      xpToNext,
+    } = getCommanderLevelProgress(xp)
 
     // XP score contribution: 1 point per level
     const xpScorePts = level
@@ -437,6 +559,15 @@ const commanderRows = computed((): CommanderRow[] => {
       playerId.value,
       name,
     )
+    const title = getCommanderPerformanceTitle({
+      playerName: playerId.value,
+      commanderName: name,
+      commanderRecords: records,
+      playerRecords: allRecords.value,
+      allRecords: Object.values(gameRecords.value).flatMap((entry) => Object.values(entry)),
+      games: chronologicalGames.value,
+      standings: standings.value,
+    })
 
     // Commander-scoped achievements (deduplicated by id)
     const cmdAchIds = earnedByCommander[name] ?? new Set()
@@ -446,10 +577,31 @@ const commanderRows = computed((): CommanderRow[] => {
       .map((def) => ({ id: def.id, name: def.name, description: def.description, icon: def.icon, points: def.points }))
 
     return {
-      name, plays, first, second, last, winRate: winRatePct, avgPoints, avgPlacement,
-      bestGame, tier, projectedTier, level, levelPct, xp, xpToNext, isMaxLevel, xpScorePts, timeline, achievements,
+      name,
+      plays: metrics.plays,
+      first: metrics.first,
+      second: metrics.second,
+      last: metrics.last,
+      winRate: metrics.winRate,
+      avgPoints: metrics.avgBasePoints,
+      avgPlacement: metrics.avgPlacement,
+      bestGame: metrics.bestGame,
+      tierDetail,
+      tierContext,
+      projectedTierDetail,
+      level,
+      levelPct: progressPct,
+      xp,
+      currentLevelXP,
+      levelSpanXP,
+      xpToNext,
+      isMaxLevel,
+      xpScorePts,
+      timeline,
+      title,
+      achievements,
     }
-  })
+  }).filter((row): row is CommanderRow => !!row)
 })
 
 // ── Card art images ───────────────────────────────────────────────────────────
@@ -458,17 +610,24 @@ const artUrls = ref(new Map<string, string>())
 const previewUrls = ref(new Map<string, string>())
 
 watch(
-  commanderRows,
-  async (rows) => {
-    const missing = rows.map((r) => r.name).filter((n) => !artUrls.value.has(n))
-    if (missing.length === 0) return
-    const results = await Promise.all(missing.map((n) => fetchCardByName(n)))
-    results.forEach((card, i) => {
-      const artUrl = card ? getCardImageUrl(card, 'art_crop') : null
-      const previewUrl = card ? getCardImageUrl(card, 'normal') : null
-      artUrls.value = new Map(artUrls.value).set(missing[i], artUrl ?? '')
-      previewUrls.value = new Map(previewUrls.value).set(missing[i], previewUrl ?? '')
-    })
+  [commanderRows, placementPrognosis],
+  async ([rows, prognosis]) => {
+    const names = [
+      ...rows.map((row) => row.name),
+      ...prognosis.commanderSuggestions.map((suggestion) => suggestion.commander),
+    ]
+    await preloadCommanderImages(names, ['art_crop', 'normal'])
+
+    const nextArtUrls = new Map<string, string>()
+    const nextPreviewUrls = new Map<string, string>()
+
+    for (const name of names) {
+      nextArtUrls.set(name, getCachedCommanderImage(name, 'art_crop') ?? '')
+      nextPreviewUrls.set(name, getCachedCommanderImage(name, 'normal') ?? '')
+    }
+
+    artUrls.value = nextArtUrls
+    previewUrls.value = nextPreviewUrls
   },
   { immediate: true },
 )
@@ -485,6 +644,33 @@ const cardPreview = reactive({
 const achievementPreview = reactive({
   visible: false,
   id: '',
+  x: 0,
+  y: 0,
+})
+const titlePreview = reactive<{
+  visible: boolean
+  title: CommanderTitleResult | null
+  x: number
+  y: number
+}>({
+  visible: false,
+  title: null,
+  x: 0,
+  y: 0,
+})
+const prognosisPreview = reactive({
+  visible: false,
+  x: 0,
+  y: 0,
+})
+const placementPickPreview = reactive<{
+  visible: boolean
+  suggestion: PlayerCommanderPickSuggestion | null
+  x: number
+  y: number
+}>({
+  visible: false,
+  suggestion: null,
   x: 0,
   y: 0,
 })
@@ -533,6 +719,65 @@ function onAchievementMove(e: MouseEvent) {
 
 function onAchievementLeave() {
   achievementPreview.visible = false
+}
+
+function onTitleEnter(title: CommanderTitleResult, e: MouseEvent) {
+  titlePreview.title = title
+  titlePreview.visible = true
+  const pos = calcPreviewPosition(e, 250, 180)
+  titlePreview.x = pos.x
+  titlePreview.y = pos.y
+}
+
+function onTitleMove(e: MouseEvent) {
+  if (!titlePreview.visible) return
+  const pos = calcPreviewPosition(e, 250, 180)
+  titlePreview.x = pos.x
+  titlePreview.y = pos.y
+}
+
+function onTitleLeave() {
+  titlePreview.visible = false
+}
+
+function onPrognosisEnter(e: MouseEvent) {
+  prognosisPreview.visible = true
+  const pos = calcPreviewPosition(e, 320, 190)
+  prognosisPreview.x = pos.x
+  prognosisPreview.y = pos.y
+}
+
+function onPrognosisMove(e: MouseEvent) {
+  if (!prognosisPreview.visible) return
+  if (placementPickPreview.visible) return
+  const pos = calcPreviewPosition(e, 320, 190)
+  prognosisPreview.x = pos.x
+  prognosisPreview.y = pos.y
+}
+
+function onPrognosisLeave() {
+  prognosisPreview.visible = false
+}
+
+function onPlacementPickEnter(suggestion: PlayerCommanderPickSuggestion, e: MouseEvent) {
+  prognosisPreview.visible = false
+  placementPickPreview.visible = true
+  placementPickPreview.suggestion = suggestion
+  const pos = calcPreviewPosition(e, 280, 150)
+  placementPickPreview.x = pos.x
+  placementPickPreview.y = pos.y
+}
+
+function onPlacementPickMove(e: MouseEvent) {
+  if (!placementPickPreview.visible) return
+  const pos = calcPreviewPosition(e, 280, 150)
+  placementPickPreview.x = pos.x
+  placementPickPreview.y = pos.y
+}
+
+function onPlacementPickLeave() {
+  placementPickPreview.visible = false
+  placementPickPreview.suggestion = null
 }
 
 // ── Sort ──────────────────────────────────────────────────────────────────────
@@ -657,7 +902,227 @@ function getCommanderIndicatorTitle(cmd: CommanderRow) {
   }
 
   &__section {
-    margin-top: $spacing-6;
+    margin-top: 3.5rem;
+  }
+
+  &__placement-overview {
+    display: flex;
+    flex-direction: column;
+    margin-bottom: $spacing-6;
+    border-radius: $border-radius-lg;
+    border: 1px solid $border-color;
+    background: $color-bg-card;
+    overflow: hidden;
+  }
+
+  &__placement-cards {
+    display: flex;
+    align-items: flex-end;
+    gap: $spacing-8;
+    padding: $spacing-4 $spacing-6;
+  }
+
+  &__placement-card {
+    display: flex;
+    flex-direction: column;
+    justify-content: flex-end;
+    min-width: 0;
+  }
+
+  &__placement-card--current {
+    .player__placement-label {
+      color: rgba($color-accent, 0.6);
+    }
+    .player__placement-rank {
+      font-size: clamp(2.8rem, 4.5vw, 4.5rem);
+      color: $color-accent;
+      text-shadow: 0 0 24px rgba($color-accent, 0.25);
+    }
+    .player__placement-meta {
+      color: $color-text-muted;
+    }
+  }
+
+  &__placement-card--prognosis {
+    cursor: help;
+
+    .player__placement-label {
+      color: rgba($color-primary-light, 0.5);
+    }
+    .player__placement-rank {
+      font-size: clamp(1.4rem, 2vw, 2rem);
+      color: $color-primary-light;
+    }
+  }
+
+  &__placement-label {
+    font-size: $font-size-xs;
+    color: $color-text-muted;
+    text-transform: uppercase;
+    letter-spacing: 0.07em;
+    margin-bottom: 2px;
+  }
+
+  &__placement-rank {
+    font-weight: $font-weight-bold;
+    color: $color-text;
+    line-height: 1;
+    font-variant-numeric: tabular-nums;
+  }
+
+  &__placement-meta {
+    font-size: $font-size-sm;
+    color: $color-text-muted;
+    line-height: 1.4;
+    margin-top: 4px;
+  }
+
+  &__placement-breakdown {
+    display: flex;
+    flex-wrap: wrap;
+    gap: $spacing-1;
+    margin-top: 4px;
+    font-size: $font-size-xs;
+    font-variant-numeric: tabular-nums;
+  }
+
+  &__placement-breakdown-chip {
+    padding: 2px 7px;
+    border-radius: $border-radius-full;
+    background: rgba($color-primary, 0.1);
+    border: 1px solid rgba($color-primary-light, 0.14);
+    color: rgba($color-primary-light, 0.5);
+    white-space: nowrap;
+
+    strong {
+      color: rgba($color-primary-light, 0.85);
+      font-weight: $font-weight-semibold;
+    }
+  }
+
+  &__placement-message {
+    font-size: $font-size-sm;
+    color: $color-text-muted;
+    font-style: italic;
+    line-height: 1.4;
+    margin-top: 4px;
+  }
+
+  &__placement-picks {
+    margin-left: auto;
+    display: flex;
+    flex-direction: column;
+    justify-content: flex-end;
+    gap: $spacing-2;
+  }
+
+  &__placement-picks-label {
+    font-size: 10px;
+    font-weight: $font-weight-semibold;
+    color: rgba($color-primary-light, 0.5);
+    text-transform: uppercase;
+    letter-spacing: 0.08em;
+  }
+
+  &__placement-picks-list {
+    display: flex;
+    gap: $spacing-2;
+  }
+
+  &__placement-pick {
+    appearance: none;
+    padding: 0;
+    border: 1px solid rgba($color-primary-light, 0.14);
+    border-radius: $border-radius-sm;
+    background: rgba($color-primary, 0.08);
+    cursor: help;
+    overflow: hidden;
+    transition: transform $transition-fast, border-color $transition-fast, box-shadow $transition-fast;
+
+    &:hover {
+      transform: translateY(-2px);
+      border-color: rgba($color-primary-light, 0.35);
+      box-shadow: 0 12px 28px rgba(0, 0, 0, 0.3);
+    }
+  }
+
+  &__placement-pick-art {
+    display: block;
+    width: 88px;
+    height: 88px;
+    object-fit: cover;
+    object-position: center top;
+    background: rgba($color-bg-elevated, 0.95);
+
+    &--empty {
+      border: 1px solid rgba($border-color, 0.8);
+    }
+  }
+
+  &__focus-tip {
+    border-top: 1px solid $border-color;
+    padding: $spacing-4 $spacing-6;
+    background: rgba(0, 0, 0, 0.25);
+    display: grid;
+    grid-template-columns: 56px 1fr;
+    grid-template-rows: auto auto auto;
+    column-gap: $spacing-4;
+    row-gap: $spacing-1;
+  }
+
+  &__focus-tip-label {
+    grid-column: 1;
+    grid-row: 1 / 4;
+    align-self: start;
+    padding-top: 3px;
+    font-size: 9px;
+    font-weight: $font-weight-semibold;
+    color: rgba($color-primary-light, 0.45);
+    text-transform: uppercase;
+    letter-spacing: 0.09em;
+    writing-mode: vertical-rl;
+    transform: rotate(180deg);
+    text-align: center;
+    white-space: nowrap;
+  }
+
+  &__focus-tip-title {
+    grid-column: 2;
+    grid-row: 1;
+    font-size: $font-size-base;
+    font-weight: $font-weight-semibold;
+    color: white;
+  }
+
+  &__focus-tip-summary {
+    grid-column: 2;
+    grid-row: 2;
+    margin: 0;
+    font-size: $font-size-sm;
+    line-height: 1.5;
+    color: $color-secondary;
+  }
+
+  &__focus-tip-reasons {
+    grid-column: 2;
+    grid-row: 3;
+    display: flex;
+    flex-wrap: wrap;
+    gap: $spacing-1 $spacing-3;
+    margin: $spacing-1 0 0;
+    padding: 0;
+    list-style: none;
+  }
+
+  &__focus-tip-reason {
+    font-size: $font-size-xs;
+    color: rgba($color-text-muted, 0.75);
+
+    &::before {
+      content: '·';
+      margin-right: 4px;
+      color: rgba($color-primary-light, 0.4);
+    }
   }
 
   &__league-panel {
@@ -709,7 +1174,7 @@ function getCommanderIndicatorTitle(cmd: CommanderRow) {
     min-width: 0;
     text-align: left;
     padding: 7px 8px;
-    background: rgba($color-bg-elevated, 0.88);
+    background:rgba(16,16,16,0.15);
     border: 1px solid rgba($border-color, 0.72);
     border-radius: $border-radius-sm;
     cursor: default;
@@ -799,6 +1264,7 @@ function getCommanderIndicatorTitle(cmd: CommanderRow) {
   display: flex;
   gap: $spacing-4;
   background: $color-bg-card;
+  backdrop-filter:blur(3px);
   border: 1px solid $border-color;
   border-radius: $border-radius-lg;
   overflow: hidden;
@@ -910,6 +1376,31 @@ function getCommanderIndicatorTitle(cmd: CommanderRow) {
     }
   }
 
+  &__title-badge {
+    appearance: none;
+    border: 1px solid rgba(196, 148, 72, 0.38);
+    background:
+      linear-gradient(180deg, rgba(30, 22, 18, 0.98), rgba(14, 10, 8, 0.98));
+    padding: 4px 11px;
+    font: inherit;
+    font-size: 10px;
+    font-weight: $font-weight-semibold;
+    letter-spacing: 0.08em;
+    text-transform: uppercase;
+    color: #d8b06a;
+    cursor: help;
+    display: inline-flex;
+    align-items: center;
+    width: fit-content;
+    max-width: 100%;
+    text-align: left;
+    flex: 0 0 auto;
+    border-radius: 3px;
+    box-shadow:
+      inset 0 0 0 1px rgba(255, 225, 155, 0.04),
+      0 6px 16px rgba(0, 0, 0, 0.22);
+  }
+
   &__tier {
     display: flex;
     align-items: center;
@@ -934,6 +1425,8 @@ function getCommanderIndicatorTitle(cmd: CommanderRow) {
     text-transform: uppercase;
     letter-spacing: 0.06em;
 
+    &.tier-text--god      { color: $tier-god-color; }
+    &.tier-text--legend   { color: $tier-legend-color; }
     &.tier-text--diamond  { color: $tier-diamond-color; }
     &.tier-text--platinum { color: $tier-platinum-color; }
     &.tier-text--gold     { color: $tier-gold-color; }
@@ -1038,7 +1531,7 @@ function getCommanderIndicatorTitle(cmd: CommanderRow) {
 
   &__bar-fill {
     height: 100%;
-    background: linear-gradient(90deg, $color-primary, $color-primary-light);
+    background: linear-gradient(90deg, $color-xp-start, $color-xp-end);
     border-radius: $border-radius-full;
     transition: width $transition-slow;
   }
@@ -1122,6 +1615,10 @@ function getCommanderIndicatorTitle(cmd: CommanderRow) {
 
 @media (max-width: 1180px) {
   .player {
+    &__placement-overview {
+      grid-template-columns: 1fr;
+    }
+
     &__league-panel {
       flex-direction: column;
     }
@@ -1159,5 +1656,72 @@ function getCommanderIndicatorTitle(cmd: CommanderRow) {
   border-radius: 14px;
   display: block;
   box-shadow: 0 18px 48px rgba(0, 0, 0, 0.45);
+}
+
+.prognosis-tooltip {
+  width: min(320px, calc(100vw - 2rem));
+  padding: 12px 14px;
+  border-radius: 12px;
+  border: 1px solid rgba(123, 211, 255, 0.2);
+  background:
+    linear-gradient(180deg, rgba(10, 17, 24, 0.96), rgba(7, 11, 17, 0.98));
+  box-shadow: 0 18px 48px rgba(0, 0, 0, 0.4);
+  color: $color-text;
+
+  &__title {
+    margin-bottom: 8px;
+    font-size: 11px;
+    font-weight: $font-weight-semibold;
+    letter-spacing: 0.08em;
+    text-transform: uppercase;
+    color: rgba($color-primary-light, 0.85);
+  }
+
+  &__line {
+    margin: 0;
+    font-size: 12px;
+    line-height: 1.45;
+    color: rgba($color-text, 0.92);
+
+    & + & {
+      margin-top: 6px;
+    }
+
+    &--muted {
+      color: $color-text-muted;
+    }
+  }
+}
+
+.prognosis-pick-tooltip {
+  width: min(280px, calc(100vw - 2rem));
+  padding: 12px 14px;
+  border-radius: 12px;
+  border: 1px solid rgba(123, 211, 255, 0.2);
+  background:
+    linear-gradient(180deg, rgba(10, 17, 24, 0.96), rgba(7, 11, 17, 0.98));
+  box-shadow: 0 18px 48px rgba(0, 0, 0, 0.4);
+  color: $color-text;
+
+  &__name {
+    font-size: 13px;
+    font-weight: $font-weight-semibold;
+    color: $color-text;
+  }
+
+  &__focus {
+    margin-top: 4px;
+    font-size: 10px;
+    color: rgba($color-primary-light, 0.78);
+    text-transform: uppercase;
+    letter-spacing: 0.08em;
+  }
+
+  &__summary {
+    margin: 8px 0 0;
+    font-size: 12px;
+    line-height: 1.45;
+    color: rgba($color-text, 0.9);
+  }
 }
 </style>

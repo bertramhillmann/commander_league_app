@@ -27,13 +27,13 @@
 </template>
 
 <script setup lang="ts">
-import { computed, onMounted, ref } from 'vue'
-import { fetchCardByName, getCardImageUrl } from '~/services/scryfallService'
-import { xpToLevel, LEVEL_THRESHOLDS, MAX_LEVEL } from '~/utils/commanderExperience'
+import { computed, ref, watch } from 'vue'
+import { getCommanderLevelProgress } from '~/utils/commanderExperience'
 
 const props = defineProps<{ playerName: string }>()
 
 const { players, gameRecords } = useLeagueState()
+const { preloadCommanderImages, getCachedCommanderImage } = useImageCache()
 
 const gamesPerCommander = computed(() => {
   const counts: Record<string, number> = {}
@@ -47,14 +47,7 @@ const rows = computed(() => {
   const xpMap = players.value[props.playerName]?.commanderXP ?? {}
   return Object.entries(xpMap)
     .map(([commander, xp]) => {
-      const level = xpToLevel(xp)
-      const isMax = level >= MAX_LEVEL
-      const levelStartXP = LEVEL_THRESHOLDS[level - 1] ?? 0
-      const nextLevelXP = LEVEL_THRESHOLDS[level] ?? LEVEL_THRESHOLDS[LEVEL_THRESHOLDS.length - 1]
-      const range = nextLevelXP - levelStartXP
-      const progressPct = isMax ? 100
-        : range === 0 ? 100
-        : Math.min(100, Math.round(((xp - levelStartXP) / range) * 100))
+      const { level, progressPct } = getCommanderLevelProgress(xp)
       return { commander, xp, level, progressPct, games: gamesPerCommander.value[commander] ?? 0 }
     })
     .sort((a, b) => b.level - a.level || b.xp - a.xp)
@@ -66,16 +59,21 @@ const totalXpPoints = computed(() => rows.value.reduce((s, r) => s + r.level, 0)
 
 const artUrls = ref(new Map<string, string>())
 
-onMounted(async () => {
-  const commanders = rows.value.map((r) => r.commander)
-  const cards = await Promise.all(commanders.map((c) => fetchCardByName(c)))
-  cards.forEach((card, i) => {
-    if (card) {
-      const url = getCardImageUrl(card, 'art_crop')
-      if (url) artUrls.value.set(commanders[i], url)
+watch(
+  rows,
+  async (currentRows) => {
+    const commanders = currentRows.map((row) => row.commander)
+    await preloadCommanderImages(commanders, ['art_crop'])
+
+    const nextArtUrls = new Map<string, string>()
+    for (const commander of commanders) {
+      nextArtUrls.set(commander, getCachedCommanderImage(commander, 'art_crop') ?? '')
     }
-  })
-})
+
+    artUrls.value = nextArtUrls
+  },
+  { immediate: true },
+)
 </script>
 
 <style lang="scss" scoped>
@@ -176,7 +174,7 @@ onMounted(async () => {
 
   &__bar-fill {
     height: 100%;
-    background: linear-gradient(90deg, $color-primary, $color-primary-light);
+    background: linear-gradient(90deg, $color-xp-start, $color-xp-end);
     border-radius: $border-radius-full;
   }
 

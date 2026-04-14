@@ -33,12 +33,14 @@ interface PlayerTotals {
 }
 
 const TIER_RANK: Record<Tier, number> = {
-  diamond: 0,
-  platinum: 1,
-  gold: 2,
-  silver: 3,
-  bronze: 4,
-  trash: 5,
+  god: 0,
+  legend: 1,
+  diamond: 2,
+  platinum: 3,
+  gold: 4,
+  silver: 5,
+  bronze: 6,
+  trash: 7,
 }
 
 export function buildCommanderPlacementTimeline(
@@ -79,11 +81,11 @@ export function buildCommanderPlacementTimeline(
 
       pairState.games++
       pairState.totalBasePoints += record.basePoints
-      if (record.basePoints === 1) pairState.wins++
+      if (record.placement === 1) pairState.wins++
 
       commanderState.games++
       commanderState.totalBasePoints += record.basePoints
-      if (record.basePoints === 1) commanderState.wins++
+      if (record.placement === 1) commanderState.wins++
     }
 
     const targetRecord = gameRecords[playerName]?.[game.gameId]
@@ -106,7 +108,7 @@ export function buildCommanderPlacementTimeline(
     const rawScore = targetPair.games > 0
       ? blendScore(targetPair.totalBasePoints / targetPair.games, targetPair.wins / targetPair.games)
       : 0
-    const tier = getTier(rawScore, globalAverage)
+    const tier = getTier(rawScore, globalAverage, targetPair.games)
 
     const playerAvgPoints = targetPlayer.games > 0 ? targetPlayer.totalBasePoints / targetPlayer.games : 0
     const playerWinRate = targetPlayer.games > 0 ? targetPlayer.wins / targetPlayer.games : 0
@@ -117,7 +119,7 @@ export function buildCommanderPlacementTimeline(
       playerAvgPoints,
       playerWinRate,
     )
-    const projectedTier = getTier(projectedScore, globalAverage)
+    const projectedTier = getTier(projectedScore, globalAverage, targetPair.games)
 
     let tierChange: 'rise' | 'drop' | null = null
     if (previousTier) {

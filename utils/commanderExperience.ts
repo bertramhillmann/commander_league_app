@@ -2,9 +2,9 @@
 
 /** XP earned per game by every participant, equal to the player count. */
 export const XP_PER_GAME: Record<number, number> = {
-  3: 3,
-  4: 4,
-  5: 5,
+  3: 1,
+  4: 2,
+  5: 3,
 }
 
 /** Bonus XP for the winner on top of the base per-game XP. */
@@ -31,10 +31,10 @@ export const MAX_LEVEL = 20
  *   Total: 252 XP  (≈ 56 games at 4.5 avg XP)
  */
 const XP_INCREMENTS = [
-   6,  9,  10, 12, 13,  // levels 1–5
-  15, 17, 19, 20, 21,  // levels 6–10
-  24, 25, 25, 26, 27,  // levels 11–15
-  28, 29, 30, 35,      // levels 16–19 (19 increments for 20 levels)
+   6,  9,  10, 11, 12,  // levels 1–5
+  13, 14, 15, 16, 17,  // levels 6–10
+  18, 19, 20, 21, 22,  // levels 11–15
+  23, 24, 25, 30,      // levels 16–19 (19 increments for 20 levels)
 ]
 
 export const LEVEL_THRESHOLDS: number[] = (() => {
@@ -78,4 +78,31 @@ export function xpForNextLevel(xp: number): number {
   const currentLevel = xpToLevel(xp)
   if (currentLevel >= MAX_LEVEL) return 0
   return LEVEL_THRESHOLDS[currentLevel] - xp
+}
+
+export function getCommanderLevelProgress(xp: number) {
+  const level = xpToLevel(xp)
+  const isMaxLevel = level >= MAX_LEVEL
+  const maxXP = LEVEL_THRESHOLDS[LEVEL_THRESHOLDS.length - 1] ?? 0
+  const levelStartXP = LEVEL_THRESHOLDS[level - 1] ?? 0
+  const nextLevelXP = isMaxLevel ? maxXP : (LEVEL_THRESHOLDS[level] ?? maxXP)
+  const range = Math.max(0, nextLevelXP - levelStartXP)
+  const currentLevelXP = isMaxLevel ? range : Math.max(0, xp - levelStartXP)
+  const levelSpanXP = range
+  const progressPct = isMaxLevel || range === 0
+    ? 100
+    : Math.max(0, Math.min(100, ((xp - levelStartXP) / range) * 100))
+  const xpToNext = isMaxLevel ? 0 : Math.max(0, nextLevelXP - xp)
+
+  return {
+    level,
+    isMaxLevel,
+    maxXP,
+    levelStartXP,
+    nextLevelXP,
+    currentLevelXP,
+    levelSpanXP,
+    progressPct,
+    xpToNext,
+  }
 }

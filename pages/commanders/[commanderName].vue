@@ -88,6 +88,15 @@
                   class="player-row__name"
                   :to="`/players/${encodeURIComponent(row.playerName)}`"
                 >{{ row.playerName }}</NuxtLink>
+                <button
+                  type="button"
+                  class="player-row__title-badge"
+                  @mouseenter="onTitleEnter(row.title, $event)"
+                  @mousemove="onTitleMove($event)"
+                  @mouseleave="onTitleLeave"
+                >
+                  {{ row.title.name }}
+                </button>
                 <span v-if="row.tier" class="player-row__tier">
                   <IconsTierIcon :tier="row.tier" :size="12" />
                   <span class="player-row__tier-label" :class="`tier-text--${row.tier}`">
@@ -151,7 +160,7 @@
                     <div class="player-row__bar-fill" :style="{ width: `${row.levelPct}%` }" />
                   </div>
                   <span class="player-row__level-next">{{ row.isMaxLevel ? 'MAX' : `Lv ${row.level + 1}` }}</span>
-                  <span class="player-row__xp-current">{{ row.xp }} XP</span>
+                  <span class="player-row__xp-current">{{ row.currentLevelXP }} / {{ row.levelSpanXP }} XP</span>
                   <span v-if="!row.isMaxLevel" class="player-row__xp-remaining">· {{ row.xpToNext }} to next</span>
                   <span class="player-row__xp-pts" title="Score points from XP levels">+{{ row.xpScorePts }} pts</span>
                 </div>
@@ -182,23 +191,35 @@
       Commander "{{ commanderName }}" not found.
     </div>
   </div>
+
+  <Teleport to="body">
+    <div
+      v-if="titlePreview.visible && titlePreview.title"
+      class="floating-panel"
+      :style="{ top: `${titlePreview.y}px`, left: `${titlePreview.x}px` }"
+    >
+      <TitlesTitleMetaInformation :title="titlePreview.title" />
+    </div>
+  </Teleport>
 </template>
 
 <script setup lang="ts">
-import { fetchCardByName, getCardImageUrl } from '~/services/scryfallService'
-import { xpToLevel, LEVEL_THRESHOLDS, MAX_LEVEL } from '~/utils/commanderExperience'
+import { compareGamesChronological } from '~/composables/useLeagueState'
+import { getCommanderLevelProgress } from '~/utils/commanderExperience'
 import { buildCommanderPlacementTimeline, type PlacementTimelinePoint } from '~/utils/commanderTimeline'
 import { TIER_META, blendScore, getTier, smoothedTierScore } from '~/utils/tiers'
 import { ACHIEVEMENTS } from '~/utils/achievements'
+import { getCommanderPerformanceTitle, type CommanderTitleResult } from '~/utils/titles'
 import type { Tier } from '~/utils/tiers'
 
 const route = useRoute()
 const commanderName = computed(() => route.params.commanderName as string)
 
-const { games, commanders, players, gameRecords } = useLeagueState()
+const { games, commanders, players, gameRecords, standings } = useLeagueState()
+const { getCommanderImage } = useImageCache()
 
 const cmdState = computed(() => commanders.value[commanderName.value] ?? null)
-const chronologicalGames = computed(() => [...games.value].reverse())
+const chronologicalGames = computed(() => [...games.value].sort(compareGamesChronological))
 
 // ── Card image ────────────────────────────────────────────────────────────────
 
@@ -207,9 +228,7 @@ const imageUrl = ref<string | null>(null)
 watch(
   commanderName,
   async (name) => {
-    imageUrl.value = null
-    const card = await fetchCardByName(name)
-    if (card) imageUrl.value = getCardImageUrl(card, 'normal')
+    imageUrl.value = await getCommanderImage(name, 'normal')
   },
   { immediate: true },
 )
@@ -226,7 +245,7 @@ const globalTier = computed((): Tier | null => {
   const cmd = cmdState.value
   if (!cmd || cmd.gamesPlayed === 0) return null
   const score = blendScore(cmd.totalBasePoints / cmd.gamesPlayed, cmd.wins / cmd.gamesPlayed)
-  return getTier(score, globalAvg)
+  return getTier(score, globalAvg, cmd.gamesPlayed)
 })
 
 // ── Aggregate stats ───────────────────────────────────────────────────────────
@@ -258,10 +277,13 @@ interface PlayerRow {
   level: number
   levelPct: number
   xp: number
+  currentLevelXP: number
+  levelSpanXP: number
   xpToNext: number
   isMaxLevel: boolean
   xpScorePts: number
   timeline: PlacementTimelinePoint[]
+  title: CommanderTitleResult
   achievements: Array<{ id: string; name: string; description: string; icon: string; points: number }>
 }
 
@@ -288,7 +310,7 @@ const playerRows = computed((): PlayerRow[] => {
     const winRatePct = Math.round((first / plays) * 100)
 
     const rawScore = plays > 0 ? blendScore(totalPts / plays, first / plays) : 0
-    const tier = plays > 0 ? getTier(rawScore, globalAvgScore) : null
+    const tier = plays > 0 ? getTier(rawScore, globalAvgScore, plays) : null
     const playerAvgPts = players.value[playerName]?.gamesPlayed
       ? players.value[playerName].totalBasePoints / players.value[playerName].gamesPlayed
       : 0
@@ -298,17 +320,16 @@ const playerRows = computed((): PlayerRow[] => {
     const projectedScore = plays > 0
       ? smoothedTierScore(totalPts, first, plays, playerAvgPts, playerWinRate)
       : 0
-    const projectedTier = plays > 0 ? getTier(projectedScore, globalAvgScore) : null
+    const projectedTier = plays > 0 ? getTier(projectedScore, globalAvgScore, plays) : null
     const xp = players.value[playerName]?.commanderXP?.[name] ?? 0
-    const level = xpToLevel(xp)
-    const isMaxLevel = level >= MAX_LEVEL
-    const maxXP = LEVEL_THRESHOLDS[LEVEL_THRESHOLDS.length - 1]
-    const levelStart = LEVEL_THRESHOLDS[level - 1] ?? 0
-    const levelEnd = isMaxLevel ? maxXP : (LEVEL_THRESHOLDS[level] ?? maxXP)
-    const levelPct = isMaxLevel ? 100
-      : levelEnd === levelStart ? 100
-      : Math.min(100, Math.round(((xp - levelStart) / (levelEnd - levelStart)) * 100))
-    const xpToNext = isMaxLevel ? 0 : levelEnd - xp
+    const {
+      level,
+      isMaxLevel,
+      currentLevelXP,
+      levelSpanXP,
+      progressPct,
+      xpToNext,
+    } = getCommanderLevelProgress(xp)
     const xpScorePts = level
     const timeline = buildCommanderPlacementTimeline(
       chronologicalGames.value,
@@ -316,6 +337,15 @@ const playerRows = computed((): PlayerRow[] => {
       playerName,
       name,
     )
+    const title = getCommanderPerformanceTitle({
+      playerName,
+      commanderName: name,
+      commanderRecords: cmdRecords,
+      playerRecords: Object.values(gameRecords.value[playerName] ?? {}),
+      allRecords: Object.values(gameRecords.value).flatMap((entry) => Object.values(entry)),
+      games: chronologicalGames.value,
+      standings: standings.value,
+    })
 
     // Commander-scoped achievements for this player with this commander
     const earnedIds = new Set(
@@ -330,7 +360,7 @@ const playerRows = computed((): PlayerRow[] => {
 
     rows.push({
       playerName, plays, first, second, last, winRate: winRatePct, avgPoints,
-      tier, projectedTier, level, levelPct, xp, xpToNext, isMaxLevel, xpScorePts, timeline, achievements,
+      tier, projectedTier, level, levelPct: progressPct, xp, currentLevelXP, levelSpanXP, xpToNext, isMaxLevel, xpScorePts, timeline, title, achievements,
     })
   }
 
@@ -367,6 +397,48 @@ const sortedPlayers = computed(() => {
 function fmt(n: number): string {
   if (n === 0) return '0'
   return n % 1 === 0 ? String(n) : n.toFixed(3).replace(/\.?0+$/, '')
+}
+
+const PREVIEW_OFFSET_X = 18
+const PREVIEW_OFFSET_Y = 18
+
+const titlePreview = reactive<{
+  visible: boolean
+  title: CommanderTitleResult | null
+  x: number
+  y: number
+}>({
+  visible: false,
+  title: null,
+  x: 0,
+  y: 0,
+})
+
+function calcPreviewPosition(e: MouseEvent, width: number, height: number) {
+  let x = e.clientX + PREVIEW_OFFSET_X
+  let y = e.clientY + PREVIEW_OFFSET_Y
+  if (x + width > window.innerWidth) x = e.clientX - width - PREVIEW_OFFSET_X
+  if (y + height > window.innerHeight) y = e.clientY - height - PREVIEW_OFFSET_Y
+  return { x: x + window.scrollX, y: y + window.scrollY }
+}
+
+function onTitleEnter(title: CommanderTitleResult, e: MouseEvent) {
+  titlePreview.title = title
+  titlePreview.visible = true
+  const pos = calcPreviewPosition(e, 250, 180)
+  titlePreview.x = pos.x
+  titlePreview.y = pos.y
+}
+
+function onTitleMove(e: MouseEvent) {
+  if (!titlePreview.visible) return
+  const pos = calcPreviewPosition(e, 250, 180)
+  titlePreview.x = pos.x
+  titlePreview.y = pos.y
+}
+
+function onTitleLeave() {
+  titlePreview.visible = false
 }
 </script>
 
@@ -456,6 +528,8 @@ function fmt(n: number): string {
     text-transform: uppercase;
     letter-spacing: 0.06em;
 
+    &.tier-text--god      { color: $tier-god-color; }
+    &.tier-text--legend   { color: $tier-legend-color; }
     &.tier-text--diamond  { color: $tier-diamond-color; }
     &.tier-text--platinum { color: $tier-platinum-color; }
     &.tier-text--gold     { color: $tier-gold-color; }
@@ -597,6 +671,31 @@ function fmt(n: number): string {
     }
   }
 
+  &__title-badge {
+    appearance: none;
+    border: 1px solid rgba(196, 148, 72, 0.38);
+    background:
+      linear-gradient(180deg, rgba(30, 22, 18, 0.98), rgba(14, 10, 8, 0.98));
+    padding: 4px 11px;
+    font: inherit;
+    font-size: 10px;
+    font-weight: $font-weight-semibold;
+    letter-spacing: 0.08em;
+    text-transform: uppercase;
+    color: #d8b06a;
+    cursor: help;
+    display: inline-flex;
+    align-items: center;
+    width: fit-content;
+    max-width: 100%;
+    text-align: left;
+    flex: 0 0 auto;
+    border-radius: 3px;
+    box-shadow:
+      inset 0 0 0 1px rgba(255, 225, 155, 0.04),
+      0 6px 16px rgba(0, 0, 0, 0.22);
+  }
+
   &__tier {
     display: flex;
     align-items: center;
@@ -621,6 +720,8 @@ function fmt(n: number): string {
     text-transform: uppercase;
     letter-spacing: 0.06em;
 
+    &.tier-text--god      { color: $tier-god-color; }
+    &.tier-text--legend   { color: $tier-legend-color; }
     &.tier-text--diamond  { color: $tier-diamond-color; }
     &.tier-text--platinum { color: $tier-platinum-color; }
     &.tier-text--gold     { color: $tier-gold-color; }
@@ -723,7 +824,7 @@ function fmt(n: number): string {
 
   &__bar-fill {
     height: 100%;
-    background: linear-gradient(90deg, $color-primary, $color-primary-light);
+    background: linear-gradient(90deg, $color-xp-start, $color-xp-end);
     border-radius: $border-radius-full;
     transition: width $transition-slow;
   }
@@ -778,5 +879,13 @@ function fmt(n: number): string {
       margin-left: 0;
     }
   }
+}
+</style>
+
+<style lang="scss">
+.floating-panel {
+  position: absolute;
+  z-index: 9999;
+  pointer-events: none;
 }
 </style>

@@ -7,16 +7,88 @@
         <tr>
           <th class="standings__th standings__th--rank">#</th>
           <th class="standings__th standings__th--name">Player</th>
-          <th class="standings__th standings__th--num" title="(Points + Achievement Points + Commander XP Points) × Performance Multiplier&#10;Multiplier rewards win rate and avg points per game relative to the league">Total</th>
+          <th class="standings__th standings__th--num" title="(Points + Achievement Points + Commander XP Points) × Performance Multiplier&#10;Multiplier rewards win rate and avg points per game relative to the league">
+            <button
+              type="button"
+              class="standings__sort-button standings__sort-button--num"
+              @click="toggleSort('totalScore')"
+            >
+              <span>Total</span>
+              <span class="standings__sort-indicator">{{ sortIndicator('totalScore') }}</span>
+            </button>
+          </th>
           <th class="standings__th standings__th--num standings__th--mult" title="Performance multiplier applied to base score&#10;1.0 = league average · &gt;1.0 = above average · &lt;1.0 = below average">×Mult</th>
-          <th class="standings__th standings__th--num">Points</th>
-          <th class="standings__th standings__th--num">Achv. Pts</th>
-          <th class="standings__th standings__th--num">XP Pts</th>
-          <th class="standings__th standings__th--num">Games</th>
-          <th class="standings__th standings__th--num">Win %</th>
-          <th class="standings__th standings__th--num">Avg / Game</th>
+          <th class="standings__th standings__th--num">
+            <button
+              type="button"
+              class="standings__sort-button standings__sort-button--num"
+              @click="toggleSort('totalPoints')"
+            >
+              <span>Points</span>
+              <span class="standings__sort-indicator">{{ sortIndicator('totalPoints') }}</span>
+            </button>
+          </th>
+          <th class="standings__th standings__th--num">
+            <button
+              type="button"
+              class="standings__sort-button standings__sort-button--num"
+              @click="toggleSort('achievementPoints')"
+            >
+              <span>Achv. Pts</span>
+              <span class="standings__sort-indicator">{{ sortIndicator('achievementPoints') }}</span>
+            </button>
+          </th>
+          <th class="standings__th standings__th--num">
+            <button
+              type="button"
+              class="standings__sort-button standings__sort-button--num"
+              @click="toggleSort('xpPoints')"
+            >
+              <span>XP Pts</span>
+              <span class="standings__sort-indicator">{{ sortIndicator('xpPoints') }}</span>
+            </button>
+          </th>
+          <th class="standings__th standings__th--num">
+            <button
+              type="button"
+              class="standings__sort-button standings__sort-button--num"
+              @click="toggleSort('gamesPlayed')"
+            >
+              <span>Games</span>
+              <span class="standings__sort-indicator">{{ sortIndicator('gamesPlayed') }}</span>
+            </button>
+          </th>
+          <th class="standings__th standings__th--num">
+            <button
+              type="button"
+              class="standings__sort-button standings__sort-button--num"
+              @click="toggleSort('winRate')"
+            >
+              <span>Win %</span>
+              <span class="standings__sort-indicator">{{ sortIndicator('winRate') }}</span>
+            </button>
+          </th>
+          <th class="standings__th standings__th--num">
+            <button
+              type="button"
+              class="standings__sort-button standings__sort-button--num"
+              @click="toggleSort('avgPerGame')"
+            >
+              <span>Avg / Game</span>
+              <span class="standings__sort-indicator">{{ sortIndicator('avgPerGame') }}</span>
+            </button>
+          </th>
           <th class="standings__th standings__th--commander">Top Commander</th>
-          <th class="standings__th standings__th--num">L-Points</th>
+          <th class="standings__th standings__th--num">
+            <button
+              type="button"
+              class="standings__sort-button standings__sort-button--num"
+              @click="toggleSort('totalLPoints')"
+            >
+              <span>L-Points</span>
+              <span class="standings__sort-indicator">{{ sortIndicator('totalLPoints') }}</span>
+            </button>
+          </th>
         </tr>
       </thead>
       <tbody>
@@ -86,6 +158,166 @@
 
     <CommandersTopCommander />
 
+    <h2 class="dashboard__subtitle">Player × Commander Pairings</h2>
+
+    <table class="standings">
+      <thead>
+        <tr>
+          <th class="standings__th standings__th--rank">#</th>
+          <th class="standings__th standings__th--name">Player × Commander</th>
+          <th class="standings__th standings__th--num">
+            <button
+              type="button"
+              class="standings__sort-button standings__sort-button--num"
+              @click="togglePairingSort('totalScore')"
+            >
+              <span>Total</span>
+              <span class="standings__sort-indicator">{{ pairingSortIndicator('totalScore') }}</span>
+            </button>
+          </th>
+          <th class="standings__th standings__th--num standings__th--mult">×Mult</th>
+          <th class="standings__th standings__th--num">
+            <button
+              type="button"
+              class="standings__sort-button standings__sort-button--num"
+              @click="togglePairingSort('totalPoints')"
+            >
+              <span>Points</span>
+              <span class="standings__sort-indicator">{{ pairingSortIndicator('totalPoints') }}</span>
+            </button>
+          </th>
+          <th class="standings__th standings__th--num">
+            <button
+              type="button"
+              class="standings__sort-button standings__sort-button--num"
+              @click="togglePairingSort('achievementPoints')"
+            >
+              <span>Achv. Pts</span>
+              <span class="standings__sort-indicator">{{ pairingSortIndicator('achievementPoints') }}</span>
+            </button>
+          </th>
+          <th class="standings__th standings__th--num">
+            <button
+              type="button"
+              class="standings__sort-button standings__sort-button--num"
+              @click="togglePairingSort('xpPoints')"
+            >
+              <span>XP Pts</span>
+              <span class="standings__sort-indicator">{{ pairingSortIndicator('xpPoints') }}</span>
+            </button>
+          </th>
+          <th class="standings__th standings__th--num">
+            <button
+              type="button"
+              class="standings__sort-button standings__sort-button--num"
+              @click="togglePairingSort('gamesPlayed')"
+            >
+              <span>Games</span>
+              <span class="standings__sort-indicator">{{ pairingSortIndicator('gamesPlayed') }}</span>
+            </button>
+          </th>
+          <th class="standings__th standings__th--num">
+            <button
+              type="button"
+              class="standings__sort-button standings__sort-button--num"
+              @click="togglePairingSort('totalLosses')"
+            >
+              <span>Losses</span>
+              <span class="standings__sort-indicator">{{ pairingSortIndicator('totalLosses') }}</span>
+            </button>
+          </th>
+          <th class="standings__th standings__th--num">
+            <button
+              type="button"
+              class="standings__sort-button standings__sort-button--num"
+              @click="togglePairingSort('winRate')"
+            >
+              <span>Win %</span>
+              <span class="standings__sort-indicator">{{ pairingSortIndicator('winRate') }}</span>
+            </button>
+          </th>
+          <th class="standings__th standings__th--num">
+            <button
+              type="button"
+              class="standings__sort-button standings__sort-button--num"
+              @click="togglePairingSort('avgPerGame')"
+            >
+              <span>Avg / Game</span>
+              <span class="standings__sort-indicator">{{ pairingSortIndicator('avgPerGame') }}</span>
+            </button>
+          </th>
+          <th class="standings__th standings__th--num">
+            <button
+              type="button"
+              class="standings__sort-button standings__sort-button--num"
+              @click="togglePairingSort('totalLPoints')"
+            >
+              <span>L-Points</span>
+              <span class="standings__sort-indicator">{{ pairingSortIndicator('totalLPoints') }}</span>
+            </button>
+          </th>
+        </tr>
+      </thead>
+      <tbody>
+        <tr
+          v-for="row in pairingTable"
+          :key="row.key"
+          class="standings__row"
+          :class="{
+            'standings__row--top1': row.rank === 1,
+            'standings__row--top2': row.rank === 2,
+            'standings__row--top3': row.rank === 3
+          }"
+        >
+          <td class="standings__td standings__td--rank">
+            <span class="standings__rank" :class="`standings__rank--${row.rank}`">
+              {{ rankLabel(row.rank) }}
+            </span>
+          </td>
+          <td class="standings__td standings__td--name">
+            <div class="standings__pairing-name">
+              <IconsTierIcon
+                v-if="row.commanderTier"
+                :tier="row.commanderTier"
+                :size="12"
+              />
+              <NuxtLink class="standings__player-link" :to="`/players/${encodeURIComponent(row.playerName)}`">{{ row.playerName }}</NuxtLink>
+              <span class="standings__pairing-separator">×</span>
+              <NuxtLink
+                class="standings__commander-name"
+                :to="`/commanders/${encodeURIComponent(row.commanderName)}`"
+                @mouseenter="onCommanderEnter(row.playerName, row.commanderName, $event)"
+                @mousemove="onMouseMove($event)"
+                @mouseleave="onCommanderLeave"
+              >
+                {{ row.commanderName }}
+              </NuxtLink>
+            </div>
+          </td>
+          <td class="standings__td standings__td--num standings__td--total">{{ fmt(row.totalScore) }}</td>
+          <td
+            class="standings__td standings__td--num standings__td--mult standings__td--hoverable-mult"
+            @mouseenter="onMultEnter(row, $event)"
+            @mousemove="onMouseMove($event)"
+            @mouseleave="onMultLeave"
+          >{{ fmt(row.perfMult) }}</td>
+          <td class="standings__td standings__td--num">{{ fmt(row.totalPoints) }}</td>
+          <td
+            class="standings__td standings__td--num standings__td--achv standings__td--hoverable"
+            @mouseenter="onAchvEnter(row.playerName, $event, row.commanderName)"
+            @mousemove="onMouseMove($event)"
+            @mouseleave="onAchvLeave"
+          >{{ fmt(row.achievementPoints) }}</td>
+          <td class="standings__td standings__td--num standings__td--xp">{{ fmt(row.xpPoints) }}</td>
+          <td class="standings__td standings__td--num">{{ row.gamesPlayed }}</td>
+          <td class="standings__td standings__td--num">{{ row.totalLosses }}</td>
+          <td class="standings__td standings__td--num">{{ row.winRate }}%</td>
+          <td class="standings__td standings__td--num">{{ fmt(row.avgPerGame) }}</td>
+          <td class="standings__td standings__td--num standings__td--lp">{{ fmt(row.totalLPoints) }}</td>
+        </tr>
+      </tbody>
+    </table>
+
     <Teleport to="body">
       <div
         v-if="hover.visible"
@@ -105,7 +337,10 @@
         class="floating-panel"
         :style="{ top: `${achvHover.y}px`, left: `${achvHover.x}px` }"
       >
-        <AchievementsAchievementList :player-name="achvHover.playerName" />
+        <AchievementsAchievementList
+          :player-name="achvHover.playerName"
+          :commander-name="achvHover.commanderName || undefined"
+        />
       </div>
     </Teleport>
 
@@ -164,15 +399,47 @@
 </template>
 
 <script setup lang="ts">
-import { computed, reactive } from 'vue'
+import { computed, reactive, ref } from 'vue'
+import { getPlayerCommanderMetrics } from '~/composables/useLeagueState'
 import {
   EXPECTED_WIN_RATE,
   PERF_BASE_WEIGHT,
   PERF_WIN_RATE_WEIGHT,
   PERF_AVG_WEIGHT,
+  PERF_MULT_MAX,
+  PERF_MULT_MIN,
 } from '~/utils/placements'
+import { computeGlobalCommanderBaseline, computePlayerCommanderTier, type Tier } from '~/utils/tiers'
 
-const { players, gameRecords, standings } = useLeagueState()
+const { commanders, gameRecords, players, standings } = useLeagueState()
+
+type SortKey =
+  | 'totalScore'
+  | 'totalPoints'
+  | 'achievementPoints'
+  | 'xpPoints'
+  | 'gamesPlayed'
+  | 'totalLosses'
+  | 'winRate'
+  | 'avgPerGame'
+  | 'totalLPoints'
+
+const sortKey = ref<SortKey>('totalScore')
+const sortDirection = ref<'desc' | 'asc'>('desc')
+const pairingSortKey = ref<SortKey>('totalScore')
+const pairingSortDirection = ref<'desc' | 'asc'>('desc')
+
+type MultRow = {
+  winRate: number
+  winRateFraction: number
+  winRateTerm: number
+  avgPerGame: number
+  leagueAvgPerGame: number
+  avgFraction: number
+  avgTerm: number
+  perfMultRaw: number
+  perfMult: number
+}
 
 // ── Commander XP points: 1 pt per level per commander ────────────────────────
 
@@ -186,6 +453,43 @@ function topCommander(playerName: string): string | null {
   return Object.entries(counts).sort((a, b) => b[1] - a[1])[0]?.[0] ?? null
 }
 
+const globalCommanderBaseline = computed(() =>
+  computeGlobalCommanderBaseline(commanders.value),
+)
+
+function playerCommanderTier(playerName: string, commanderName: string): Tier | null {
+  const records = Object.values(gameRecords.value[playerName] ?? {}).filter(
+    (record) => record.commander === commanderName,
+  )
+  const { detail } = computePlayerCommanderTier(records, globalCommanderBaseline.value)
+  return detail?.tier ?? null
+}
+
+function buildPerformanceMetrics(totalPoints: number, gamesPlayed: number, baseWins: number, leagueAvgPerGame: number) {
+  const avgPerGame = gamesPlayed > 0 ? r3(totalPoints / gamesPlayed) : 0
+  const winRate = gamesPlayed > 0 ? Math.round((baseWins / gamesPlayed) * 100) : 0
+  const winRateFraction = gamesPlayed > 0 ? baseWins / gamesPlayed : EXPECTED_WIN_RATE
+  const avgFraction = leagueAvgPerGame > 0 ? avgPerGame / leagueAvgPerGame : 1
+  const winRateTerm = r3(PERF_WIN_RATE_WEIGHT * (winRateFraction / EXPECTED_WIN_RATE))
+  const avgTerm = r3(PERF_AVG_WEIGHT * avgFraction)
+  const perfMultRaw = r3(PERF_BASE_WEIGHT + winRateTerm + avgTerm)
+  const perfMult = gamesPlayed > 0
+    ? r3(Math.min(PERF_MULT_MAX, Math.max(PERF_MULT_MIN, perfMultRaw)))
+    : 1
+
+  return {
+    avgPerGame,
+    winRate,
+    winRateFraction: r3(winRateFraction),
+    avgFraction: r3(avgFraction),
+    winRateTerm,
+    avgTerm,
+    perfMultRaw,
+    perfMult,
+    leagueAvgPerGame: r3(leagueAvgPerGame),
+  }
+}
+
 // ── Table rows ────────────────────────────────────────────────────────────────
 
 const table = computed(() => {
@@ -196,18 +500,13 @@ const table = computed(() => {
   const totalPoints = allPlayers.reduce((s, p) => s + p.totalPoints, 0)
   const leagueAvgPerGame = totalGames > 0 ? totalPoints / totalGames : 1
 
-  return allPlayers.map((p) => {
-    const avg = p.avgPerGame
-    const winRate = p.gamesPlayed > 0
-      ? Math.round((p.baseWins / p.gamesPlayed) * 100)
-      : 0
-
-    // Performance multiplier: average player (25 % wins, league-avg pts) → 1.0
-    const winRateFraction = p.gamesPlayed > 0 ? p.baseWins / p.gamesPlayed : EXPECTED_WIN_RATE
-    const avgFraction     = leagueAvgPerGame > 0 ? avg / leagueAvgPerGame : 1
-    const winRateTerm     = r3(PERF_WIN_RATE_WEIGHT * (winRateFraction / EXPECTED_WIN_RATE))
-    const avgTerm         = r3(PERF_AVG_WEIGHT * avgFraction)
-    const multRaw         = r3(PERF_BASE_WEIGHT + winRateTerm + avgTerm)
+  const rows = allPlayers.map((p) => {
+    const performance = buildPerformanceMetrics(
+      p.totalPoints,
+      p.gamesPlayed,
+      p.baseWins,
+      leagueAvgPerGame,
+    )
 
     const tc = topCommander(p.name)
     return {
@@ -218,23 +517,126 @@ const table = computed(() => {
       achievementPoints: p.achievementPoints,
       xpPoints: p.xpPoints,
       gamesPlayed: p.gamesPlayed,
-      winRate,
-      avgPerGame: avg,
-      leagueAvgPerGame: r3(leagueAvgPerGame),
-      perfMult: p.perfMult,
-      perfMultRaw: multRaw,
-      winRateFraction: r3(winRateFraction),
-      winRateTerm,
-      avgFraction: r3(avgFraction),
-      avgTerm,
+      winRate: performance.winRate,
+      avgPerGame: performance.avgPerGame,
+      leagueAvgPerGame: performance.leagueAvgPerGame,
+      perfMult: performance.perfMult,
+      perfMultRaw: performance.perfMultRaw,
+      winRateFraction: performance.winRateFraction,
+      winRateTerm: performance.winRateTerm,
+      avgFraction: performance.avgFraction,
+      avgTerm: performance.avgTerm,
       topCommander: tc,
-      topCommanderTier: tc ? (players.value[p.name]?.commanderTiers?.[tc] ?? null) : null,
+      topCommanderTier: tc ? playerCommanderTier(p.name, tc) : null,
       totalLPoints: p.totalLPoints,
     }
   })
+
+  return rows.sort((a, b) => {
+    const direction = sortDirection.value === 'desc' ? -1 : 1
+    const delta = a[sortKey.value] - b[sortKey.value]
+
+    if (delta !== 0) return delta * direction
+
+    return (a.rank - b.rank) * direction
+  })
+})
+
+const pairingTable = computed(() => {
+  const rows = Object.entries(gameRecords.value).flatMap(([playerName, recordsMap]) => {
+    const byCommander = new Set(Object.values(recordsMap).map((record) => record.commander))
+
+    return Array.from(byCommander).flatMap((commanderName) => {
+      const metrics = getPlayerCommanderMetrics(playerName, commanderName, gameRecords.value, players.value)
+      if (!metrics) return []
+
+      return {
+        key: `${playerName}::${commanderName}`,
+        playerName,
+        commanderName,
+        commanderTier: playerCommanderTier(playerName, commanderName),
+        totalPoints: metrics.totalFinalPoints,
+        achievementPoints: metrics.achievementPoints,
+        xpPoints: metrics.xpPoints,
+        gamesPlayed: metrics.plays,
+        totalLosses: metrics.totalLosses,
+        baseWins: metrics.first,
+        totalLPoints: metrics.totalLPoints,
+      }
+    })
+  })
+
+  const totalGames = rows.reduce((sum, row) => sum + row.gamesPlayed, 0)
+  const totalPoints = rows.reduce((sum, row) => sum + row.totalPoints, 0)
+  const leagueAvgPerGame = totalGames > 0 ? totalPoints / totalGames : 1
+
+  const enrichedRows = rows.map((row) => {
+    const performance = buildPerformanceMetrics(
+      row.totalPoints,
+      row.gamesPlayed,
+      row.baseWins,
+      leagueAvgPerGame,
+    )
+    const totalScore = r3((row.totalPoints + row.achievementPoints + row.xpPoints) * performance.perfMult)
+
+    return {
+      ...row,
+      totalScore,
+      winRate: performance.winRate,
+      avgPerGame: performance.avgPerGame,
+      leagueAvgPerGame: performance.leagueAvgPerGame,
+      perfMult: performance.perfMult,
+      perfMultRaw: performance.perfMultRaw,
+      winRateFraction: performance.winRateFraction,
+      winRateTerm: performance.winRateTerm,
+      avgFraction: performance.avgFraction,
+      avgTerm: performance.avgTerm,
+    }
+  })
+
+  return enrichedRows
+    .sort((a, b) => {
+      const direction = pairingSortDirection.value === 'desc' ? -1 : 1
+      const delta = a[pairingSortKey.value] - b[pairingSortKey.value]
+
+      if (delta !== 0) return delta * direction
+
+      return a.key.localeCompare(b.key) * direction
+    })
+    .map((row, index) => ({ ...row, rank: index + 1 }))
 })
 
 function r3(n: number): number { return Math.round(n * 1000) / 1000 }
+
+function toggleSort(key: SortKey) {
+  if (sortKey.value === key) {
+    sortDirection.value = sortDirection.value === 'desc' ? 'asc' : 'desc'
+    return
+  }
+
+  sortKey.value = key
+  sortDirection.value = 'desc'
+}
+
+function sortIndicator(key: SortKey) {
+  if (sortKey.value !== key) return '↕'
+  return sortDirection.value === 'desc' ? '↓' : '↑'
+}
+
+function togglePairingSort(key: SortKey) {
+  if (pairingSortKey.value === key) {
+    pairingSortDirection.value = pairingSortDirection.value === 'desc' ? 'asc' : 'desc'
+    return
+  }
+
+  pairingSortKey.value = key
+  pairingSortDirection.value = 'desc'
+}
+
+function pairingSortIndicator(key: SortKey) {
+  if (pairingSortKey.value !== key) return '↕'
+  return pairingSortDirection.value === 'desc' ? '↓' : '↑'
+}
 
 function rankLabel(rank: number) {
   return ['🥇', '🥈', '🥉'][rank - 1] ?? `${rank}.`
@@ -298,7 +700,7 @@ function onCommanderLeave() {
 
 // ── Achievement tooltip ───────────────────────────────────────────────────────
 
-const achvHover = reactive({ visible: false, playerName: '', x: 0, y: 0 })
+const achvHover = reactive({ visible: false, playerName: '', commanderName: '', x: 0, y: 0 })
 
 function calcAchvPosition(e: MouseEvent) {
   let x = e.clientX + OFFSET_X
@@ -308,8 +710,9 @@ function calcAchvPosition(e: MouseEvent) {
   return { x: x + window.scrollX, y: y + window.scrollY }
 }
 
-function onAchvEnter(playerName: string, e: MouseEvent) {
+function onAchvEnter(playerName: string, e: MouseEvent, commanderName = '') {
   achvHover.playerName = playerName
+  achvHover.commanderName = commanderName
   achvHover.visible = true
   const pos = calcAchvPosition(e)
   achvHover.x = pos.x
@@ -318,6 +721,7 @@ function onAchvEnter(playerName: string, e: MouseEvent) {
 
 function onAchvLeave() {
   achvHover.visible = false
+  achvHover.commanderName = ''
 }
 
 // ── XP tooltip ────────────────────────────────────────────────────────────────
@@ -383,7 +787,7 @@ function calcMultPosition(e: MouseEvent) {
   return { x: x + window.scrollX, y: y + window.scrollY }
 }
 
-function onMultEnter(row: (typeof table.value)[number], e: MouseEvent) {
+function onMultEnter(row: MultRow, e: MouseEvent) {
   multHover.visible = true
   multHover.winRate = row.winRate
   multHover.winRateFraction = row.winRateFraction
@@ -412,8 +816,16 @@ function onMultLeave() {
   margin-bottom: $spacing-6;
 }
 
+.dashboard__subtitle {
+  font-size: $font-size-lg;
+  font-weight: $font-weight-semibold;
+  color: $color-text;
+  margin: $spacing-8 0 $spacing-4;
+}
+
 .standings {
   width: 100%;
+  background: rgba(0, 0, 0, 0.25);
   border-collapse: collapse;
   font-size: $font-size-sm;
 
@@ -434,12 +846,43 @@ function onMultLeave() {
     &--mult { color: $color-text-muted; font-size: $font-size-xs; }
   }
 
+  &__sort-button {
+    display: inline-flex;
+    align-items: center;
+    gap: 6px;
+    padding: 0;
+    border: 0;
+    background: transparent;
+    color: inherit;
+    font: inherit;
+    letter-spacing: inherit;
+    text-transform: inherit;
+    cursor: pointer;
+
+    &:hover {
+      color: $color-text;
+    }
+
+    &--num {
+      width: 100%;
+      justify-content: flex-end;
+    }
+  }
+
+  &__sort-indicator {
+    min-width: 10px;
+    color: $color-primary-light;
+    text-align: center;
+  }
+
   &__row {
     border-bottom: 1px solid rgba($border-color, 0.5);
     transition: background $transition-fast;
 
     &:hover {
-      background: $color-bg-elevated;
+      // background: $color-bg-elevated;
+      background:rgba(16,16,16,0.35);
+      backdrop-filter: blur(3px);
     }
 
     &--top3 {
@@ -494,6 +937,17 @@ function onMultLeave() {
   }
 
   &__muted {
+    color: $color-text-muted;
+  }
+
+  &__pairing-name {
+    display: inline-flex;
+    align-items: center;
+    gap: 6px;
+    flex-wrap: wrap;
+  }
+
+  &__pairing-separator {
     color: $color-text-muted;
   }
 

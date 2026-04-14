@@ -38,14 +38,16 @@ const props = withDefaults(defineProps<{
   compact: false,
 })
 
-const tierPalette = {
+const tierPalette: Record<string, string> = {
+  god: '#fde68a',
+  legend: '#e879f9',
   diamond: '#7ad8ff',
   platinum: '#d9dee8',
   gold: '#e8a030',
   silver: '#aeb7d0',
   bronze: '#b88357',
   trash: '#d85b72',
-} as const
+}
 
 const canvasRef = ref<HTMLCanvasElement | null>(null)
 let chart: Chart | null = null
@@ -126,10 +128,13 @@ function buildChartConfig(): ChartConfiguration<'line' | 'scatter'> {
           borderWidth: props.compact ? 1.5 : 2,
           pointRadius: props.compact ? 1.6 : 2.4,
           pointHoverRadius: props.compact ? 3 : 4,
-          pointBackgroundColor: '#9b6ee8',
+          pointBackgroundColor: props.points.map((p) => tierPalette[p.tier] ?? '#9b6ee8'),
           pointBorderColor: '#242438',
           pointBorderWidth: props.compact ? 0.8 : 1,
           fill: false,
+          segment: {
+            borderColor: (ctx: any) => tierPalette[props.points[ctx.p0DataIndex]?.tier] ?? '#9b6ee8',
+          },
         },
         {
           type: 'scatter',
