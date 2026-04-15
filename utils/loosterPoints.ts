@@ -1,8 +1,8 @@
 // "Looster Points" — the in-app currency/scoring system
 
-export const MISSED_GAME_LPOINTS_3_PLAYER = 1.5
-export const MISSED_GAME_LPOINTS_4_PLAYER = 2
-export const MISSED_GAME_LPOINTS_5_PLAYER = 2.2
+export const MISSED_GAME_LPOINTS_3_PLAYER = 0.5
+export const MISSED_GAME_LPOINTS_4_PLAYER = 0.6
+export const MISSED_GAME_LPOINTS_5_PLAYER = 0.55
 
 export const MISSED_GAME_LPOINTS_BY_PLAYER_COUNT: Record<number, number> = {
   3: MISSED_GAME_LPOINTS_3_PLAYER,

@@ -371,6 +371,7 @@ function onTitleLeave() {
     border: 1px solid rgba($color-primary-light, 0.18);
     border-radius: $border-radius-xl;
     overflow: hidden;
+    backdrop-filter: blur(3px);
     background:linear-gradient(45deg, black, rgba(100,24,140,0.1));
     box-shadow:
       inset 0 0 0 1px rgba(255, 240, 214, 0.03),

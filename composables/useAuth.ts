@@ -1,15 +1,18 @@
 export function useAuth() {
   const user = useState<string | null>('auth:user', () => null)
+  const isAdmin = useState<boolean>('auth:isAdmin', () => false)
   const ready = useState<boolean>('auth:ready', () => false)
 
   async function refreshSession() {
     const requestFetch = process.server ? useRequestFetch() : $fetch
 
     try {
-      const session = await requestFetch<{ authenticated: boolean; user: string | null }>('/api/auth/session')
+      const session = await requestFetch<{ authenticated: boolean; user: string | null; isAdmin: boolean }>('/api/auth/session')
       user.value = session.user
+      isAdmin.value = session.isAdmin ?? false
     } catch {
       user.value = null
+      isAdmin.value = false
     } finally {
       ready.value = true
     }
@@ -30,6 +33,7 @@ export function useAuth() {
 
     user.value = result.user
     ready.value = true
+    await refreshSession()
     return result.user
   }
 
@@ -38,12 +42,14 @@ export function useAuth() {
       await $fetch('/api/auth/logout', { method: 'POST' })
     } finally {
       user.value = null
+      isAdmin.value = false
       ready.value = true
     }
   }
 
   return {
     user,
+    isAdmin,
     ready,
     refreshSession,
     ensureSession,

@@ -135,16 +135,18 @@
               v-for="achievement in playerAchievements"
               :key="achievement.id"
               type="button"
-              class="player__league-achievement"
+              class="mini-ach"
+              :class="`mini-ach--rarity-${getAchievementRarityClass(achievement.id)}`"
               @mouseenter="onAchievementEnter(achievement.id, $event)"
               @mousemove="onAchievementMove($event)"
               @mouseleave="onAchievementLeave"
             >
-              <span class="player__league-achievement-icon">{{ achievement.icon }}</span>
-              <span class="player__league-achievement-name">{{ achievement.name }}</span>
-              <span class="player__league-achievement-meta">
-                +{{ achievement.points }} pts<span v-if="achievement.count > 1"> · x{{ achievement.count }}</span>
-              </span>
+              <span class="mini-ach__icon">{{ achievement.icon }}</span>
+              <span class="mini-ach__name">{{ achievement.name }}</span>
+              <div class="mini-ach__footer">
+                <span class="mini-ach__pts">+{{ fmtAchPts(achievement.points) }} pts</span>
+                <span v-if="achievement.count > 1" class="mini-ach__count">×{{ achievement.count }}</span>
+              </div>
             </button>
           </div>
         </div>
@@ -201,7 +203,13 @@
                 />
                 <div v-else class="cmd-row__card-placeholder" />
               </div>
-              <div class="cmd-row__card-xp">
+              <div
+                class="cmd-row__card-xp"
+                :class="{
+                  'cmd-row__card-xp--near-levelup': !cmd.isMaxLevel && cmd.levelPct >= 80,
+                  'cmd-row__card-xp--max-level': cmd.isMaxLevel,
+                }"
+              >
                 <div class="cmd-row__level-row">
                   <span class="cmd-row__level-label">Lv {{ cmd.level }}</span>
                   <div class="cmd-row__bar-wrap">
@@ -259,9 +267,26 @@
                     <span class="cmd-row__stat-val cmd-row__stat-val--secondary">{{ fmt(cmd.avgPoints) }}</span>
                     <span class="cmd-row__stat-lbl">Avg Pts</span>
                   </div>
-                  <div class="cmd-row__stat">
-                    <span class="cmd-row__stat-val cmd-row__stat-val--accent">{{ fmt(cmd.bestGame) }}</span>
-                    <span class="cmd-row__stat-lbl">Best</span>
+                  <div
+                    class="cmd-row__stat"
+                    :class="{
+                      'cmd-row__stat--positive': cmd.edgeScore > 0,
+                      'cmd-row__stat--negative': cmd.edgeScore < 0,
+                    }"
+                    @mouseenter="onEdgeEnter(cmd, $event)"
+                    @mousemove="onEdgeMove($event)"
+                    @mouseleave="onEdgeLeave"
+                  >
+                    <span
+                      class="cmd-row__stat-val"
+                      :class="{
+                        'cmd-row__stat-val--positive': cmd.edgeScore > 0,
+                        'cmd-row__stat-val--negative': cmd.edgeScore < 0,
+                      }"
+                    >
+                      {{ formatSignedPercent(cmd.edgeScore) }}
+                    </span>
+                    <span class="cmd-row__stat-lbl">Edge</span>
                   </div>
                   <div class="cmd-row__stat cmd-row__stat--place cmd-row__stat--gold">
                     <span class="cmd-row__stat-val">{{ cmd.first }}</span>
@@ -291,14 +316,17 @@
                   v-for="ach in cmd.achievements"
                   :key="ach.id"
                   type="button"
-                  class="cmd-row__ach"
+                  class="mini-ach"
+                  :class="`mini-ach--rarity-${getAchievementRarityClass(ach.id)}`"
                   @mouseenter="onAchievementEnter(ach.id, $event)"
                   @mousemove="onAchievementMove($event)"
                   @mouseleave="onAchievementLeave"
                 >
-                  <span class="cmd-row__ach-icon">{{ ach.icon }}</span>
-                  <span class="cmd-row__ach-name">{{ ach.name }}</span>
-                  <span class="cmd-row__ach-pts">+{{ ach.points }}</span>
+                  <span class="mini-ach__icon">{{ ach.icon }}</span>
+                  <span class="mini-ach__name">{{ ach.name }}</span>
+                  <div class="mini-ach__footer">
+                    <span class="mini-ach__pts">+{{ fmtAchPts(ach.points) }} pts</span>
+                  </div>
                 </button>
               </div>
 
@@ -376,10 +404,28 @@
       </div>
     </div>
   </Teleport>
+
+  <Teleport to="body">
+    <div
+      v-if="edgePreview.visible && edgePreview.commander"
+      class="floating-panel"
+      :style="{ top: `${edgePreview.y}px`, left: `${edgePreview.x}px` }"
+    >
+      <div class="dependency-tooltip">
+        <div class="dependency-tooltip__title">Commander Edge</div>
+        <p class="dependency-tooltip__line">
+          {{ getEdgeTooltipText(edgePreview.commander) }}
+        </p>
+        <p class="dependency-tooltip__line dependency-tooltip__line--muted">
+          Positive = better than this player's usual pool. Negative = worse.
+        </p>
+      </div>
+    </div>
+  </Teleport>
 </template>
 
 <script setup lang="ts">
-import { compareGamesChronological, getLeagueStandingMetrics, getPlayerCommanderMetrics } from '~/composables/useLeagueState'
+import { compareGamesChronological, getLeagueStandingMetrics, getPlayerCommanderPerformanceEdgeMetrics, getPlayerCommanderMetrics } from '~/composables/useLeagueState'
 import { xpToLevel, getCommanderLevelProgress } from '~/utils/commanderExperience'
 import { buildCommanderPlacementTimeline, type PlacementTimelinePoint } from '~/utils/commanderTimeline'
 import { buildPlayerLeagueTimeline } from '~/utils/playerLeagueTimeline'
@@ -482,7 +528,6 @@ interface CommanderRow {
   winRate: number
   avgPoints: number
   avgPlacement: number
-  bestGame: number
   tierDetail: TierDetail | null
   tierContext: TierContext
   projectedTierDetail: TierDetail | null
@@ -494,6 +539,18 @@ interface CommanderRow {
   xpToNext: number
   isMaxLevel: boolean
   xpScorePts: number
+  edgeScore: number
+  edgeWithGames: number
+  edgeWithoutGames: number
+  edgeWithAvg: number
+  edgeWithoutAvg: number
+  edgeConfidence: number
+  edgeRaw: number
+  edgePickRate: number
+  edgeImportanceScore: number
+  edgeLowCommanderSample: boolean
+  edgeLowPoolSample: boolean
+  edgeReliable: boolean
   timeline: PlacementTimelinePoint[]
   title: CommanderTitleResult
   achievements: Array<{ id: string; name: string; description: string; icon: string; points: number }>
@@ -528,6 +585,7 @@ const commanderRows = computed((): CommanderRow[] => {
   return Object.entries(byCommander).map(([name, records]) => {
     const metrics = getPlayerCommanderMetrics(playerId.value, name, gameRecords.value, players.value)
     if (!metrics) return null
+    const edgeMetrics = getPlayerCommanderPerformanceEdgeMetrics(playerId.value, name, gameRecords.value)
 
     const { detail: tierDetail, context: tierContext } = computePlayerCommanderTier(records, globalAvgScore)
 
@@ -585,7 +643,6 @@ const commanderRows = computed((): CommanderRow[] => {
       winRate: metrics.winRate,
       avgPoints: metrics.avgBasePoints,
       avgPlacement: metrics.avgPlacement,
-      bestGame: metrics.bestGame,
       tierDetail,
       tierContext,
       projectedTierDetail,
@@ -597,6 +654,18 @@ const commanderRows = computed((): CommanderRow[] => {
       xpToNext,
       isMaxLevel,
       xpScorePts,
+      edgeScore: edgeMetrics?.weightedEdge ?? 0,
+      edgeWithGames: edgeMetrics?.withGames ?? 0,
+      edgeWithoutGames: edgeMetrics?.withoutGames ?? 0,
+      edgeWithAvg: edgeMetrics?.withAvg ?? 0,
+      edgeWithoutAvg: edgeMetrics?.withoutAvg ?? 0,
+      edgeConfidence: edgeMetrics?.confidence ?? 0,
+      edgeRaw: edgeMetrics?.rawEdge ?? 0,
+      edgePickRate: edgeMetrics?.pickRate ?? 0,
+      edgeImportanceScore: edgeMetrics?.importanceScore ?? 0,
+      edgeLowCommanderSample: edgeMetrics?.hasLowCommanderSample ?? true,
+      edgeLowPoolSample: edgeMetrics?.hasLowPoolSample ?? true,
+      edgeReliable: edgeMetrics?.isReliable ?? false,
       timeline,
       title,
       achievements,
@@ -671,6 +740,17 @@ const placementPickPreview = reactive<{
 }>({
   visible: false,
   suggestion: null,
+  x: 0,
+  y: 0,
+})
+const edgePreview = reactive<{
+  visible: boolean
+  commander: CommanderRow | null
+  x: number
+  y: number
+}>({
+  visible: false,
+  commander: null,
   x: 0,
   y: 0,
 })
@@ -780,6 +860,26 @@ function onPlacementPickLeave() {
   placementPickPreview.suggestion = null
 }
 
+function onEdgeEnter(commander: CommanderRow, e: MouseEvent) {
+  edgePreview.visible = true
+  edgePreview.commander = commander
+  const pos = calcPreviewPosition(e, 340, 230)
+  edgePreview.x = pos.x
+  edgePreview.y = pos.y
+}
+
+function onEdgeMove(e: MouseEvent) {
+  if (!edgePreview.visible) return
+  const pos = calcPreviewPosition(e, 340, 230)
+  edgePreview.x = pos.x
+  edgePreview.y = pos.y
+}
+
+function onEdgeLeave() {
+  edgePreview.visible = false
+  edgePreview.commander = null
+}
+
 // ── Sort ──────────────────────────────────────────────────────────────────────
 
 const sortOptions = [
@@ -839,6 +939,39 @@ function getCommanderIndicatorTitle(cmd: CommanderRow) {
   const pct = Math.round(Math.abs(indicator.deltaRatio) * 100)
   const relation = indicator.direction === 'up' ? 'above' : 'below'
   return `${pct}% ${relation} ${indicator.metricLabel}`
+}
+
+function formatSignedPercent(value: number) {
+  const rounded = Math.round(value * 1000) / 10
+  const prefix = rounded > 0 ? '+' : ''
+  const absRounded = Math.abs(rounded)
+  const display = absRounded % 1 === 0 ? String(absRounded) : absRounded.toFixed(1).replace(/\.0$/, '')
+  return `${prefix}${rounded < 0 ? '-' : ''}${display}%`
+}
+
+function getAchievementRarityClass(id: string): string {
+  const def = ACHIEVEMENTS[id]
+  if (!def) return 'common'
+  if (def.points >= 3) return 'mythic'
+  if (def.points >= 2 || !def.repeatable) return 'rare'
+  if (def.points >= 1) return 'uncommon'
+  return 'common'
+}
+
+function fmtAchPts(value: number): string {
+  return value % 1 === 0 ? String(value) : value.toFixed(2).replace(/\.?0+$/, '')
+}
+
+function getEdgeTooltipText(cmd: CommanderRow) {
+  if (!cmd.edgeReliable) {
+    return `Not reliable yet: only ${cmd.edgeWithoutGames} games outside ${cmd.name}.`
+  }
+
+  if (cmd.edgeLowCommanderSample) {
+    return `${formatSignedPercent(cmd.edgeScore)} weighted edge. Low sample: ${cmd.edgeWithGames} games with ${cmd.name}.`
+  }
+
+  return `${formatSignedPercent(cmd.edgeScore)} weighted edge vs this player's other commanders.`
 }
 </script>
 
@@ -1160,47 +1293,9 @@ function getCommanderIndicatorTitle(cmd: CommanderRow) {
 
   &__league-achievements-list {
     display: grid;
-    grid-template-columns: repeat(4, minmax(0, 1fr));
+    grid-template-columns: repeat(auto-fill, minmax(92px, 1fr));
     gap: $spacing-2;
     align-content: start;
-  }
-
-  &__league-achievement {
-    appearance: none;
-    display: flex;
-    flex-direction: column;
-    align-items: flex-start;
-    gap: 3px;
-    min-width: 0;
-    text-align: left;
-    padding: 7px 8px;
-    background:rgba(16,16,16,0.15);
-    border: 1px solid rgba($border-color, 0.72);
-    border-radius: $border-radius-sm;
-    cursor: default;
-    transition: border-color $transition-fast, background $transition-fast;
-
-    &:hover {
-      border-color: rgba($color-accent, 0.35);
-      background: rgba($color-bg-elevated, 1);
-    }
-  }
-
-  &__league-achievement-icon {
-    font-size: 12px;
-    line-height: 1;
-  }
-
-  &__league-achievement-name {
-    font-size: 10px;
-    color: $color-text;
-    line-height: 1.2;
-  }
-
-  &__league-achievement-meta {
-    font-size: 9px;
-    color: $color-accent;
-    line-height: 1.2;
   }
 
   &__section-header {
@@ -1278,25 +1373,26 @@ function getCommanderIndicatorTitle(cmd: CommanderRow) {
 
   &__card-wrap {
     flex-shrink: 0;
-    width: 220px;
+    width: 234px;
     display: flex;
     flex-direction: column;
     padding: $spacing-3 0 $spacing-3 $spacing-3;
-    gap: $spacing-2;
+    gap: 0;
+    filter: drop-shadow(0 10px 28px rgba(0, 0, 0, 0.72));
   }
 
   &__card {
     position: relative;
-    border-radius: $border-radius-md;
+    border-radius: $border-radius-md $border-radius-md 0 0;
     overflow: hidden;
-    box-shadow: $shadow-md;
     flex-shrink: 0;
+    flex-grow: 1;
     cursor: zoom-in;
   }
 
   &__card-img {
     width: 100%;
-    height: 170px;
+    height: 100%;
     object-fit: cover;
     object-position: center top;
     display: block;
@@ -1304,9 +1400,9 @@ function getCommanderIndicatorTitle(cmd: CommanderRow) {
 
   &__card-placeholder {
     width: 100%;
-    height: 170px;
+    height: 192px;
     background: $color-bg-elevated;
-    border-radius: $border-radius-md;
+    border-radius: $border-radius-md $border-radius-md 0 0;
   }
 
   &__indicator {
@@ -1341,7 +1437,48 @@ function getCommanderIndicatorTitle(cmd: CommanderRow) {
   &__card-xp {
     display: flex;
     flex-direction: column;
-    gap: 3px;
+    gap: 2px;
+    background: rgba(0, 0, 0, 0.25);
+    border-radius:0 0 $border-radius-md $border-radius-md;
+    border: none;
+
+    &--near-levelup {
+      .cmd-row__level-label {
+        color: #f5c842;
+        text-shadow: 0 0 10px rgba(245, 200, 66, 0.65);
+      }
+
+      .cmd-row__level-next {
+        color: #f5c842;
+        animation: xp-pulse-text 1.6s ease-in-out infinite;
+      }
+
+      .cmd-row__bar-fill {
+        box-shadow:
+          0 0 12px rgba(255, 100, 0, 0.9),
+          0 0 28px rgba(230, 60, 0, 0.55);
+        animation: xp-pulse-bar 1.6s ease-in-out infinite;
+      }
+    }
+
+    &--max-level {
+      .cmd-row__level-label {
+        color: #ffd966;
+        text-shadow: 0 0 12px rgba(255, 217, 102, 0.75);
+      }
+
+      .cmd-row__level-next {
+        color: #ffd966;
+        font-weight: $font-weight-semibold;
+        letter-spacing: 0.06em;
+      }
+
+      .cmd-row__bar-fill {
+        box-shadow:
+          0 0 14px rgba(255, 120, 0, 0.95),
+          0 0 32px rgba(240, 70, 0, 0.6);
+      }
+    }
   }
 
   // ── Body ─────────────────────────────────────────────────────────────────
@@ -1474,6 +1611,14 @@ function getCommanderIndicatorTitle(cmd: CommanderRow) {
     &--place { min-width: 44px; }
     &--gold  .cmd-row__stat-val { color: $color-accent; }
     &--danger .cmd-row__stat-val { color: $color-danger; }
+    &--positive {
+      border-color: rgba(44, 156, 106, 0.35);
+      background: rgba(44, 156, 106, 0.1);
+    }
+    &--negative {
+      border-color: rgba(176, 72, 72, 0.35);
+      background: rgba(176, 72, 72, 0.1);
+    }
   }
 
   &__stat-val {
@@ -1485,6 +1630,8 @@ function getCommanderIndicatorTitle(cmd: CommanderRow) {
 
     &--secondary { color: $color-secondary; }
     &--accent    { color: $color-primary-light; }
+    &--positive  { color: #72d6a2; }
+    &--negative  { color: #f18a8a; }
   }
 
   &__stat-lbl {
@@ -1507,7 +1654,7 @@ function getCommanderIndicatorTitle(cmd: CommanderRow) {
     display: flex;
     align-items: center;
     gap: $spacing-2;
-    flex-wrap: wrap;
+    padding: $spacing-1 $spacing-3;
   }
 
   &__level-label,
@@ -1522,8 +1669,8 @@ function getCommanderIndicatorTitle(cmd: CommanderRow) {
 
   &__bar-wrap {
     flex: 1;
-    height: 5px;
-    background: $color-bg-elevated;
+    height: 6px;
+    background: rgba(16,16,16,0.55);
     border-radius: $border-radius-full;
     overflow: hidden;
     flex-shrink: 0;
@@ -1531,7 +1678,7 @@ function getCommanderIndicatorTitle(cmd: CommanderRow) {
 
   &__bar-fill {
     height: 100%;
-    background: linear-gradient(90deg, $color-xp-start, $color-xp-end);
+    background: linear-gradient(90deg, #e84800 0%, #ff7a00 55%, #ffb830 100%);
     border-radius: $border-radius-full;
     transition: width $transition-slow;
   }
@@ -1541,6 +1688,7 @@ function getCommanderIndicatorTitle(cmd: CommanderRow) {
     align-items: baseline;
     gap: 4px;
     flex-wrap: wrap;
+    padding: 0 $spacing-3 $spacing-2;
   }
 
   &__xp-current {
@@ -1574,42 +1722,113 @@ function getCommanderIndicatorTitle(cmd: CommanderRow) {
     flex: 0 0 400px;
     margin-left: auto;
   }
+}
 
-  &__ach {
-    appearance: none;
-    display: inline-flex;
-    align-items: center;
-    gap: 5px;
-    background: rgba($color-accent, 0.08);
-    border: 1px solid rgba($color-accent, 0.2);
-    border-radius: $border-radius-full;
-    padding: 2px $spacing-2;
-    cursor: default;
-    color: inherit;
-    font: inherit;
-    text-align: left;
-    transition: border-color $transition-fast, background $transition-fast;
+// ── Mini achievement card ─────────────────────────────────────────────────────
 
-    &:hover {
-      background: rgba($color-accent, 0.12);
-      border-color: rgba($color-accent, 0.34);
-    }
+.mini-ach {
+  appearance: none;
+  position: relative;
+  display: flex;
+  flex-direction: column;
+  gap: 3px;
+  padding: calc(#{$spacing-2} + 2px) $spacing-2 $spacing-2;
+  border-radius: 10px;
+  overflow: hidden;
+  border: 1px solid rgba(255, 255, 255, 0.08);
+  background: linear-gradient(180deg, rgba(13, 16, 23, 0.97), rgba(10, 12, 18, 0.97));
+  cursor: default;
+  color: inherit;
+  font: inherit;
+  text-align: left;
+  transition: border-color 160ms ease, box-shadow 160ms ease;
+
+  --rarity-stripe: rgba(200, 195, 185, 0.25);
+
+  &::before {
+    content: '';
+    position: absolute;
+    top: 0;
+    left: 0;
+    right: 0;
+    height: 2px;
+    background: var(--rarity-stripe);
+    z-index: 2;
+    pointer-events: none;
   }
 
-  &__ach-icon {
-    font-size: 11px;
+  &__icon {
+    font-size: 16px;
     line-height: 1;
   }
 
-  &__ach-name {
-    font-size: $font-size-xs;
-    color: $color-text-muted;
+  &__name {
+    font-size: 11px;
+    color: $color-text;
+    line-height: 1.25;
   }
 
-  &__ach-pts {
-    font-size: $font-size-xs;
+  &__footer {
+    display: flex;
+    align-items: center;
+    gap: 4px;
+    margin-top: 1px;
+  }
+
+  &__pts {
+    font-size: 10px;
     color: $color-accent;
     font-weight: $font-weight-semibold;
+    line-height: 1;
+  }
+
+  &__count {
+    font-size: 10px;
+    color: rgba($color-text-muted, 0.75);
+    line-height: 1;
+  }
+
+  // ── Rarity tiers ────────────────────────────────────────────────────────
+
+  &--rarity-common {
+    --rarity-stripe: #9e9070;
+    border-color: rgba(158, 144, 112, 0.2);
+    background: linear-gradient(180deg, rgba(18, 16, 12, 0.97), rgba(12, 11, 10, 0.97));
+
+    &:hover { border-color: rgba(158, 144, 112, 0.38); }
+    .mini-ach__name { color: #c8b898; }
+  }
+
+  &--rarity-uncommon {
+    --rarity-stripe: #52c8a8;
+    border-color: rgba(82, 200, 168, 0.26);
+    background: linear-gradient(155deg, rgba(0, 30, 26, 0.18) 0%, transparent 60%),
+      linear-gradient(180deg, rgba(10, 15, 15, 0.97), rgba(9, 12, 12, 0.97));
+
+    &:hover { border-color: rgba(82, 200, 168, 0.44); box-shadow: 0 6px 14px rgba(0, 0, 0, 0.3), 0 0 10px rgba(82, 200, 168, 0.12); }
+    .mini-ach__name { color: rgba($color-text, 0.95); }
+  }
+
+  &--rarity-rare {
+    --rarity-stripe: #9b6ee8;
+    border-color: rgba(155, 110, 232, 0.32);
+    background: linear-gradient(155deg, rgba(30, 10, 55, 0.22) 0%, transparent 60%),
+      linear-gradient(180deg, rgba(12, 9, 20, 0.97), rgba(10, 8, 17, 0.97));
+
+    &:hover { border-color: rgba(155, 110, 232, 0.52); box-shadow: 0 6px 14px rgba(0, 0, 0, 0.3), 0 0 12px rgba(155, 110, 232, 0.18); }
+    .mini-ach__name { font-family: $font-family-display; font-size: 10px; }
+  }
+
+  &--rarity-mythic {
+    --rarity-stripe: #ff9030;
+    border-color: rgba(255, 148, 50, 0.4);
+    background: linear-gradient(150deg, rgba(55, 18, 0, 0.2) 0%, transparent 60%),
+      linear-gradient(180deg, rgba(15, 10, 7, 0.97), rgba(10, 8, 6, 0.97));
+
+    &::before { background: linear-gradient(90deg, #d04010, #ffb830, #ffe870, #ffb830, #d04010); }
+    &:hover { border-color: rgba(255, 148, 50, 0.6); box-shadow: 0 6px 14px rgba(0, 0, 0, 0.3), 0 0 14px rgba(255, 130, 40, 0.22); }
+    .mini-ach__name { font-family: $font-family-display; font-size: 10px; color: #fff0d8; }
+    .mini-ach__pts { color: #ffb840; }
   }
 }
 
@@ -1723,5 +1942,60 @@ function getCommanderIndicatorTitle(cmd: CommanderRow) {
     line-height: 1.45;
     color: rgba($color-text, 0.9);
   }
+}
+
+.dependency-tooltip {
+  width: min(340px, calc(100vw - 2rem));
+  padding: 12px 14px;
+  border-radius: 12px;
+  border: 1px solid rgba(123, 211, 255, 0.2);
+  background:
+    linear-gradient(180deg, rgba(10, 17, 24, 0.96), rgba(7, 11, 17, 0.98));
+  box-shadow: 0 18px 48px rgba(0, 0, 0, 0.4);
+  color: $color-text;
+
+  &__title {
+    margin-bottom: 8px;
+    font-size: 11px;
+    font-weight: $font-weight-semibold;
+    letter-spacing: 0.08em;
+    text-transform: uppercase;
+    color: rgba($color-primary-light, 0.85);
+  }
+
+  &__line {
+    margin: 0;
+    font-size: 12px;
+    line-height: 1.45;
+    color: rgba($color-text, 0.92);
+
+    & + & {
+      margin-top: 6px;
+    }
+
+    &--muted {
+      color: $color-text-muted;
+    }
+  }
+}
+
+@keyframes xp-pulse-bar {
+  0%, 100% {
+    box-shadow:
+      0 0 12px rgba(255, 100, 0, 0.9),
+      0 0 28px rgba(230, 60, 0, 0.55),
+      0 0 3px rgba(255, 160, 30, 0.5) inset;
+  }
+  50% {
+    box-shadow:
+      0 0 20px rgba(255, 130, 0, 1),
+      0 0 44px rgba(240, 70, 0, 0.8),
+      0 0 5px rgba(255, 200, 60, 0.6) inset;
+  }
+}
+
+@keyframes xp-pulse-text {
+  0%, 100% { opacity: 1; }
+  50%       { opacity: 0.6; }
 }
 </style>

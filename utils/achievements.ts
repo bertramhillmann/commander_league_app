@@ -298,7 +298,7 @@ export const ACHIEVEMENTS: Record<string, AchievementDef> = {
     id: 'forgotten_friend',
     name: 'Forgotten Friend',
     description: 'Replay a commander after not using it for 10+ of your own games',
-    icon: 'ðŸ¤',
+    icon: '😞',
     points: 1,
     repeatable: true,
     scope: 'commander',

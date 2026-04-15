@@ -14,6 +14,14 @@
 
     <div class="top-menu__auth">
       <span v-if="user" class="top-menu__user">{{ user }}</span>
+      <NuxtLink
+        v-if="isAdmin"
+        to="/admin/createGame"
+        class="top-menu__link"
+        :class="{ 'top-menu__link--active': route.path === '/admin/createGame' }"
+      >
+        Create Game
+      </NuxtLink>
       <button type="button" class="top-menu__logout" @click="signOut">Logout</button>
     </div>
   </nav>
@@ -21,7 +29,7 @@
 
 <script setup lang="ts">
 const route = useRoute()
-const { user, logout } = useAuth()
+const { user, isAdmin, logout } = useAuth()
 
 const items = [
   { label: 'Dashboard', to: '/dashboard', match: ['/dashboard'] },

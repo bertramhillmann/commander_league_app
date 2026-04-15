@@ -22,10 +22,10 @@
 
     <div class="cmd-meta__divider" />
 
-    <div class="cmd-meta__title-copy">
+    <!--<div class="cmd-meta__title-copy">
       <div class="cmd-meta__title-description">{{ commanderTitle.description }}</div>
       <div class="cmd-meta__title-reason">{{ commanderTitle.reason }}</div>
-    </div>
+    </div>-->
 
     <div class="cmd-meta__divider" />
 
@@ -179,7 +179,8 @@ const winRatePct = computed(() =>
 <style lang="scss" scoped>
 .cmd-meta {
   width: 240px;
-  background: $color-bg-elevated;
+  background: rgba($color-bg-elevated,0.85);
+  backdrop-filter:blur(3px);
   border: 1px solid $border-color;
   border-radius: $border-radius-lg;
   overflow: hidden;
@@ -328,7 +329,9 @@ const winRatePct = computed(() =>
     display: flex;
     align-items: baseline;
     gap: 5px;
-    padding: 0 $spacing-3 $spacing-2;
+    background:rgba(0,0,0,0.5);
+    border-top:$color-bg-elevated;
+    padding: $spacing-2 $spacing-3;
   }
 
   &__winrate-val {

@@ -127,6 +127,21 @@ export interface PlayerCommanderMetrics {
   xpPoints: number
 }
 
+export interface PlayerCommanderPerformanceEdgeMetrics {
+  withGames: number
+  withoutGames: number
+  withAvg: number
+  withoutAvg: number
+  rawEdge: number
+  weightedEdge: number
+  confidence: number
+  pickRate: number
+  importanceScore: number
+  hasLowCommanderSample: boolean
+  hasLowPoolSample: boolean
+  isReliable: boolean
+}
+
 function createEmptyPlayerState(name: string): PlayerState {
   return {
     name,
@@ -289,6 +304,129 @@ export function getPlayerCommanderMetrics(
   }
 }
 
+/**
+ * Converts a placement into a normalized score so 3-, 4-, and 5-player games
+ * can be compared on the same 0..1 scale.
+ */
+/**
+ * Converts a finishing placement into a normalized 0..1 score so games with
+ * different player counts can be compared on the same scale.
+ */
+function getNormalizedPlacementScore(placement: number, playerCount: number) {
+  if (playerCount <= 1) return 0
+  return (playerCount - placement) / (playerCount - 1)
+}
+
+/**
+ * Computes the average normalized placement score for a set of records.
+ */
+function getAverageNormalizedPlacement(records: PlayerGameRecord[]) {
+  if (records.length === 0) return 0
+
+  const total = records.reduce(
+    (sum, record) => sum + getNormalizedPlacementScore(record.placement, record.playerCount),
+    0,
+  )
+
+  return total / records.length
+}
+
+/**
+ * Shrinks a sample toward neutral as long as the sample is still small.
+ */
+function getSampleConfidence(sampleSize: number, k = 8) {
+  if (sampleSize <= 0) return 0
+  return sampleSize / (sampleSize + k)
+}
+
+/**
+ * Combines weighted edge and pick rate into a simple importance score.
+ */
+function getCommanderImportanceScore(weightedEdge: number, pickRate: number) {
+  return weightedEdge * (0.5 + 0.5 * pickRate)
+}
+
+/**
+ * Rounds commander edge metrics only at the public return boundary.
+ */
+function roundCommanderEdgeMetrics(metrics: {
+  withGames: number
+  withoutGames: number
+  withAvg: number
+  withoutAvg: number
+  rawEdge: number
+  weightedEdge: number
+  confidence: number
+  pickRate: number
+  importanceScore: number
+  hasLowCommanderSample: boolean
+  hasLowPoolSample: boolean
+  isReliable: boolean
+}): PlayerCommanderPerformanceEdgeMetrics {
+  return {
+    withGames: metrics.withGames,
+    withoutGames: metrics.withoutGames,
+    withAvg: round3(metrics.withAvg),
+    withoutAvg: round3(metrics.withoutAvg),
+    rawEdge: round3(metrics.rawEdge),
+    weightedEdge: round3(metrics.weightedEdge),
+    confidence: round3(metrics.confidence),
+    pickRate: round3(metrics.pickRate),
+    importanceScore: round3(metrics.importanceScore),
+    hasLowCommanderSample: metrics.hasLowCommanderSample,
+    hasLowPoolSample: metrics.hasLowPoolSample,
+    isReliable: metrics.isReliable,
+  }
+}
+
+/**
+ * Calculates a player's commander edge versus the rest of their commander
+ * pool using normalized placement and two-sided confidence shrinkage.
+ */
+export function getPlayerCommanderPerformanceEdgeMetrics(
+  playerName: string,
+  commanderName: string,
+  gameRecords: Record<string, Record<string, PlayerGameRecord>>,
+): PlayerCommanderPerformanceEdgeMetrics | null {
+  const allRecords = Object.values(gameRecords[playerName] ?? {})
+  if (allRecords.length === 0) return null
+
+  const withRecords = allRecords.filter((record) => record.commander === commanderName)
+  const withoutRecords = allRecords.filter((record) => record.commander !== commanderName)
+  if (withRecords.length === 0) return null
+
+  const withGames = withRecords.length
+  const withoutGames = withoutRecords.length
+  const totalGames = allRecords.length
+  const withAvg = getAverageNormalizedPlacement(withRecords)
+  const withoutAvg = getAverageNormalizedPlacement(withoutRecords)
+  const rawEdge = withAvg - withoutAvg
+  const commanderConfidence = getSampleConfidence(withGames)
+  const poolConfidence = getSampleConfidence(withoutGames)
+  const confidence = Math.sqrt(commanderConfidence * poolConfidence)
+  const weightedEdge = rawEdge * confidence
+  const pickRate = totalGames > 0 ? withGames / totalGames : 0
+  const importanceScore = getCommanderImportanceScore(weightedEdge, pickRate)
+  const hasLowCommanderSample = withGames < 5
+  const hasLowPoolSample = withoutGames < 5
+  const isReliable = !hasLowPoolSample
+
+  return roundCommanderEdgeMetrics({
+    withGames,
+    withoutGames,
+    withAvg,
+    withoutAvg,
+    rawEdge,
+    weightedEdge,
+    confidence,
+    pickRate,
+    importanceScore,
+    hasLowCommanderSample,
+    hasLowPoolSample,
+    isReliable,
+  })
+}
+
 // ─── Shared state ─────────────────────────────────────────────────────────────
 
 const useGamesState = () => useState<ProcessedGame[]>('league:games', () => [])
@@ -312,8 +450,8 @@ export function useLeagueState() {
   const loading = ref(false)
   const error = ref<string | null>(null)
 
-  async function init() {
-    if (loaded.value) return
+  async function init(force = false) {
+    if (loaded.value && !force) return
 
     loading.value = true
     error.value = null
@@ -381,6 +519,8 @@ export function useLeagueState() {
         grinderDone: boolean
       }
       const playerWeeks: Record<string, Record<string, WeekData>> = {}
+      // Repeatable achievements already earned by this player in a given week
+      const playerWeeklyRepeatables: Record<string, Record<string, Set<string>>> = {}
       // Absolute week (year*53+isoWeek) of each player's last game
       const playerLastAbsWeek: Record<string, number> = {}
 
@@ -499,10 +639,14 @@ export function useLeagueState() {
 
           if (!playerOneTime[p.name])   playerOneTime[p.name] = new Set()
           if (!playerWeeks[p.name])     playerWeeks[p.name] = {}
+          if (!playerWeeklyRepeatables[p.name]) playerWeeklyRepeatables[p.name] = {}
           if (!playerOwnGameIdx[p.name])  playerOwnGameIdx[p.name] = 0
           if (!playerCommanderLastOwnIdx[p.name]) playerCommanderLastOwnIdx[p.name] = {}
           if (!playerCommanderLastPlaceStreak[p.name]) playerCommanderLastPlaceStreak[p.name] = {}
           if (!playerCommanderWitherData[p.name]) playerCommanderWitherData[p.name] = {}
+          if (!playerWeeklyRepeatables[p.name][weekKey]) {
+            playerWeeklyRepeatables[p.name][weekKey] = new Set()
+          }
           if (!playerWeeks[p.name][weekKey]) {
             playerWeeks[p.name][weekKey] = {
               games: 0,
@@ -516,6 +660,7 @@ export function useLeagueState() {
           }
 
           const wd = playerWeeks[p.name][weekKey]
+          const weeklyRepeatables = playerWeeklyRepeatables[p.name][weekKey]
           const gameAchievements: EarnedAchievement[] = []
           const isLastPlace = p.placement === playerCount
           const lastPlaceStreak = playerCommanderLastPlaceStreak[p.name][p.commander] ?? 0
@@ -523,12 +668,16 @@ export function useLeagueState() {
 
           const earn = (id: string, commander?: string) => {
             const def = ACHIEVEMENTS[id]
+            if (def.repeatable && weeklyRepeatables.has(id)) return
+
             const entry: EarnedAchievement = { id, gameId: game.gameId, commander }
             gameAchievements.push(entry)
             playerMap[p.name].earnedAchievements.push(entry)
             playerMap[p.name].achievementPoints = round3(
               playerMap[p.name].achievementPoints + def.points,
             )
+
+            if (def.repeatable) weeklyRepeatables.add(id)
           }
 
           // Cold Trail: 5 last-place finishes in a row with this commander
@@ -961,7 +1110,11 @@ export function useLeagueState() {
 
   const standings = computed(() => buildLeagueStandings(players.value))
 
-  return { games, players, commanders, gameRecords, leagueSnapshots, standings, loaded, loading, error, init }
+  async function refresh() {
+    await init(true)
+  }
+
+  return { games, players, commanders, gameRecords, leagueSnapshots, standings, loaded, loading, error, init, refresh }
 }
 
 function round3(n: number): number {

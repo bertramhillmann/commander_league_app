@@ -36,21 +36,21 @@ export interface PlacementRating {
 export const BASE_RATINGS: Record<number, PlacementRating[]> = {
   3: [
     { points: 1,    lPoints: 0 }, // 1st
-    { points: 0.5, lPoints: 2 }, // 2nd
-    { points: 0,    lPoints: 3 }, // 3rd
+    { points: 0.5, lPoints: 0.5 }, // 2nd
+    { points: 0,    lPoints: 1 }, // 3rd
   ],
   4: [
-    { points: 1, lPoints: 0 }, // 1st
-    { points: 0.66, lPoints: 2 }, // 2nd
-    { points: 0.33, lPoints: 3 }, // 3rd
-    { points: 0,    lPoints: 4 }, // 4th
+    { points: 1.2, lPoints: 0 }, // 1st
+    { points: 0.8, lPoints: 0.4 }, // 2nd
+    { points: 0.4, lPoints: 0.8 }, // 3rd
+    { points: 0,    lPoints: 1.2 }, // 4th
   ],
   5: [
-    { points: 1, lPoints: 0 }, // 1st
-    { points: 0.75,  lPoints: 2 }, // 2nd
-    { points: 0.5, lPoints: 3 }, // 3rd
-    { points: 0.25, lPoints: 4 }, // 4th
-    { points: 0,    lPoints: 5 }, // 5th
+    { points: 1.1, lPoints: 0 }, // 1st
+    { points: 0.825,  lPoints: 0.275 }, // 2nd
+    { points: 0.55, lPoints: 0.55 }, // 3rd
+    { points: 0.275, lPoints: 0.825 }, // 4th
+    { points: 0,    lPoints: 1.1 }, // 5th
   ],
 }
 

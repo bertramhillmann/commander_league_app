@@ -117,6 +117,21 @@ function cleanupExpiredSessions() {
   }
 }
 
+export function parseAdmins(raw: string | undefined): string[] {
+  if (!raw) return []
+  const bodyMatch = raw.match(/\[(.*)\]/s)
+  const body = bodyMatch?.[1] ?? raw
+  return body
+    .split(/[,\s\r\n]+/)
+    .map((s) => s.trim().toLowerCase())
+    .filter(Boolean)
+}
+
+export function isAdminUser(raw: string | undefined, username: string): boolean {
+  const admins = parseAdmins(raw)
+  return admins.includes(username.trim().toLowerCase())
+}
+
 function capitalizePlayerName(name: string) {
   const trimmed = name.trim()
   if (!trimmed) return trimmed

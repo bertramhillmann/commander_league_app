@@ -8,7 +8,8 @@
       "Bash(npm install:*)",
       "Bash(npx nuxt:*)",
       "Bash(npx nuxi:*)",
-      "Bash(node -e ':*)"
+      "Bash(node -e ':*)",
+      "Bash(python3 -c ':*)"
     ]
   }
 }

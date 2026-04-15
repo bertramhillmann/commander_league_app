@@ -44,7 +44,7 @@
           v-for="player in sortedPlayers"
           :key="player.name"
           class="game-card__player"
-          :class="`game-card__player--place-${player.placement}`"
+          :class="[`game-card__player--place-${player.placement}`, { 'game-card__player--highlighted': props.highlightPlayer && player.name === props.highlightPlayer }]"
         >
           <span class="game-card__placement">{{ placementLabel(player.placement) }}</span>
           <span class="game-card__name-cell">
@@ -123,7 +123,7 @@ import type { ProcessedGame, ProcessedGamePlayer } from '~/composables/useLeague
 import { TIER_META, blendScore, getTier, type Tier } from '~/utils/tiers'
 import { ACHIEVEMENTS } from '~/utils/achievements'
 
-const props = defineProps<{ game: ProcessedGame }>()
+const props = defineProps<{ game: ProcessedGame; highlightPlayer?: string | null }>()
 const { preloadCommanderImages, getCachedCommanderImage } = useImageCache()
 
 const formattedDate = computed(() =>
@@ -426,6 +426,11 @@ function rankDelta(playerName: string): number {
     &--place-1 .game-card__name {
       color: $color-accent;
       font-weight: $font-weight-semibold;
+    }
+
+    &--highlighted,
+    &--highlighted:nth-child(even) {
+      background: rgba($color-primary, 0.3);
     }
   }
 
