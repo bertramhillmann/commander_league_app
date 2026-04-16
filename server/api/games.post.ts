@@ -1,6 +1,10 @@
 import { connectToDatabase } from '../utils/mongoose'
 import { Game } from '../models/Game'
+import { Player } from '../models/Player'
+import { fetchArchidektDeck } from '../utils/archidekt'
 import { getPlayerSession, isAdminUser } from '../utils/playerAuth'
+import { formatPlayerName } from '~/utils/playerNames'
+import { normalizeDeckIdentityKey } from '~/utils/deckLinks'
 
 export default defineEventHandler(async (event) => {
   const config = useRuntimeConfig()
@@ -23,6 +27,58 @@ export default defineEventHandler(async (event) => {
 
   await connectToDatabase()
 
+  const normalizedPlayers = players.map((player) => ({
+    ...player,
+    name: formatPlayerName(player.name),
+    commander: player.commander.trim(),
+  }))
+
+  const uniquePlayerNames = [...new Set(normalizedPlayers.map((player) => player.name))]
+  const playerDocs = await Player.find({ name: { $in: uniquePlayerNames } })
+    .select('name commanderDecks')
+    .lean()
+
+  const playerDeckMap = new Map(
+    playerDocs.map((player) => [player.name, player.commanderDecks ?? []]),
+  )
+
+  const fetchedDeckCache = new Map<string, Awaited<ReturnType<typeof fetchArchidektDeck>> | null>()
+
+  const playersWithDecklists = await Promise.all(
+    normalizedPlayers.map(async (player) => {
+      const commanderKey = normalizeDeckIdentityKey(player.commander)
+      const savedDeck = (playerDeckMap.get(player.name) ?? [])
+        .find((deck) =>
+          deck.commanderNameKey === commanderKey || normalizeDeckIdentityKey(deck.commanderName) === commanderKey,
+        )
+
+      let decklist: Awaited<ReturnType<typeof fetchArchidektDeck>> | null = null
+
+      if (savedDeck?.archidektDeckId) {
+        if (fetchedDeckCache.has(savedDeck.archidektDeckId)) {
+          decklist = fetchedDeckCache.get(savedDeck.archidektDeckId) ?? null
+        } else {
+          try {
+            decklist = await fetchArchidektDeck(savedDeck.archidektDeckId)
+          } catch {
+            decklist = null
+          }
+          fetchedDeckCache.set(savedDeck.archidektDeckId, decklist)
+        }
+      }
+
+      return {
+        name: player.name,
+        commander: player.commander,
+        placement: player.placement,
+        points: null,
+        eliminations: player.eliminations ?? null,
+        commanderCasts: player.commanderCasts ?? null,
+        decklist,
+      }
+    }),
+  )
+
   // Derive next gameId by finding the highest existing numeric suffix
   const last = await Game.findOne({ gameId: /^G\d+$/ })
     .sort({ gameId: -1 })
@@ -39,14 +95,7 @@ export default defineEventHandler(async (event) => {
   const game = await Game.create({
     gameId,
     date: new Date(date),
-    players: players.map((p, i) => ({
-      name: p.name,
-      commander: p.commander,
-      placement: p.placement,
-      points: null,
-      eliminations: p.eliminations ?? null,
-      commanderCasts: p.commanderCasts ?? null,
-    })),
+    players: playersWithDecklists,
   })
 
   return { ok: true, gameId: game.gameId }

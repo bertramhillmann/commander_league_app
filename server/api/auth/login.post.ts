@@ -5,6 +5,8 @@ import {
   setPlayerSessionCookie,
   validatePlayerLogin,
 } from '~/server/utils/playerAuth'
+import { connectToDatabase } from '~/server/utils/mongoose'
+import { ensurePlayerExists } from '~/server/utils/playerData'
 
 export default defineEventHandler(async (event) => {
   const { username = '', password = '' } = await readBody<{ username?: string; password?: string }>(event)
@@ -23,6 +25,8 @@ export default defineEventHandler(async (event) => {
   }
 
   const canonicalUsername = resolvePlayerUsername(config.playerLogins, normalizedUsername)
+  await connectToDatabase()
+  await ensurePlayerExists(canonicalUsername)
   const session = createPlayerSession(canonicalUsername)
   setPlayerSessionCookie(event, session.token, session.maxAge)
 

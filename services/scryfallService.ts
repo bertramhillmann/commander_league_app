@@ -3,6 +3,8 @@ const BASE_URL = 'https://api.scryfall.com'
 export interface ScryfallCard {
   id: string
   name: string
+  cmc?: number
+  mana_cost?: string
   image_uris?: {
     small: string
     normal: string

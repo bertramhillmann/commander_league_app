@@ -2,6 +2,7 @@
   <div class="page page--dashboard">
     <h1 class="dashboard__title">Standings</h1>
 
+    <div class="standings-wrap">
     <table class="standings">
       <thead>
         <tr>
@@ -155,6 +156,7 @@
         </tr>
       </tbody>
     </table>
+    </div>
 
     <section
       v-if="featuredPlayer || loggedInArchEnemy"
@@ -196,14 +198,21 @@
           <div class="dashboard__spotlight-honorable-label">Honorable Mentions</div>
           <div class="dashboard__spotlight-honorable-list">
             <NuxtLink
-              v-for="player in honorableMentions"
+              v-for="(player, index) in honorableMentions"
               :key="player.name"
               class="dashboard__spotlight-mention"
               :to="`/players/${encodeURIComponent(player.name)}`"
             >
+              <div class="dashboard__spotlight-mention-rank">#{{ index + 2 }}</div>
               <div class="dashboard__spotlight-mention-header">
                 <div class="dashboard__spotlight-mention-name">{{ player.name }}</div>
                 <div class="dashboard__spotlight-mention-title">{{ player.title }}</div>
+              </div>
+              <div class="dashboard__spotlight-mention-stats">
+                <span>{{ player.rankLabel }}</span>
+                <span>{{ player.gamesPlayed }} games</span>
+                <span>{{ player.winRate }}% win</span>
+                <span>{{ fmt(player.avgPerGame) }} avg pts</span>
               </div>
               <p class="dashboard__spotlight-mention-summary">{{ player.summary }}</p>
             </NuxtLink>
@@ -221,6 +230,7 @@
 
     <h2 class="dashboard__subtitle">Player × Commander Pairings</h2>
 
+    <div class="standings-wrap">
     <table class="standings">
       <thead>
         <tr>
@@ -378,6 +388,7 @@
         </tr>
       </tbody>
     </table>
+    </div>
 
     <Teleport to="body">
       <div
@@ -725,7 +736,22 @@ const featuredPlayers = computed<FeaturedPlayerCandidate[]>(() => {
 })
 
 const featuredPlayer = computed<FeaturedPlayerCandidate | null>(() => featuredPlayers.value[0] ?? null)
-const honorableMentions = computed<FeaturedPlayerCandidate[]>(() => featuredPlayers.value.slice(1, 3))
+const honorableMentions = computed(() =>
+  featuredPlayers.value
+    .slice(1, 3)
+    .map((player) => {
+      const standing = standings.value.find((entry) => entry.name === player.name)
+
+      return {
+        ...player,
+        rank: standing ? standings.value.findIndex((entry) => entry.name === player.name) + 1 : null,
+        rankLabel: standing ? `League #${standings.value.findIndex((entry) => entry.name === player.name) + 1}` : 'League spotlight',
+        gamesPlayed: standing?.gamesPlayed ?? 0,
+        winRate: standing?.gamesPlayed ? Math.round((standing.baseWins / standing.gamesPlayed) * 100) : 0,
+        avgPerGame: standing?.gamesPlayed ? standing.totalPoints / standing.gamesPlayed : 0,
+      }
+    }),
+)
 
 function r3(n: number): number { return Math.round(n * 1000) / 1000 }
 
@@ -1102,22 +1128,47 @@ function onMultLeave() {
   }
 
   &-mention {
+    position: relative;
     display: flex;
     flex-direction: column;
-    gap: 6px;
+    gap: 8px;
     padding: $spacing-3;
-    border-radius: $border-radius-md;
-    border: 1px solid rgba($color-primary-light, 0.14);
-    background: rgba(255, 255, 255, 0.04);
+    border-radius: $border-radius-lg;
+    border: 1px solid rgba($color-primary-light, 0.16);
+    background:
+      linear-gradient(180deg, rgba(255, 255, 255, 0.05), rgba(255, 255, 255, 0.02)),
+      rgba(7, 10, 16, 0.72);
+    box-shadow:
+      inset 0 0 0 1px rgba(255, 255, 255, 0.02),
+      0 8px 24px rgba(0, 0, 0, 0.18);
     color: inherit;
     text-decoration: none;
-    transition: border-color $transition-fast, transform $transition-fast, background $transition-fast;
+    transition: border-color $transition-fast, transform $transition-fast, background $transition-fast, box-shadow $transition-fast;
 
     &:hover {
-      transform: translateY(-1px);
-      border-color: rgba($color-primary-light, 0.3);
-      background: rgba(255, 255, 255, 0.06);
+      transform: translateY(-2px);
+      border-color: rgba($color-primary-light, 0.34);
+      background:
+        linear-gradient(180deg, rgba($color-primary, 0.08), rgba(255, 255, 255, 0.03)),
+        rgba(7, 10, 16, 0.78);
+      box-shadow:
+        inset 0 0 0 1px rgba(255, 255, 255, 0.03),
+        0 12px 28px rgba(0, 0, 0, 0.24);
     }
+  }
+
+  &-mention-rank {
+    align-self: flex-start;
+    font-size: 10px;
+    font-weight: $font-weight-bold;
+    letter-spacing: 0.12em;
+    text-transform: uppercase;
+    color: rgba($color-primary-light, 0.88);
+    background: rgba($color-primary, 0.14);
+    border: 1px solid rgba($color-primary, 0.24);
+    border-radius: $border-radius-full;
+    padding: 3px 8px;
+    line-height: 1;
   }
 
   &-mention-header {
@@ -1146,6 +1197,22 @@ function onMultLeave() {
     line-height: 1.45;
   }
 
+  &-mention-stats {
+    display: flex;
+    flex-wrap: wrap;
+    gap: 6px;
+
+    span {
+      font-size: 10px;
+      color: rgba($color-text, 0.86);
+      background: rgba($color-primary, 0.08);
+      border: 1px solid rgba($color-primary-light, 0.14);
+      border-radius: $border-radius-full;
+      padding: 2px 8px;
+      white-space: nowrap;
+    }
+  }
+
   &-aside {
     flex-shrink: 0;
     display: flex;
@@ -1166,6 +1233,11 @@ function onMultLeave() {
     background: rgba(0, 0, 0, 0.25);
     align-items: flex-end;
   }
+}
+
+.standings-wrap {
+  overflow-x: auto;
+  -webkit-overflow-scrolling: touch;
 }
 
 .standings {
@@ -1312,7 +1384,15 @@ function onMultLeave() {
     grid-template-columns: 1fr;
 
     &-art {
-      min-height: 140px;
+      max-height: 120px;
+      padding: $spacing-2 $spacing-3;
+    }
+
+    &-art-img {
+      max-height: 100px;
+      width: auto;
+      max-width: 100%;
+      margin: 0 auto;
     }
 
     &-body {
@@ -1325,6 +1405,38 @@ function onMultLeave() {
 
     &-aside {
       align-items: flex-start;
+    }
+  }
+}
+
+@media (max-width: $breakpoint-sm) {
+  .dashboard__title {
+    font-size: $font-size-xl;
+  }
+
+  .dashboard__subtitle {
+    font-size: $font-size-base;
+  }
+
+  .dashboard__spotlight {
+    &-art {
+      max-height: 90px;
+    }
+
+    &-art-img {
+      max-height: 74px;
+    }
+
+    &-body {
+      padding: $spacing-3;
+    }
+
+    &-reasons {
+      grid-template-columns: 1fr;
+    }
+
+    &-name {
+      font-size: $font-size-lg;
     }
   }
 }

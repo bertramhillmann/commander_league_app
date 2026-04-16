@@ -82,3 +82,15 @@ a {
   max-width: 1440px;
   margin: 0 auto;
 }
+
+@media (max-width: $breakpoint-md) {
+  .page {
+    padding: $spacing-4;
+  }
+}
+
+@media (max-width: $breakpoint-sm) {
+  .page {
+    padding: $spacing-3;
+  }
+}

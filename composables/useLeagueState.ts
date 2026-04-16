@@ -26,6 +26,17 @@ export interface ProcessedGamePlayer {
   lPoints: number
   eliminations: number | null
   commanderCasts: number | null
+  decklist?: {
+    deckId: string
+    name: string
+    owner: string
+    url: string
+    cards: {
+      name: string
+      quantity: number
+      categories: string[]
+    }[]
+  } | null
 }
 
 export interface ProcessedGame {

@@ -300,6 +300,78 @@
                   <span class="cmd-row__tier-prefix">Projected</span>
                   <UITierBadge :detail="cmd.projectedTierDetail" />
                 </span>
+
+                <button
+                  v-if="isOwnProfile || getCommanderDeckLink(cmd.name)"
+                  type="button"
+                  class="cmd-row__deck-trigger"
+                  :class="{
+                    'cmd-row__deck-trigger--linked': getCommanderDeckLink(cmd.name),
+                    'cmd-row__deck-trigger--open': deckPopoverOpen === cmd.name,
+                  }"
+                  @click.prevent="toggleDeckPopover(cmd.name)"
+                >
+                  {{ getCommanderDeckLink(cmd.name) ? 'deck ↗' : '+ deck' }}
+                </button>
+                <button
+                  v-if="getCommanderDeckLink(cmd.name)"
+                  type="button"
+                  class="cmd-row__deck-trigger cmd-row__deck-trigger--view"
+                  @click.prevent="openCommanderDeck(cmd)"
+                >
+                  View Deck
+                </button>
+              </div>
+
+              <div v-if="deckPopoverOpen === cmd.name" class="cmd-row__deck-popover">
+                <div v-if="isOwnProfile" class="cmd-row__deck-popover-row">
+                  <input
+                    v-model="commanderDeckInputs[cmd.name]"
+                    type="url"
+                    class="cmd-row__deck-input"
+                    placeholder="Paste Archidekt deck URL"
+                    @keydown.enter.prevent="saveCommanderDeckLink(cmd.name)"
+                  />
+                  <button
+                    type="button"
+                    class="cmd-row__deck-btn cmd-row__deck-btn--primary"
+                    :disabled="deckLinkSaving[cmd.name]"
+                    @click="saveCommanderDeckLink(cmd.name)"
+                  >
+                    {{ deckLinkSaving[cmd.name] ? 'Saving…' : getCommanderDeckLink(cmd.name) ? 'Update' : 'Save' }}
+                  </button>
+                  <button
+                    v-if="getCommanderDeckLink(cmd.name)"
+                    type="button"
+                    class="cmd-row__deck-btn"
+                    :disabled="deckLinkSaving[cmd.name]"
+                    @click="clearCommanderDeckLink(cmd.name)"
+                  >
+                    Remove
+                  </button>
+                </div>
+
+                <div v-if="getCommanderDeckLink(cmd.name)" class="cmd-row__deck-popover-actions">
+                  <button
+                    type="button"
+                    class="cmd-row__deck-btn cmd-row__deck-btn--primary"
+                    @click="openCommanderDeck(cmd)"
+                  >
+                    View Decklist
+                  </button>
+                  <a
+                    :href="getCommanderDeckLink(cmd.name)?.archidektUrl"
+                    target="_blank"
+                    rel="noopener noreferrer"
+                    class="cmd-row__deck-btn"
+                  >
+                    Open on Archidekt ↗
+                  </a>
+                </div>
+
+                <span v-if="deckLinkErrors[cmd.name]" class="cmd-row__deck-error">
+                  {{ deckLinkErrors[cmd.name] }}
+                </span>
               </div>
 
               <div class="cmd-row__stats-band">
@@ -514,17 +586,143 @@
       </div>
     </div>
   </Teleport>
+
+  <Teleport to="body">
+    <div
+      v-if="deckCardPreview.visible && deckCardPreview.hoverImageUrl"
+      class="floating-panel"
+      :style="{ top: `${deckCardPreview.y}px`, left: `${deckCardPreview.x}px` }"
+    >
+      <img
+        :src="deckCardPreview.hoverImageUrl"
+        alt="Card preview"
+        class="card-preview__img"
+      />
+    </div>
+  </Teleport>
+
+  <Teleport to="body">
+    <div
+      v-if="deckPanel.open"
+      class="deck-drawer"
+      @click.self="closeDeckPanel"
+    >
+      <div class="deck-drawer__scrim" @click="closeDeckPanel" />
+
+      <aside class="deck-drawer__panel">
+        <div class="deck-drawer__header">
+          <div>
+            <div class="deck-drawer__eyebrow">{{ deckPanel.commanderName }}</div>
+            <h2 class="deck-drawer__title">{{ deckPanel.deck?.name || 'Decklist' }}</h2>
+            <p v-if="deckPanel.deck" class="deck-drawer__meta">
+              {{ deckPanel.deck.cardCount }} cards
+              <span v-if="deckPanel.deck.owner"> · by {{ deckPanel.deck.owner }}</span>
+            </p>
+            <p v-if="deckPanel.deck && deckPanel.loadingCards" class="deck-drawer__meta deck-drawer__meta--loading">
+              Loading card details {{ deckPanel.loadedCards }}/{{ deckPanel.totalCards }}
+            </p>
+          </div>
+
+          <div class="deck-drawer__header-actions">
+            <a
+              v-if="deckPanel.link"
+              :href="deckPanel.link.archidektUrl"
+              target="_blank"
+              rel="noopener noreferrer"
+              class="deck-drawer__link"
+            >
+              Open Archidekt
+            </a>
+            <button type="button" class="deck-drawer__close" @click="closeDeckPanel">
+              Close
+            </button>
+          </div>
+        </div>
+
+        <div v-if="deckPanel.loading" class="deck-drawer__state">
+          Loading deck...
+        </div>
+        <div v-else-if="deckPanel.error" class="deck-drawer__state deck-drawer__state--error">
+          {{ deckPanel.error }}
+        </div>
+        <div v-else-if="deckPanel.deck" class="deck-drawer__content">
+          <section
+            v-for="group in deckPanel.deck.groups"
+            :key="group.label"
+            class="deck-drawer__group"
+          >
+            <div class="deck-drawer__group-header">
+              <h3 class="deck-drawer__group-title">{{ group.label }}</h3>
+              <span class="deck-drawer__group-count">{{ group.count }}</span>
+            </div>
+
+            <div class="deck-drawer__cards">
+              <article
+                v-for="card in group.cards"
+                :key="`${group.label}-${card.name}`"
+                class="deck-drawer__card"
+              >
+                <img
+                  v-if="card.imageUrl"
+                  :src="card.imageUrl"
+                  :alt="card.name"
+                  class="deck-drawer__card-image"
+                  @mouseenter="onDeckCardEnter(card.hoverImageUrl, $event)"
+                  @mousemove="onDeckCardMove($event)"
+                  @mouseleave="onDeckCardLeave"
+                />
+                <div v-else class="deck-drawer__card-image deck-drawer__card-image--placeholder">
+                  <div v-if="card.loading" class="deck-drawer__card-spinner" />
+                </div>
+
+                <div class="deck-drawer__card-body">
+                  <div class="deck-drawer__card-name-row">
+                    <span class="deck-drawer__card-qty">{{ card.quantity }}x</span>
+                    <a
+                      v-if="card.scryfallUri"
+                      :href="card.scryfallUri"
+                      target="_blank"
+                      rel="noopener noreferrer"
+                      class="deck-drawer__card-name"
+                    >
+                      {{ card.name }}
+                    </a>
+                    <span v-else class="deck-drawer__card-name">{{ card.name }}</span>
+                  </div>
+                  <div class="deck-drawer__card-meta">
+                    <span>{{ card.loading ? 'Loading card details...' : card.typeLine }}</span>
+                    <span>{{ card.loading ? 'Fetching...' : `MV ${fmtManaValue(card.manaValue)}` }}</span>
+                  </div>
+                  <div v-if="card.categories.length > 0" class="deck-drawer__card-tags">
+                    <span
+                      v-for="cat in card.categories"
+                      :key="cat"
+                      class="deck-drawer__card-tag"
+                    >{{ cat }}</span>
+                  </div>
+                </div>
+              </article>
+            </div>
+          </section>
+        </div>
+      </aside>
+    </div>
+  </Teleport>
 </template>
 
 <script setup lang="ts">
 import { compareGamesChronological, getLeagueStandingMetrics, getPlayerCommanderPerformanceEdgeMetrics, getPlayerCommanderMetrics } from '~/composables/useLeagueState'
+import { useAuth } from '~/composables/useAuth'
+import { fetchCardByName, getCardImageUrl } from '~/services/scryfallService'
 import { xpToLevel, getCommanderLevelProgress } from '~/utils/commanderExperience'
 import { getArchEnemySummary } from '~/utils/archEnemy'
+import { extractArchidektDeckId } from '~/utils/archidekt'
 import { buildCommanderPlacementTimeline, type PlacementTimelinePoint } from '~/utils/commanderTimeline'
 import { buildPlayerLeagueTimeline } from '~/utils/playerLeagueTimeline'
 import { buildPlayerMatchTimeline } from '~/utils/playerMatchTimeline'
 import { buildPlacementPrognosis } from '~/utils/placementPrognosis'
 import { formatPlayerName } from '~/utils/playerNames'
+import { normalizeDeckIdentityKey } from '~/utils/deckLinks'
 import { buildPlayerSuggestion, type PlayerCommanderPickSuggestion } from '~/utils/playerSuggestions'
 import { computeGlobalCommanderBaseline, computePlayerCommanderTier, smoothedTierScore, getTierDetail, type TierDetail, type TierContext } from '~/utils/tiers'
 import { ACHIEVEMENTS } from '~/utils/achievements'
@@ -535,6 +733,9 @@ import { getCommanderPerformanceTitle, type CommanderTitleResult } from '~/utils
 const route = useRoute()
 const playerId = computed(() => route.params.playerId as string)
 const displayPlayerName = computed(() => formatPlayerName(playerId.value))
+const { user, ensureSession } = useAuth()
+
+await ensureSession()
 
 const playerPortraitModules = import.meta.glob('../../assets/img/*.png', { eager: true, import: 'default' })
 const playerPortraits = Object.fromEntries(
@@ -548,6 +749,9 @@ const playerPortraitUrl = computed(() => playerPortraits[playerId.value.toLowerC
 
 const { games, commanders, players, gameRecords, leagueSnapshots, standings } = useLeagueState()
 const { preloadCommanderImages, getCachedCommanderImage } = useImageCache()
+const isOwnProfile = computed(() =>
+  Boolean(user.value) && formatPlayerName(user.value ?? '').toLowerCase() === displayPlayerName.value.toLowerCase(),
+)
 
 const player = computed(() => players.value[playerId.value] ?? null)
 const playerStanding = computed(() =>
@@ -695,6 +899,55 @@ type CommanderIndicator = {
   strength: 1 | 2
   metricLabel: string
   deltaRatio: number
+}
+
+type CommanderDeckLinkRecord = {
+  playerName: string
+  playerNameKey?: string
+  commanderName: string
+  commanderNameKey?: string
+  archidektUrl: string
+  archidektDeckId: string
+  updatedAt?: string
+}
+
+type ArchidektDeckCard = {
+  name: string
+  quantity: number
+  categories: string[]
+}
+
+type ArchidektDeckResponse = {
+  deckId: string
+  name: string
+  owner: string
+  url: string
+  cards: ArchidektDeckCard[]
+}
+
+type DeckPanelCard = ArchidektDeckCard & {
+  imageUrl: string | null
+  hoverImageUrl: string | null
+  manaValue: number
+  typeLine: string
+  scryfallUri: string
+  groupLabel: string
+  groupOrder: number
+  loading: boolean
+}
+
+type DeckPanelGroup = {
+  label: string
+  count: number
+  cards: DeckPanelCard[]
+}
+
+type DeckPanelData = {
+  name: string
+  owner: string
+  url: string
+  cardCount: number
+  groups: DeckPanelGroup[]
 }
 
 function normalizePlacement(placement: number, playerCount: number) {
@@ -905,6 +1158,86 @@ const edgePreview = reactive<{
   x: 0,
   y: 0,
 })
+const commanderDeckLinks = ref<Record<string, CommanderDeckLinkRecord>>({})
+const commanderDeckInputs = reactive<Record<string, string>>({})
+const deckLinkSaving = reactive<Record<string, boolean>>({})
+const deckPopoverOpen = ref<string | null>(null)
+
+function getCommanderDeckLink(commanderName: string) {
+  const normalizedCommanderName = normalizeDeckIdentityKey(commanderName)
+  const directMatch = commanderDeckLinks.value[normalizedCommanderName]
+  if (directMatch) return directMatch
+
+  return Object.values(commanderDeckLinks.value).find(
+    (link) => (link.commanderNameKey ?? normalizeDeckIdentityKey(link.commanderName)) === normalizedCommanderName,
+  )
+}
+
+function toggleDeckPopover(commanderName: string) {
+  if (deckPopoverOpen.value === commanderName) {
+    deckPopoverOpen.value = null
+    return
+  }
+
+  const savedLink = getCommanderDeckLink(commanderName)
+  commanderDeckInputs[commanderName] = savedLink?.archidektUrl ?? commanderDeckInputs[commanderName] ?? ''
+  deckLinkErrors[commanderName] = ''
+  deckPopoverOpen.value = commanderName
+}
+const deckLinkErrors = reactive<Record<string, string>>({})
+const deckPanel = reactive<{
+  open: boolean
+  loading: boolean
+  loadingCards: boolean
+  error: string
+  commanderName: string
+  link: CommanderDeckLinkRecord | null
+  deck: DeckPanelData | null
+  loadedCards: number
+  totalCards: number
+}>({
+  open: false,
+  loading: false,
+  loadingCards: false,
+  error: '',
+  commanderName: '',
+  link: null,
+  deck: null,
+  loadedCards: 0,
+  totalCards: 0,
+})
+
+function applyCommanderDeckLinks(links: CommanderDeckLinkRecord[]) {
+  const nextLinks: Record<string, CommanderDeckLinkRecord> = {}
+
+  for (const link of links) {
+    const commanderKey = link.commanderNameKey ?? normalizeDeckIdentityKey(link.commanderName)
+    nextLinks[commanderKey] = link
+    if (isOwnProfile.value) commanderDeckInputs[link.commanderName] = link.archidektUrl
+  }
+
+  commanderDeckLinks.value = nextLinks
+}
+
+async function loadCommanderDeckLinks(playerName: string) {
+  if (!playerName) {
+    commanderDeckLinks.value = {}
+    return []
+  }
+
+  const links = await $fetch<CommanderDeckLinkRecord[]>('/api/deck-links', {
+    query: { playerName },
+  }).catch(() => [])
+
+  applyCommanderDeckLinks(links)
+  return links
+}
+
+await useAsyncData(
+  () => `player-deck-links:${displayPlayerName.value}`,
+  () => loadCommanderDeckLinks(displayPlayerName.value),
+  { watch: [displayPlayerName] },
+)
 const consistencyPreview = reactive({
   visible: false,
   x: 0,
@@ -912,6 +1245,17 @@ const consistencyPreview = reactive({
 })
 const clutchPreview = reactive({
   visible: false,
+  x: 0,
+  y: 0,
+})
+const deckCardPreview = reactive<{
+  visible: boolean
+  hoverImageUrl: string | null
+  x: number
+  y: number
+}>({
+  visible: false,
+  hoverImageUrl: null,
   x: 0,
   y: 0,
 })
@@ -1077,7 +1421,176 @@ function onClutchLeave() {
   clutchPreview.visible = false
 }
 
+function onDeckCardEnter(hoverImageUrl: string | null, e: MouseEvent) {
+  if (!hoverImageUrl) return
+  deckCardPreview.hoverImageUrl = hoverImageUrl
+  deckCardPreview.visible = true
+  const pos = calcPreviewPosition(e, 260, 364)
+  deckCardPreview.x = pos.x
+  deckCardPreview.y = pos.y
+}
+
+function onDeckCardMove(e: MouseEvent) {
+  if (!deckCardPreview.visible) return
+  const pos = calcPreviewPosition(e, 260, 364)
+  deckCardPreview.x = pos.x
+  deckCardPreview.y = pos.y
+}
+
+function onDeckCardLeave() {
+  deckCardPreview.visible = false
+  deckCardPreview.hoverImageUrl = null
+}
+
 // ── Sort ──────────────────────────────────────────────────────────────────────
+
+const deckPanelCache = new Map<string, DeckPanelData>()
+let activeDeckLoadToken = 0
+
+watch(
+  isOwnProfile,
+  (value) => {
+    if (!value) return
+    for (const [commanderName, link] of Object.entries(commanderDeckLinks.value)) {
+      commanderDeckInputs[commanderName] = link.archidektUrl
+    }
+  },
+  { immediate: true },
+)
+
+watch(
+  () => deckPanel.open,
+  (open) => {
+    if (!import.meta.client) return
+    document.body.style.overflow = open ? 'hidden' : ''
+  },
+)
+
+if (import.meta.client) {
+  const onKeydown = (event: KeyboardEvent) => {
+    if (event.key === 'Escape' && deckPanel.open) closeDeckPanel()
+  }
+
+  onMounted(() => window.addEventListener('keydown', onKeydown))
+  onBeforeUnmount(() => {
+    window.removeEventListener('keydown', onKeydown)
+    document.body.style.overflow = ''
+  })
+}
+
+async function saveCommanderDeckLink(commanderName: string) {
+  const archidektUrl = (commanderDeckInputs[commanderName] ?? '').trim()
+  deckLinkSaving[commanderName] = true
+  deckLinkErrors[commanderName] = ''
+
+  if (!extractArchidektDeckId(archidektUrl)) {
+    deckLinkErrors[commanderName] = 'Please enter a valid Archidekt deck URL.'
+    deckLinkSaving[commanderName] = false
+    return
+  }
+
+  try {
+    const result = await $fetch<{ ok: boolean; link: CommanderDeckLinkRecord }>('/api/deck-links', {
+      method: 'PUT',
+      body: {
+        playerName: displayPlayerName.value,
+        commanderName,
+        archidektUrl,
+      },
+    })
+
+    const commanderKey = result.link.commanderNameKey ?? normalizeDeckIdentityKey(commanderName)
+    commanderDeckLinks.value = {
+      ...commanderDeckLinks.value,
+      [commanderKey]: result.link,
+    }
+    commanderDeckInputs[commanderName] = result.link.archidektUrl
+  } catch (error: any) {
+    deckLinkErrors[commanderName] = error?.data?.statusMessage ?? 'Could not save deck link.'
+  } finally {
+    deckLinkSaving[commanderName] = false
+  }
+}
+
+async function clearCommanderDeckLink(commanderName: string) {
+  deckLinkSaving[commanderName] = true
+  deckLinkErrors[commanderName] = ''
+
+  try {
+    await $fetch('/api/deck-links', {
+      method: 'PUT',
+      body: {
+        playerName: displayPlayerName.value,
+        commanderName,
+        archidektUrl: '',
+      },
+    })
+
+    const nextLinks = { ...commanderDeckLinks.value }
+    delete nextLinks[normalizeDeckIdentityKey(commanderName)]
+    commanderDeckLinks.value = nextLinks
+    commanderDeckInputs[commanderName] = ''
+
+    if (deckPanel.commanderName === commanderName) closeDeckPanel()
+  } catch (error: any) {
+    deckLinkErrors[commanderName] = error?.data?.statusMessage ?? 'Could not remove deck link.'
+  } finally {
+    deckLinkSaving[commanderName] = false
+  }
+}
+
+async function openCommanderDeck(commander: CommanderRow) {
+  const link = getCommanderDeckLink(commander.name)
+  if (!link?.archidektDeckId) return
+  const loadToken = ++activeDeckLoadToken
+
+  deckPanel.open = true
+  deckPanel.loading = true
+  deckPanel.loadingCards = false
+  deckPanel.error = ''
+  deckPanel.commanderName = commander.name
+  deckPanel.link = link
+  deckPanel.deck = null
+  deckPanel.loadedCards = 0
+  deckPanel.totalCards = 0
+
+  const cachedDeck = deckPanelCache.get(link.archidektDeckId)
+  if (cachedDeck) {
+    deckPanel.deck = cachedDeck
+    deckPanel.loading = false
+    return
+  }
+
+  try {
+    const deck = await $fetch<ArchidektDeckResponse>(`/api/archidekt/${link.archidektDeckId}`)
+    if (loadToken !== activeDeckLoadToken) return
+
+    deckPanel.deck = createDeckPanelData(deck)
+    deckPanel.totalCards = deck.cards.length
+    deckPanel.loading = false
+    deckPanel.loadingCards = true
+
+    const normalizedDeck = await hydrateDeckPanelData(deck, loadToken)
+    if (loadToken !== activeDeckLoadToken) return
+
+    deckPanelCache.set(link.archidektDeckId, normalizedDeck)
+    deckPanel.deck = normalizedDeck
+  } catch (error: any) {
+    deckPanel.error = error?.data?.statusMessage ?? 'Could not load this deck from Archidekt.'
+  } finally {
+    if (loadToken === activeDeckLoadToken) {
+      deckPanel.loading = false
+      deckPanel.loadingCards = false
+    }
+  }
+}
+
+function closeDeckPanel() {
+  activeDeckLoadToken += 1
+  deckPanel.open = false
+  deckPanel.loading = false
+  deckPanel.loadingCards = false
+}
 
 const sortOptions = [
   { key: 'plays',     label: 'Plays' },
@@ -1103,6 +1616,232 @@ const sortedCommanders = computed(() => {
 })
 
 // ── Helpers ───────────────────────────────────────────────────────────────────
+
+const TYPE_GROUPS = [
+  { label: 'Commander', order: 0 },
+  { label: 'Creature', order: 1 },
+  { label: 'Planeswalker', order: 2 },
+  { label: 'Battle', order: 3 },
+  { label: 'Artifact', order: 4 },
+  { label: 'Enchantment', order: 5 },
+  { label: 'Instant', order: 6 },
+  { label: 'Sorcery', order: 7 },
+  { label: 'Land', order: 8 },
+  { label: 'Other', order: 9 },
+] as const
+
+function getDeckCardGroup(typeLine: string, categories: string[]) {
+  const normalizedCategories = categories.map((category) => category.toLowerCase())
+  if (normalizedCategories.some((category) => category.includes('commander'))) return TYPE_GROUPS[0]
+  if (typeLine.includes('Creature')) return TYPE_GROUPS[1]
+  if (typeLine.includes('Planeswalker')) return TYPE_GROUPS[2]
+  if (typeLine.includes('Battle')) return TYPE_GROUPS[3]
+  if (typeLine.includes('Artifact')) return TYPE_GROUPS[4]
+  if (typeLine.includes('Enchantment')) return TYPE_GROUPS[5]
+  if (typeLine.includes('Instant')) return TYPE_GROUPS[6]
+  if (typeLine.includes('Sorcery')) return TYPE_GROUPS[7]
+  if (typeLine.includes('Land')) return TYPE_GROUPS[8]
+  return TYPE_GROUPS[9]
+}
+
+function sleep(ms: number) {
+  return new Promise<void>((resolve) => setTimeout(resolve, ms))
+}
+
+async function buildDeckPanelData(deck: ArchidektDeckResponse): Promise<DeckPanelData> {
+  // Scryfall asks for 50–100 ms between requests.
+  // Process in batches of 6 with an 600 ms pause between batches so we
+  // never exceed ~10 req/s, even for large decks.
+  const BATCH_SIZE = 6
+  const BATCH_DELAY_MS = 600
+
+  const enrichedCards: DeckPanelCard[] = []
+
+  for (let i = 0; i < deck.cards.length; i += BATCH_SIZE) {
+    if (i > 0) await sleep(BATCH_DELAY_MS)
+    const batch = deck.cards.slice(i, i + BATCH_SIZE)
+    const results = await Promise.all(
+      batch.map(async (card): Promise<DeckPanelCard> => {
+        const scryfallCard = await fetchCardByName(card.name)
+        const typeLine = scryfallCard?.type_line ?? 'Unknown'
+        const manaValue = Number(scryfallCard?.cmc ?? 0)
+        const group = getDeckCardGroup(typeLine, card.categories)
+
+        return {
+          ...card,
+          imageUrl: scryfallCard ? getCardImageUrl(scryfallCard, 'small') : null,
+          hoverImageUrl: scryfallCard ? getCardImageUrl(scryfallCard, 'normal') : null,
+          manaValue,
+          typeLine,
+          scryfallUri: scryfallCard?.scryfall_uri ?? '',
+          groupLabel: group.label,
+          groupOrder: group.order,
+          loading: false,
+        }
+      }),
+    )
+    enrichedCards.push(...results)
+  }
+
+  const groupsMap = new Map<string, DeckPanelGroup>()
+  for (const card of enrichedCards) {
+    const existingGroup = groupsMap.get(card.groupLabel) ?? {
+      label: card.groupLabel,
+      count: 0,
+      cards: [],
+    }
+
+    existingGroup.count += card.quantity
+    existingGroup.cards.push(card)
+    groupsMap.set(card.groupLabel, existingGroup)
+  }
+
+  const groups = [...groupsMap.values()]
+    .map((group) => ({
+      ...group,
+      cards: [...group.cards].sort((a, b) =>
+        a.manaValue - b.manaValue
+        || a.name.localeCompare(b.name),
+      ),
+    }))
+    .sort((a, b) => {
+      const aOrder = enrichedCards.find((card) => card.groupLabel === a.label)?.groupOrder ?? 999
+      const bOrder = enrichedCards.find((card) => card.groupLabel === b.label)?.groupOrder ?? 999
+      return aOrder - bOrder || a.label.localeCompare(b.label)
+    })
+
+  return {
+    name: deck.name,
+    owner: deck.owner,
+    url: deck.url,
+    cardCount: deck.cards.reduce((sum, card) => sum + card.quantity, 0),
+    groups,
+  }
+}
+
+function buildDeckPanelGroups(cards: DeckPanelCard[]) {
+  const groupsMap = new Map<string, DeckPanelGroup>()
+
+  for (const card of cards) {
+    const existingGroup = groupsMap.get(card.groupLabel) ?? {
+      label: card.groupLabel,
+      count: 0,
+      cards: [],
+    }
+
+    existingGroup.count += card.quantity
+    existingGroup.cards.push(card)
+    groupsMap.set(card.groupLabel, existingGroup)
+  }
+
+  return [...groupsMap.values()]
+    .map((group) => ({
+      ...group,
+      cards: [...group.cards].sort((a, b) =>
+        a.groupOrder - b.groupOrder
+        || a.manaValue - b.manaValue
+        || a.name.localeCompare(b.name),
+      ),
+    }))
+    .sort((a, b) => {
+      const aOrder = a.cards[0]?.groupOrder ?? 999
+      const bOrder = b.cards[0]?.groupOrder ?? 999
+      return aOrder - bOrder || a.label.localeCompare(b.label)
+    })
+}
+
+function createDeckPanelCard(card: ArchidektDeckCard): DeckPanelCard {
+  const group = getDeckCardGroup('Unknown', card.categories)
+
+  return {
+    ...card,
+    imageUrl: null,
+    hoverImageUrl: null,
+    manaValue: 999,
+    typeLine: 'Unknown',
+    scryfallUri: '',
+    groupLabel: group.label,
+    groupOrder: group.order,
+    loading: true,
+  }
+}
+
+function createDeckPanelData(deck: ArchidektDeckResponse): DeckPanelData {
+  const cards = deck.cards.map(createDeckPanelCard)
+
+  return {
+    name: deck.name,
+    owner: deck.owner,
+    url: deck.url,
+    cardCount: deck.cards.reduce((sum, card) => sum + card.quantity, 0),
+    groups: buildDeckPanelGroups(cards),
+  }
+}
+
+async function hydrateDeckPanelData(deck: ArchidektDeckResponse, loadToken: number): Promise<DeckPanelData> {
+  const BATCH_SIZE = 4
+  const REQUEST_DELAY_MS = 180
+  const BATCH_DELAY_MS = 900
+  const cards = deck.cards.map(createDeckPanelCard)
+
+  for (let i = 0; i < cards.length; i += BATCH_SIZE) {
+    const batch = cards.slice(i, i + BATCH_SIZE)
+
+    for (const card of batch) {
+      if (loadToken !== activeDeckLoadToken) {
+        return {
+          name: deck.name,
+          owner: deck.owner,
+          url: deck.url,
+          cardCount: deck.cards.reduce((sum, entry) => sum + entry.quantity, 0),
+          groups: buildDeckPanelGroups(cards),
+        }
+      }
+
+      const scryfallCard = await fetchCardByName(card.name)
+      const typeLine = scryfallCard?.type_line ?? 'Unknown'
+      const manaValue = Number(scryfallCard?.cmc ?? 999)
+      const group = getDeckCardGroup(typeLine, card.categories)
+
+      card.imageUrl = scryfallCard ? getCardImageUrl(scryfallCard, 'small') : null
+      card.hoverImageUrl = scryfallCard ? getCardImageUrl(scryfallCard, 'normal') : null
+      card.manaValue = manaValue
+      card.typeLine = typeLine
+      card.scryfallUri = scryfallCard?.scryfall_uri ?? ''
+      card.groupLabel = group.label
+      card.groupOrder = group.order
+      card.loading = false
+
+      if (loadToken === activeDeckLoadToken) {
+        deckPanel.loadedCards += 1
+        if (deckPanel.deck) {
+          deckPanel.deck = {
+            ...deckPanel.deck,
+            groups: buildDeckPanelGroups(cards),
+          }
+        }
+      }
+
+      await sleep(REQUEST_DELAY_MS)
+    }
+
+    if (i + BATCH_SIZE < cards.length) {
+      await sleep(BATCH_DELAY_MS)
+    }
+  }
+
+  return {
+    name: deck.name,
+    owner: deck.owner,
+    url: deck.url,
+    cardCount: deck.cards.reduce((sum, card) => sum + card.quantity, 0),
+    groups: buildDeckPanelGroups(cards),
+  }
+}
+
+function fmtManaValue(value: number) {
+  return value % 1 === 0 ? String(value) : value.toFixed(1).replace(/\.0$/, '')
+}
 
 function fmt(n: number): string {
   if (n === 0) return '0'
@@ -1759,6 +2498,136 @@ function getEdgeTooltipText(cmd: CommanderRow) {
     flex-wrap: wrap;
   }
 
+  &__deck-trigger {
+    appearance: none;
+    margin-left: auto;
+    padding: 2px 7px;
+    border: 1px solid transparent;
+    border-radius: $border-radius-sm;
+    background: transparent;
+    color: rgba($color-text-muted, 0.45);
+    font: inherit;
+    font-size: 10px;
+    font-weight: $font-weight-semibold;
+    text-transform: uppercase;
+    letter-spacing: 0.07em;
+    cursor: pointer;
+    transition: color $transition-fast, border-color $transition-fast, background $transition-fast;
+
+    &:hover {
+      color: $color-text-muted;
+      border-color: rgba($border-color, 0.8);
+      background: rgba(0, 0, 0, 0.2);
+    }
+
+    &--linked {
+      color: rgba($color-primary-light, 0.55);
+
+      &:hover {
+        color: $color-primary-light;
+        border-color: rgba($color-primary-light, 0.3);
+      }
+    }
+
+    &--open {
+      color: $color-primary-light;
+      border-color: rgba($color-primary-light, 0.35);
+      background: rgba($color-primary, 0.12);
+    }
+
+    &--view {
+      margin-left: 0;
+      color: rgba($color-primary-light, 0.75);
+
+      &:hover {
+        color: $color-primary-light;
+        border-color: rgba($color-primary-light, 0.35);
+      }
+    }
+  }
+
+  &__deck-popover {
+    display: flex;
+    flex-direction: column;
+    gap: $spacing-2;
+    padding: $spacing-3 $spacing-3;
+    border-top: 1px solid rgba($border-color, 0.6);
+    background: rgba(0, 0, 0, 0.18);
+  }
+
+  &__deck-popover-row {
+    display: flex;
+    align-items: center;
+    gap: $spacing-2;
+    flex-wrap: wrap;
+  }
+
+  &__deck-popover-actions {
+    display: flex;
+    align-items: center;
+    gap: $spacing-2;
+    flex-wrap: wrap;
+  }
+
+  &__deck-input {
+    flex: 1 1 280px;
+    min-width: 220px;
+    padding: $spacing-2 $spacing-3;
+    border-radius: $border-radius-md;
+    border: 1px solid $border-color;
+    background: rgba(0, 0, 0, 0.28);
+    color: $color-text;
+    font: inherit;
+
+    &::placeholder {
+      color: rgba($color-text-muted, 0.9);
+    }
+
+    &:focus {
+      outline: none;
+      border-color: rgba($color-primary, 0.6);
+      box-shadow: 0 0 0 2px rgba($color-primary, 0.15);
+    }
+  }
+
+  &__deck-btn {
+    appearance: none;
+    border: 1px solid $border-color;
+    border-radius: $border-radius-md;
+    background: rgba(0, 0, 0, 0.24);
+    color: $color-text;
+    font: inherit;
+    font-size: $font-size-xs;
+    padding: $spacing-2 $spacing-3;
+    cursor: pointer;
+    transition: border-color $transition-fast, background $transition-fast, color $transition-fast;
+
+    &:hover:not(:disabled) {
+      border-color: rgba($color-primary, 0.5);
+      color: $color-primary-light;
+    }
+
+    &:disabled {
+      opacity: 0.7;
+      cursor: wait;
+    }
+
+    &--primary {
+      background: rgba($color-primary, 0.18);
+      border-color: rgba($color-primary, 0.45);
+      color: $color-primary-light;
+    }
+
+    &--ghost {
+      margin-left: auto;
+    }
+  }
+
+  &__deck-error {
+    color: #f1a0a0;
+    font-size: 11px;
+  }
+
   &__name {
     font-size: $font-size-base;
     font-weight: $font-weight-semibold;
@@ -2106,9 +2975,14 @@ function getEdgeTooltipText(cmd: CommanderRow) {
       flex-direction: column;
     }
 
+    &__league-chart {
+      height: 220px;
+    }
+
     &__league-achievements {
       width: 100%;
       flex-basis: auto;
+      height: auto;
     }
 
     &__league-achievements-list {
@@ -2122,6 +2996,96 @@ function getEdgeTooltipText(cmd: CommanderRow) {
       min-width: 0;
       flex-basis: 100%;
       margin-left: 0;
+    }
+  }
+}
+
+@media (max-width: $breakpoint-md) {
+  .player {
+    &__title {
+      font-size: $font-size-2xl;
+    }
+
+    &__placement-cards {
+      flex-wrap: wrap;
+      gap: $spacing-4;
+    }
+
+    &__focus-tip {
+      grid-template-columns: 1fr;
+      row-gap: $spacing-2;
+    }
+
+    &__focus-tip-label {
+      grid-column: 1;
+      grid-row: auto;
+      writing-mode: horizontal-tb;
+      transform: none;
+      padding-top: 0;
+    }
+
+    &__focus-tip-title,
+    &__focus-tip-summary,
+    &__focus-tip-reasons {
+      grid-column: 1;
+      grid-row: auto;
+    }
+
+    &__placement-picks {
+      grid-column: 1;
+      grid-row: auto;
+      align-self: auto;
+      align-items: flex-start;
+      justify-content: flex-start;
+    }
+  }
+
+  .cmd-row {
+    flex-direction: column;
+    gap: 0;
+
+    &__card-wrap {
+      width: 100%;
+      flex-direction: row;
+      padding: $spacing-3;
+      gap: $spacing-3;
+      filter: none;
+    }
+
+    &__card {
+      width: 120px;
+      flex: 0 0 120px;
+      min-height: 120px;
+    }
+
+    &__card-xp {
+      flex: 1;
+      min-width: 0;
+    }
+
+    &__body {
+      padding: 0 $spacing-3 $spacing-3;
+    }
+  }
+}
+
+@media (max-width: $breakpoint-sm) {
+  .player {
+    &__stats {
+      gap: $spacing-2;
+    }
+
+    &__stat {
+      min-width: 76px;
+      padding: $spacing-2 $spacing-2;
+    }
+
+    &__placement-portrait {
+      width: 60px;
+    }
+
+    &__league-panel {
+      padding: $spacing-4 $spacing-3;
     }
   }
 }
@@ -2240,6 +3204,311 @@ function getEdgeTooltipText(cmd: CommanderRow) {
     &--muted {
       color: $color-text-muted;
     }
+  }
+}
+
+.deck-drawer {
+  position: fixed;
+  inset: 0;
+  z-index: 9500;
+  display: flex;
+  justify-content: flex-end;
+}
+
+.deck-drawer__scrim {
+  position: absolute;
+  inset: 0;
+  background: rgba(4, 3, 10, 0.72);
+  backdrop-filter: blur(6px);
+}
+
+.deck-drawer__panel {
+  position: relative;
+  z-index: 1;
+  width: min(780px, 100vw);
+  height: 100vh;
+  overflow-y: auto;
+  padding: 28px 28px 40px;
+  background:
+    linear-gradient(180deg, rgba(18, 11, 30, 0.99), rgba(11, 7, 20, 0.99));
+  border-left: 1px solid rgba($color-primary, 0.22);
+  box-shadow:
+    -24px 0 64px rgba(0, 0, 0, 0.55),
+    inset 1px 0 0 rgba($color-primary-light, 0.04);
+}
+
+.deck-drawer__header {
+  display: flex;
+  justify-content: space-between;
+  gap: 16px;
+  align-items: flex-start;
+  margin-bottom: 24px;
+  padding-bottom: 20px;
+  border-bottom: 1px solid rgba($color-primary, 0.15);
+}
+
+.deck-drawer__eyebrow {
+  font-size: 10px;
+  letter-spacing: 0.1em;
+  text-transform: uppercase;
+  color: rgba($color-primary-light, 0.7);
+  margin-bottom: 4px;
+}
+
+.deck-drawer__title {
+  margin: 0;
+  font-size: clamp(1.3rem, 2.8vw, 1.8rem);
+  color: $color-text;
+}
+
+.deck-drawer__meta {
+  margin: 5px 0 0;
+  color: $color-text-muted;
+  font-size: 12px;
+}
+
+.deck-drawer__meta--loading {
+  color: rgba($color-primary-light, 0.82);
+}
+
+.deck-drawer__header-actions {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  flex-wrap: wrap;
+  justify-content: flex-end;
+  flex-shrink: 0;
+}
+
+.deck-drawer__link,
+.deck-drawer__close {
+  appearance: none;
+  border: 1px solid $border-color;
+  border-radius: $border-radius-md;
+  background: rgba(0, 0, 0, 0.24);
+  color: $color-text-muted;
+  font: inherit;
+  font-size: 11px;
+  padding: 8px 13px;
+  text-decoration: none;
+  cursor: pointer;
+  transition: border-color $transition-fast, color $transition-fast, background $transition-fast;
+  white-space: nowrap;
+}
+
+.deck-drawer__link:hover,
+.deck-drawer__close:hover {
+  border-color: rgba($color-primary, 0.55);
+  color: $color-primary-light;
+  background: rgba($color-primary, 0.1);
+}
+
+.deck-drawer__state {
+  padding: 32px 20px;
+  border: 1px solid rgba($color-primary, 0.12);
+  border-radius: $border-radius-lg;
+  background: rgba(0, 0, 0, 0.18);
+  color: $color-text-muted;
+  font-size: 13px;
+  text-align: center;
+}
+
+.deck-drawer__state--error {
+  color: #f4afaf;
+  border-color: rgba(190, 80, 80, 0.32);
+  background: rgba(120, 20, 20, 0.12);
+}
+
+.deck-drawer__content {
+  display: flex;
+  flex-direction: column;
+  gap: 28px;
+}
+
+.deck-drawer__group {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+}
+
+.deck-drawer__group-header {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  padding-bottom: 8px;
+  border-bottom: 1px solid rgba($color-primary, 0.14);
+}
+
+.deck-drawer__group-title {
+  margin: 0;
+  font-size: 10px;
+  text-transform: uppercase;
+  letter-spacing: 0.1em;
+  color: rgba($color-primary-light, 0.6);
+  padding-left: 8px;
+  border-left: 2px solid rgba($color-primary, 0.45);
+}
+
+.deck-drawer__group-count {
+  margin-left: auto;
+  color: $color-primary-light;
+  font-size: 11px;
+  font-weight: $font-weight-semibold;
+  background: rgba($color-primary, 0.12);
+  border: 1px solid rgba($color-primary, 0.25);
+  border-radius: $border-radius-full;
+  padding: 1px 8px;
+}
+
+.deck-drawer__cards {
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+}
+
+.deck-drawer__card {
+  display: grid;
+  grid-template-columns: 68px minmax(0, 1fr);
+  gap: 12px;
+  align-items: start;
+  padding: 9px;
+  border-radius: $border-radius-md;
+  border: 1px solid rgba(255, 255, 255, 0.05);
+  background: rgba(0, 0, 0, 0.2);
+  transition: border-color $transition-fast, background $transition-fast, box-shadow $transition-fast;
+
+  &:hover {
+    border-color: rgba($color-primary, 0.28);
+    background: rgba($color-primary, 0.05);
+    box-shadow: 0 4px 16px rgba(0, 0, 0, 0.28);
+  }
+}
+
+.deck-drawer__card-image {
+  width: 68px;
+  height: 95px;
+  object-fit: cover;
+  border-radius: 8px;
+  background: rgba(255, 255, 255, 0.04);
+  cursor: zoom-in;
+  transition: filter $transition-fast, transform $transition-fast;
+  display: block;
+
+  .deck-drawer__card:hover & {
+    filter: brightness(1.08);
+  }
+}
+
+.deck-drawer__card-image--placeholder {
+  border: 1px dashed rgba(255, 255, 255, 0.08);
+  cursor: default;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+}
+
+.deck-drawer__card-spinner {
+  width: 24px;
+  height: 24px;
+  border-radius: 50%;
+  border: 2px solid rgba($color-primary-light, 0.22);
+  border-top-color: rgba($color-primary-light, 0.95);
+  animation: deck-drawer-spin 0.9s linear infinite;
+}
+
+.deck-drawer__card-body {
+  min-width: 0;
+  display: flex;
+  flex-direction: column;
+  gap: 5px;
+  padding-top: 2px;
+}
+
+.deck-drawer__card-name-row {
+  display: flex;
+  align-items: baseline;
+  gap: 7px;
+  flex-wrap: wrap;
+}
+
+.deck-drawer__card-qty {
+  color: $color-primary-light;
+  font-size: 11px;
+  font-weight: $font-weight-bold;
+  font-variant-numeric: tabular-nums;
+  background: rgba($color-primary, 0.14);
+  border: 1px solid rgba($color-primary, 0.25);
+  border-radius: 4px;
+  padding: 1px 5px;
+  line-height: 1.4;
+  flex-shrink: 0;
+}
+
+.deck-drawer__card-name {
+  color: $color-text;
+  text-decoration: none;
+  font-size: 13px;
+  font-weight: $font-weight-semibold;
+  line-height: 1.3;
+}
+
+.deck-drawer__card-name:hover {
+  color: $color-primary-light;
+  text-decoration: underline dotted;
+}
+
+.deck-drawer__card-meta {
+  display: flex;
+  gap: 8px;
+  flex-wrap: wrap;
+  font-size: 11px;
+  color: $color-text-muted;
+  align-items: center;
+}
+
+.deck-drawer__card-tags {
+  display: flex;
+  gap: 4px;
+  flex-wrap: wrap;
+  margin-top: 1px;
+}
+
+.deck-drawer__card-tag {
+  font-size: 10px;
+  color: rgba($color-text-muted, 0.85);
+  background: rgba($color-primary, 0.07);
+  border: 1px solid rgba($color-primary-light, 0.1);
+  border-radius: 4px;
+  padding: 1px 6px;
+  white-space: nowrap;
+}
+
+@keyframes deck-drawer-spin {
+  to {
+    transform: rotate(360deg);
+  }
+}
+
+@media (max-width: $breakpoint-sm) {
+  .deck-drawer__panel {
+    padding: 18px 14px 28px;
+  }
+
+  .deck-drawer__header {
+    flex-direction: column;
+  }
+
+  .deck-drawer__header-actions {
+    justify-content: flex-start;
+  }
+
+  .deck-drawer__card {
+    grid-template-columns: 54px minmax(0, 1fr);
+  }
+
+  .deck-drawer__card-image {
+    width: 54px;
+    height: 76px;
   }
 }
 

@@ -7,6 +7,17 @@ export interface IGamePlayer {
   points: number | null
   eliminations: number | null
   commanderCasts: number | null
+  decklist: {
+    deckId: string
+    name: string
+    owner: string
+    url: string
+    cards: {
+      name: string
+      quantity: number
+      categories: string[]
+    }[]
+  } | null
 }
 
 export interface IGame extends Document {
@@ -23,6 +34,23 @@ const GamePlayerSchema = new Schema<IGamePlayer>(
     points: { type: Number, default: null },
     eliminations: { type: Number, default: null },
     commanderCasts: { type: Number, default: null },
+    decklist: {
+      type: {
+        deckId: { type: String, required: true },
+        name: { type: String, required: true },
+        owner: { type: String, default: '' },
+        url: { type: String, required: true },
+        cards: {
+          type: [{
+            name: { type: String, required: true },
+            quantity: { type: Number, required: true },
+            categories: { type: [String], default: [] },
+          }],
+          default: [],
+        },
+      },
+      default: null,
+    },
   },
   { _id: false }
 )

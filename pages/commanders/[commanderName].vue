@@ -913,6 +913,36 @@ function onTitleLeave() {
     }
   }
 }
+
+@media (max-width: $breakpoint-md) {
+  .cmd-page {
+    &__hero {
+      flex-direction: column;
+      gap: $spacing-4;
+    }
+
+    &__card-wrap {
+      padding: 0;
+    }
+
+    &__card {
+      width: 160px;
+    }
+  }
+}
+
+@media (max-width: $breakpoint-sm) {
+  .cmd-page {
+    &__title {
+      font-size: $font-size-2xl;
+    }
+  }
+
+  .player-row {
+    flex-direction: column;
+    gap: 0;
+  }
+}
 </style>
 
 <style lang="scss">

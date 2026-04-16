@@ -485,6 +485,66 @@ function rankDelta(playerName: string): number {
   }
 }
 
+@media (max-width: $breakpoint-sm) {
+  .game-card {
+    &:hover {
+      transform: none; // avoid scale on mobile (causes layout issues)
+    }
+
+    &__art {
+      width: 90px;
+    }
+
+    &__art-others {
+      height: 44px;
+    }
+
+    &__body {
+      padding: $spacing-3;
+    }
+
+    &__player {
+      grid-template-columns: 1.8rem 4rem 1fr;
+      gap: $spacing-2;
+    }
+
+    &__header {
+      padding: $spacing-1 $spacing-2;
+    }
+  }
+}
+
+@media (max-width: 400px) {
+  .game-card {
+    flex-direction: column;
+
+    &__art {
+      width: 100%;
+      flex-direction: row;
+      height: 80px;
+    }
+
+    &__art-winner {
+      flex: 1;
+      padding: 6px;
+    }
+
+    &__art-others {
+      flex-direction: column;
+      width: 60px;
+      height: 100%;
+      border-top: 0;
+      border-left: 1px solid $border-color;
+    }
+
+    &__art-other {
+      flex: 1;
+      margin: 2px;
+      & + & { border-left: 0; border-top: 1px solid $border-color; }
+    }
+  }
+}
+
 .tier-badge {
   flex-shrink: 0;
   font-size: 9px;
