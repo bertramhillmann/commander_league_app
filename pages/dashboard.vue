@@ -156,6 +156,67 @@
       </tbody>
     </table>
 
+    <section
+      v-if="featuredPlayer || loggedInArchEnemy"
+      class="dashboard__spotlight"
+      :class="{ 'dashboard__spotlight--no-art': !featuredPlayer }"
+    >
+      <div v-if="featuredPlayer" class="dashboard__spotlight-art">
+        <img
+          v-if="featuredPlayer.imageUrl"
+          :src="featuredPlayer.imageUrl"
+          :alt="featuredPlayer.name"
+          class="dashboard__spotlight-art-img"
+        />
+        <div v-else class="dashboard__spotlight-art-placeholder">
+          {{ featuredPlayer.initials }}
+        </div>
+        <div class="dashboard__spotlight-art-overlay" />
+      </div>
+
+      <div class="dashboard__spotlight-body">
+        <div v-if="featuredPlayer" class="dashboard__spotlight-player">
+          <div class="dashboard__spotlight-eyebrow">Featured Player</div>
+          <NuxtLink
+            class="dashboard__spotlight-name"
+            :to="`/players/${encodeURIComponent(featuredPlayer.name)}`"
+          >{{ featuredPlayer.name }}</NuxtLink>
+          <div class="dashboard__spotlight-player-title">{{ featuredPlayer.title }}</div>
+          <p class="dashboard__spotlight-summary">{{ featuredPlayer.summary }}</p>
+          <ul class="dashboard__spotlight-reasons">
+            <li
+              v-for="reason in featuredPlayer.reasons"
+              :key="reason"
+              class="dashboard__spotlight-reason"
+            >{{ reason }}</li>
+          </ul>
+        </div>
+
+        <div v-if="honorableMentions.length" class="dashboard__spotlight-honorable">
+          <div class="dashboard__spotlight-honorable-label">Honorable Mentions</div>
+          <div class="dashboard__spotlight-honorable-list">
+            <NuxtLink
+              v-for="player in honorableMentions"
+              :key="player.name"
+              class="dashboard__spotlight-mention"
+              :to="`/players/${encodeURIComponent(player.name)}`"
+            >
+              <div class="dashboard__spotlight-mention-header">
+                <div class="dashboard__spotlight-mention-name">{{ player.name }}</div>
+                <div class="dashboard__spotlight-mention-title">{{ player.title }}</div>
+              </div>
+              <p class="dashboard__spotlight-mention-summary">{{ player.summary }}</p>
+            </NuxtLink>
+          </div>
+        </div>
+
+        <div v-if="loggedInArchEnemy" class="dashboard__spotlight-aside">
+          <div class="dashboard__spotlight-aside-label">Your Arch Enemy</div>
+          <PlayersArchEnemyCard :summary="loggedInArchEnemy" />
+        </div>
+      </div>
+    </section>
+
     <CommandersTopCommander />
 
     <h2 class="dashboard__subtitle">Player × Commander Pairings</h2>
@@ -400,7 +461,10 @@
 
 <script setup lang="ts">
 import { computed, reactive, ref } from 'vue'
-import { getPlayerCommanderMetrics } from '~/composables/useLeagueState'
+import { compareGamesChronological, getPlayerCommanderMetrics } from '~/composables/useLeagueState'
+import { getArchEnemySummary } from '~/utils/archEnemy'
+import { getFeaturedPlayers, type FeaturedPlayerCandidate } from '~/utils/featuredPlayer'
+import { formatPlayerName } from '~/utils/playerNames'
 import {
   EXPECTED_WIN_RATE,
   PERF_BASE_WEIGHT,
@@ -411,7 +475,8 @@ import {
 } from '~/utils/placements'
 import { computeGlobalCommanderBaseline, computePlayerCommanderTier, type Tier } from '~/utils/tiers'
 
-const { commanders, gameRecords, players, standings } = useLeagueState()
+const { commanders, gameRecords, games, players, standings } = useLeagueState()
+const { user, ensureSession } = useAuth()
 
 type SortKey =
   | 'totalScore'
@@ -428,6 +493,28 @@ const sortKey = ref<SortKey>('totalScore')
 const sortDirection = ref<'desc' | 'asc'>('desc')
 const pairingSortKey = ref<SortKey>('totalScore')
 const pairingSortDirection = ref<'desc' | 'asc'>('desc')
+const chronologicalGames = computed(() => [...games.value].sort(compareGamesChronological))
+const playerPortraitModules = import.meta.glob('../assets/img/*.png', { eager: true, import: 'default' })
+const playerPortraits = Object.fromEntries(
+  Object.entries(playerPortraitModules).map(([path, url]) => {
+    const fileName = path.split('/').pop() ?? ''
+    const key = fileName.replace(/\.png$/i, '').toLowerCase()
+    return [key, url as string]
+  }),
+)
+const gameOrderMap = computed(() =>
+  new Map(chronologicalGames.value.map((game, index) => [game.gameId, index])),
+)
+const loggedInArchEnemy = computed(() => {
+  if (!user.value) return null
+  const playerName = formatPlayerName(user.value)
+  if (!players.value[playerName]) return null
+  return getArchEnemySummary(playerName, chronologicalGames.value, gameRecords.value)
+})
+
+onMounted(async () => {
+  await ensureSession()
+})
 
 type MultRow = {
   winRate: number
@@ -606,7 +693,45 @@ const pairingTable = computed(() => {
     .map((row, index) => ({ ...row, rank: index + 1 }))
 })
 
+const featuredPlayers = computed<FeaturedPlayerCandidate[]>(() => {
+  // Prefer players who have a portrait image
+  const withImages = getFeaturedPlayers(gameRecords.value, gameOrderMap.value, {
+    resolveImageUrl: getPlayerPortrait,
+    requireImage: true,
+  }, 3)
+  if (withImages.length > 0) return withImages
+
+  // Fall back to signal-based without image requirement
+  const withoutImages = getFeaturedPlayers(gameRecords.value, gameOrderMap.value, {
+    resolveImageUrl: getPlayerPortrait,
+    requireImage: false,
+  }, 3)
+  if (withoutImages.length > 0) return withoutImages
+
+  // Final fallback: current league leader with a generic highlight
+  const leader = standings.value[0]
+  if (!leader) return []
+  return [{
+    name: leader.name,
+    imageUrl: getPlayerPortrait(leader.name),
+    initials: leader.name.slice(0, 2).toUpperCase(),
+    title: 'League Leader',
+    summary: `${leader.name} sits at the top of the standings, currently leading the league.`,
+    reasons: [
+      `Ranked #1 with ${leader.gamesPlayed} game${leader.gamesPlayed === 1 ? '' : 's'} played.`,
+    ],
+    score: 0,
+  }]
+})
+
+const featuredPlayer = computed<FeaturedPlayerCandidate | null>(() => featuredPlayers.value[0] ?? null)
+const honorableMentions = computed<FeaturedPlayerCandidate[]>(() => featuredPlayers.value.slice(1, 3))
+
 function r3(n: number): number { return Math.round(n * 1000) / 1000 }
+
+function getPlayerPortrait(playerName: string) {
+  return playerPortraits[playerName.toLowerCase()] ?? ''
+}
 
 function toggleSort(key: SortKey) {
   if (sortKey.value === key) {
@@ -823,6 +948,226 @@ function onMultLeave() {
   margin: $spacing-8 0 $spacing-4;
 }
 
+.dashboard__spotlight {
+  display: grid;
+  grid-template-columns: 180px minmax(0, 1fr);
+  margin: $spacing-8 0;
+  border: 1px solid rgba($color-primary-light, 0.18);
+  border-radius: $border-radius-xl;
+  overflow: hidden;
+  backdrop-filter: blur(3px);
+  background: linear-gradient(45deg, black, rgba(100, 24, 140, 0.1));
+  box-shadow:
+    inset 0 0 0 1px rgba(255, 240, 214, 0.03),
+    $shadow-lg;
+
+  &--no-art {
+    grid-template-columns: 1fr;
+  }
+
+  &-art {
+    position: relative;
+    display: flex;
+    align-items: stretch;
+    justify-content: center;
+    padding: $spacing-3;
+  }
+
+  &-art-img {
+    width: 100%;
+    display: block;
+    object-fit: cover;
+    object-position: center top;
+    border-radius: $border-radius-lg;
+  }
+
+  &-art-placeholder {
+    width: 100%;
+    aspect-ratio: 1 / 1;
+    display: grid;
+    place-items: center;
+    font-size: 1.8rem;
+    font-weight: $font-weight-bold;
+    letter-spacing: 0.08em;
+    color: rgba($color-text, 0.9);
+    border-radius: $border-radius-lg;
+    background:
+      radial-gradient(circle at top, rgba($color-primary-light, 0.18), transparent 55%),
+      linear-gradient(180deg, rgba(22, 28, 38, 0.92), rgba(8, 11, 17, 0.96));
+  }
+
+  &-art-overlay {
+    position: absolute;
+    inset: 0;
+    background:
+      linear-gradient(180deg, rgba(11, 8, 6, 0.02), rgba(11, 8, 6, 0.45)),
+      linear-gradient(90deg, rgba(11, 8, 6, 0), rgba(11, 8, 6, 0.25));
+  }
+
+  &-body {
+    padding: $spacing-4;
+    display: flex;
+    flex-direction: row;
+    gap: $spacing-4;
+    align-items: flex-start;
+  }
+
+  &-player {
+    flex: 1;
+    min-width: 0;
+    display: flex;
+    flex-direction: column;
+    gap: $spacing-2;
+  }
+
+  &-eyebrow {
+    color: $color-primary-light;
+    font-size: 10px;
+    text-transform: uppercase;
+    letter-spacing: 0.12em;
+    font-weight: $font-weight-semibold;
+  }
+
+  &-name {
+    font-size: $font-size-xl;
+    font-family: $font-family-display;
+    font-weight: $font-weight-bold;
+    line-height: 1;
+    color: $color-text;
+    text-decoration: none;
+
+    &:hover {
+      color: $color-primary-light;
+    }
+  }
+
+  &-player-title {
+    font-size: $font-size-xs;
+    font-weight: $font-weight-semibold;
+    text-transform: uppercase;
+    letter-spacing: 0.08em;
+    color: rgba($color-secondary, 0.88);
+  }
+
+  &-summary {
+    margin: 0;
+    max-width: 60ch;
+    color: $color-text-muted;
+    font-size: $font-size-sm;
+  }
+
+  &-reasons {
+    margin: 0;
+    padding: 0;
+    list-style: none;
+    display: grid;
+    grid-template-columns: repeat(2, minmax(0, 1fr));
+    gap: $spacing-3;
+  }
+
+  &-reason {
+    display: flex;
+    flex-direction: column;
+    gap: 4px;
+    padding: $spacing-3;
+    border-radius: $border-radius-lg;
+    background: rgba(10, 0, 30, 0.25);
+    border: 1px solid rgba($border-color, 0.72);
+    font-size: $font-size-sm;
+    color: $color-text;
+    font-weight: $font-weight-semibold;
+    line-height: 1.4;
+  }
+
+  &-honorable {
+    flex: 0 1 320px;
+    min-width: 260px;
+    display: flex;
+    flex-direction: column;
+    gap: $spacing-2;
+  }
+
+  &-honorable-label {
+    font-size: 10px;
+    text-transform: uppercase;
+    letter-spacing: 0.12em;
+    font-weight: $font-weight-semibold;
+    color: rgba($color-secondary, 0.8);
+  }
+
+  &-honorable-list {
+    display: flex;
+    flex-direction: column;
+    gap: $spacing-2;
+  }
+
+  &-mention {
+    display: flex;
+    flex-direction: column;
+    gap: 6px;
+    padding: $spacing-3;
+    border-radius: $border-radius-md;
+    border: 1px solid rgba($color-primary-light, 0.14);
+    background: rgba(255, 255, 255, 0.04);
+    color: inherit;
+    text-decoration: none;
+    transition: border-color $transition-fast, transform $transition-fast, background $transition-fast;
+
+    &:hover {
+      transform: translateY(-1px);
+      border-color: rgba($color-primary-light, 0.3);
+      background: rgba(255, 255, 255, 0.06);
+    }
+  }
+
+  &-mention-header {
+    display: flex;
+    flex-direction: column;
+    gap: 2px;
+  }
+
+  &-mention-name {
+    color: $color-text;
+    font-weight: $font-weight-semibold;
+    line-height: 1.1;
+  }
+
+  &-mention-title {
+    font-size: 10px;
+    text-transform: uppercase;
+    letter-spacing: 0.08em;
+    color: rgba($color-primary-light, 0.78);
+  }
+
+  &-mention-summary {
+    margin: 0;
+    color: rgba($color-text-muted, 0.95);
+    font-size: $font-size-xs;
+    line-height: 1.45;
+  }
+
+  &-aside {
+    flex-shrink: 0;
+    display: flex;
+    flex-direction: column;
+    align-items: flex-end;
+    gap: $spacing-1;
+  }
+
+  &-aside-label {
+    font-size: 10px;
+    text-transform: uppercase;
+    letter-spacing: 0.12em;
+    font-weight: $font-weight-semibold;
+    color: rgba($color-danger, 0.65);
+  }
+
+  :deep(.arch-enemy-card) {
+    background: rgba(0, 0, 0, 0.25);
+    align-items: flex-end;
+  }
+}
+
 .standings {
   width: 100%;
   background: rgba(0, 0, 0, 0.25);
@@ -958,6 +1303,28 @@ function onMultLeave() {
     &:hover {
       color: $color-primary-light;
       text-decoration: underline dotted;
+    }
+  }
+}
+
+@media (max-width: $breakpoint-md) {
+  .dashboard__spotlight {
+    grid-template-columns: 1fr;
+
+    &-art {
+      min-height: 140px;
+    }
+
+    &-body {
+      flex-direction: column;
+    }
+
+    &-honorable {
+      min-width: 0;
+    }
+
+    &-aside {
+      align-items: flex-start;
     }
   }
 }

@@ -463,14 +463,14 @@ function onCardPreviewLeave() {
     font-size: $font-size-xs;
     font-family: inherit;
     color: $color-text-muted;
-    background: $color-bg-card;
+    background: rgba(0,0,0,0.25);
     border: 1px solid $border-color;
     cursor: pointer;
     transition: color $transition-fast, background $transition-fast, border-color $transition-fast;
   }
 
   &__sort-btn {
-    border-radius: $border-radius-full;
+    border-radius: 4px;
 
     &--active {
       color: $color-primary-light;
@@ -590,7 +590,7 @@ function onCardPreviewLeave() {
     align-items: center;
     min-width: 66px;
     padding: $spacing-2 $spacing-3;
-    background: $color-bg-elevated;
+    background: rgba(0,0,0,0.25);
     border: 1px solid $border-color;
     border-radius: $border-radius-md;
 
@@ -642,9 +642,9 @@ function onCardPreviewLeave() {
     gap: $spacing-2;
     flex-wrap: wrap;
     padding: $spacing-2 $spacing-3;
-    background: rgba($color-bg-elevated, 0.8);
-    border: 1px solid rgba($border-color, 0.82);
-    border-radius: $border-radius-md;
+    background: rgba(0,0,0,0.25);
+    border-bottom-left-radius: $border-radius-md;
+    border-bottom-right-radius: $border-radius-md;
   }
 
   &__leader-name {

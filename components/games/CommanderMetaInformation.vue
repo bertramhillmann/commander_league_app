@@ -20,14 +20,10 @@
       </span>
     </div>
 
-    <div class="cmd-meta__divider" />
-
     <!--<div class="cmd-meta__title-copy">
       <div class="cmd-meta__title-description">{{ commanderTitle.description }}</div>
       <div class="cmd-meta__title-reason">{{ commanderTitle.reason }}</div>
     </div>-->
-
-    <div class="cmd-meta__divider" />
 
     <!-- Level + progress bar -->
     <div class="cmd-meta__level-row">
@@ -41,12 +37,11 @@
       <span class="cmd-meta__level-next">
         {{ isMaxLevel ? 'MAX' : `Lvl ${level + 1}` }}
       </span>
+      <div class="cmd-meta__xp-label">
+        {{ currentLevelXP }} / {{ levelSpanXP }} XP
+      </div>
+    
     </div>
-    <div class="cmd-meta__xp-label">
-      {{ currentLevelXP }} / {{ levelSpanXP }} XP
-    </div>
-
-    <div class="cmd-meta__divider" />
 
     <!-- Stats -->
     <div class="cmd-meta__stats">
@@ -272,18 +267,44 @@ const winRatePct = computed(() =>
   }
 
   &__level-row {
+    position:relative;
     display: flex;
+    flex-wrap: wrap;
     align-items: center;
     gap: $spacing-2;
-    padding: $spacing-1 $spacing-3;
+    margin:8px 0px;
+    border-top:1px solid $border-color;
+    border-bottom:1px solid $border-color;
+    padding: $spacing-3 $spacing-3 $spacing-2;
+    background:rgba(0,0,0,0.5);
+    @include dropshadow();
+
+    * {
+      position: relative;
+      z-index:1;
+    }
+
+    &:after {
+      content:"";
+      position:absolute;
+      top:0;
+      left:0;
+      width:100%;
+      height:100%;
+      background:url(/assets/img/xp_texture.jpg);
+      opacity:0.1;
+      z-index:0 !important;
+    }
   }
 
   &__level-label,
   &__level-next {
+    position: relative;
     font-size: $font-size-xs;
     color: $color-text-muted;
     white-space: nowrap;
     min-width: 32px;
+    z-index:3;
   }
 
   &__level-next {
@@ -293,7 +314,7 @@ const winRatePct = computed(() =>
   &__bar-wrap {
     flex: 1;
     height: 6px;
-    background: $color-bg-card;
+    background: rgba(0,0,0,0.75);
     border-radius: $border-radius-full;
     overflow: hidden;
   }
@@ -306,9 +327,10 @@ const winRatePct = computed(() =>
   }
 
   &__xp-label {
+    flex: 1 0 100%;
     font-size: 10px;
     color: $color-text-muted;
-    padding: 0 $spacing-3 $spacing-2;
+    margin-top: -$spacing-1;
   }
 
   &__stats {

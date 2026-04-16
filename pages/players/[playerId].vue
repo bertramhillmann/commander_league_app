@@ -7,6 +7,12 @@
 
       <div class="player__placement-overview">
         <div class="player__placement-cards">
+          <img
+            v-if="playerPortraitUrl"
+            :src="playerPortraitUrl"
+            :alt="displayPlayerName"
+            class="player__placement-portrait"
+          />
           <div class="player__placement-card player__placement-card--current">
             <span class="player__placement-rank">#{{ currentLeagueRank }}</span>
             <span class="player__placement-label">League Standing</span>
@@ -35,6 +41,25 @@
             </template>
           </div>
 
+          <PlayersArchEnemyCard
+            class="player__arch-enemy"
+            :summary="playerArchEnemy"
+          />
+        </div>
+
+        <div v-if="playerSuggestion" class="player__focus-tip">
+          <span class="player__focus-tip-label">Focus Tip</span>
+          <div class="player__focus-tip-title">{{ playerSuggestion.title }}</div>
+          <p class="player__focus-tip-summary">{{ playerSuggestion.summary }}</p>
+          <ul class="player__focus-tip-reasons">
+            <li
+              v-for="reason in playerSuggestion.reasons"
+              :key="reason"
+              class="player__focus-tip-reason"
+            >
+              {{ reason }}
+            </li>
+          </ul>
           <div
             v-if="placementPrognosis.hasEnoughData && placementPrognosis.commanderSuggestions?.length > 0"
             class="player__placement-picks"
@@ -60,21 +85,6 @@
               </button>
             </div>
           </div>
-        </div>
-
-        <div v-if="playerSuggestion" class="player__focus-tip">
-          <span class="player__focus-tip-label">Focus Tip</span>
-          <div class="player__focus-tip-title">{{ playerSuggestion.title }}</div>
-          <p class="player__focus-tip-summary">{{ playerSuggestion.summary }}</p>
-          <ul class="player__focus-tip-reasons">
-            <li
-              v-for="reason in playerSuggestion.reasons"
-              :key="reason"
-              class="player__focus-tip-reason"
-            >
-              {{ reason }}
-            </li>
-          </ul>
         </div>
       </div>
 
@@ -109,23 +119,63 @@
           <span class="player__stat-val">{{ fmt(avgPerGame) }}</span>
           <span class="player__stat-lbl">Avg / Game</span>
         </div>
-        <div class="player__stat">
-          <span class="player__stat-val player__stat-val--lp">{{ fmt(player.totalLPoints) }}</span>
-          <span class="player__stat-lbl">L-Points</span>
+        <div
+          class="player__stat player__stat--hoverable"
+          @mouseenter="onConsistencyEnter($event)"
+          @mousemove="onConsistencyMove($event)"
+          @mouseleave="onConsistencyLeave"
+        >
+          <span class="player__stat-val player__stat-val--muted">{{ consistencyFactor }}%</span>
+          <span class="player__stat-lbl">Consistency</span>
         </div>
-        <div class="player__stat">
-          <span class="player__stat-val player__stat-val--muted">{{ uniqueCommandersCount }}</span>
-          <span class="player__stat-lbl">Commanders</span>
+        <div
+          class="player__stat player__stat--hoverable"
+          @mouseenter="onClutchEnter($event)"
+          @mousemove="onClutchMove($event)"
+          @mouseleave="onClutchLeave"
+        >
+          <span class="player__stat-val player__stat-val--muted">{{ clutchRating }}%</span>
+          <span class="player__stat-lbl">Clutch</span>
         </div>
         <div class="player__stat">
           <span class="player__stat-val player__stat-val--muted">{{ fmt(avgPlacementOverall) }}</span>
           <span class="player__stat-lbl">Avg Place</span>
         </div>
+        <div class="player__stat">
+          <span class="player__stat-val player__stat-val--lp">{{ fmt(player.totalLPoints) }}</span>
+          <span class="player__stat-lbl">L-Points</span>
+        </div>
       </div>
 
-      <div v-if="leagueTimeline.length > 0" class="player__league-panel">
+      <div v-if="leagueTimeline.length > 0 || playerMatchTimeline.length > 0" class="player__league-panel">
         <div class="player__league-chart">
-          <ChartsLeagueRankTimeline :points="leagueTimeline" />
+          <div class="player__league-chart-switcher">
+            <button
+              type="button"
+              class="player__league-chart-switch"
+              :class="{ 'player__league-chart-switch--active': activePlayerChart === 'league' }"
+              @click="activePlayerChart = 'league'"
+            >
+              League Placement
+            </button>
+            <button
+              type="button"
+              class="player__league-chart-switch"
+              :class="{ 'player__league-chart-switch--active': activePlayerChart === 'results' }"
+              @click="activePlayerChart = 'results'"
+            >
+              Match Results
+            </button>
+          </div>
+
+          <ChartsLeagueRankTimeline
+            v-if="activePlayerChart === 'league'"
+            :points="leagueTimeline"
+          />
+          <ChartsPlayerMatchTimeline
+            v-else
+            :points="playerMatchTimeline"
+          />
         </div>
 
         <div v-if="playerAchievements.length > 0" class="player__league-achievements">
@@ -422,23 +472,79 @@
       </div>
     </div>
   </Teleport>
+
+  <Teleport to="body">
+    <div
+      v-if="consistencyPreview.visible"
+      class="floating-panel"
+      :style="{ top: `${consistencyPreview.y}px`, left: `${consistencyPreview.x}px` }"
+    >
+      <div class="dependency-tooltip">
+        <div class="dependency-tooltip__title">Consistency</div>
+        <p class="dependency-tooltip__line">
+          Measures how tightly this player's finishes cluster around their usual level.
+        </p>
+        <p class="dependency-tooltip__line">
+          We normalize placements across 3-, 4-, and 5-player games, calculate the standard deviation, then invert it.
+        </p>
+        <p class="dependency-tooltip__line dependency-tooltip__line--muted">
+          Higher = steadier results. Lower = more swingy results, from spikes and slumps alike.
+        </p>
+      </div>
+    </div>
+  </Teleport>
+
+  <Teleport to="body">
+    <div
+      v-if="clutchPreview.visible"
+      class="floating-panel"
+      :style="{ top: `${clutchPreview.y}px`, left: `${clutchPreview.x}px` }"
+    >
+      <div class="dependency-tooltip">
+        <div class="dependency-tooltip__title">Clutch</div>
+        <p class="dependency-tooltip__line">
+          Measures how often this player converts a podium appearance into a win.
+        </p>
+        <p class="dependency-tooltip__line">
+          Formula: 1st places ÷ (top-2 finishes + 1), expressed as a percentage.
+        </p>
+        <p class="dependency-tooltip__line dependency-tooltip__line--muted">
+          Higher = wins flow from top finishes. Lower = often 2nd but rarely 1st.
+        </p>
+      </div>
+    </div>
+  </Teleport>
 </template>
 
 <script setup lang="ts">
 import { compareGamesChronological, getLeagueStandingMetrics, getPlayerCommanderPerformanceEdgeMetrics, getPlayerCommanderMetrics } from '~/composables/useLeagueState'
 import { xpToLevel, getCommanderLevelProgress } from '~/utils/commanderExperience'
+import { getArchEnemySummary } from '~/utils/archEnemy'
 import { buildCommanderPlacementTimeline, type PlacementTimelinePoint } from '~/utils/commanderTimeline'
 import { buildPlayerLeagueTimeline } from '~/utils/playerLeagueTimeline'
+import { buildPlayerMatchTimeline } from '~/utils/playerMatchTimeline'
 import { buildPlacementPrognosis } from '~/utils/placementPrognosis'
 import { formatPlayerName } from '~/utils/playerNames'
 import { buildPlayerSuggestion, type PlayerCommanderPickSuggestion } from '~/utils/playerSuggestions'
 import { computeGlobalCommanderBaseline, computePlayerCommanderTier, smoothedTierScore, getTierDetail, type TierDetail, type TierContext } from '~/utils/tiers'
 import { ACHIEVEMENTS } from '~/utils/achievements'
+
+const RARITY_ORDER: Record<string, number> = { common: 0, uncommon: 1, rare: 2, mythic: 3 }
 import { getCommanderPerformanceTitle, type CommanderTitleResult } from '~/utils/titles'
 
 const route = useRoute()
 const playerId = computed(() => route.params.playerId as string)
 const displayPlayerName = computed(() => formatPlayerName(playerId.value))
+
+const playerPortraitModules = import.meta.glob('../../assets/img/*.png', { eager: true, import: 'default' })
+const playerPortraits = Object.fromEntries(
+  Object.entries(playerPortraitModules).map(([path, url]) => {
+    const fileName = path.split('/').pop() ?? ''
+    const key = fileName.replace(/\.png$/i, '').toLowerCase()
+    return [key, url as string]
+  }),
+)
+const playerPortraitUrl = computed(() => playerPortraits[playerId.value.toLowerCase()] ?? '')
 
 const { games, commanders, players, gameRecords, leagueSnapshots, standings } = useLeagueState()
 const { preloadCommanderImages, getCachedCommanderImage } = useImageCache()
@@ -451,9 +557,16 @@ const chronologicalGames = computed(() => [...games.value].sort(compareGamesChro
 const leagueTimeline = computed(() =>
   buildPlayerLeagueTimeline(chronologicalGames.value, gameRecords.value, leagueSnapshots.value, playerId.value),
 )
+const playerMatchTimeline = computed(() =>
+  buildPlayerMatchTimeline(chronologicalGames.value, gameRecords.value, playerId.value),
+)
+const playerArchEnemy = computed(() =>
+  getArchEnemySummary(playerId.value, chronologicalGames.value, gameRecords.value),
+)
 const currentLeagueRank = computed(() =>
   standings.value.find((entry) => entry.name === playerId.value)?.rank ?? standings.value.length,
 )
+const activePlayerChart = ref<'league' | 'results'>('league')
 const placementPrognosis = computed(() =>
   buildPlacementPrognosis(playerId.value, chronologicalGames.value, gameRecords.value, players.value, commanders.value),
 )
@@ -480,7 +593,11 @@ const playerAchievements = computed(() => {
         count,
       }
     })
-    .sort((a, b) => (b.points * b.count) - (a.points * a.count) || a.name.localeCompare(b.name))
+    .sort((a, b) => {
+      const ra = RARITY_ORDER[ACHIEVEMENTS[a.id]?.rarity ?? 'common'] ?? 0
+      const rb = RARITY_ORDER[ACHIEVEMENTS[b.id]?.rarity ?? 'common'] ?? 0
+      return ra - rb || a.name.localeCompare(b.name)
+    })
 })
 
 // ── Player-level stats ────────────────────────────────────────────────────────
@@ -508,13 +625,29 @@ const avgPerGame = computed(() => {
 
 const allRecords = computed(() => Object.values(gameRecords.value[playerId.value] ?? {}))
 
-const uniqueCommandersCount = computed(() => new Set(allRecords.value.map((r) => r.commander)).size)
+const clutchRating = computed(() => {
+  const recs = allRecords.value
+  const firstPlaces = recs.filter((r) => r.placement === 1).length
+  const top2Places = recs.filter((r) => r.placement <= 2).length
+  return Math.round((firstPlaces / (top2Places + 1)) * 100)
+})
 
 const avgPlacementOverall = computed(() => {
   const recs = allRecords.value
   if (recs.length === 0) return 0
   const sum = recs.reduce((s, r) => s + r.placement, 0)
   return Math.round((sum / recs.length) * 100) / 100
+})
+
+const consistencyFactor = computed(() => {
+  const recs = allRecords.value
+  if (recs.length < 2) return 0
+
+  const normalizedPlacements = recs.map((record) => normalizePlacement(record.placement, record.playerCount))
+  const normalizedStdDev = standardDeviation(normalizedPlacements)
+  const normalizedVarianceShare = Math.min(1, normalizedStdDev / 0.5)
+
+  return Math.round((1 - normalizedVarianceShare) * 100)
 })
 
 // ── Per-commander aggregation ─────────────────────────────────────────────────
@@ -562,6 +695,23 @@ type CommanderIndicator = {
   strength: 1 | 2
   metricLabel: string
   deltaRatio: number
+}
+
+function normalizePlacement(placement: number, playerCount: number) {
+  if (playerCount <= 1) return 0
+  return (placement - 1) / (playerCount - 1)
+}
+
+function average(values: number[]) {
+  if (values.length === 0) return 0
+  return values.reduce((sum, value) => sum + value, 0) / values.length
+}
+
+function standardDeviation(values: number[]) {
+  if (values.length === 0) return 0
+  const mean = average(values)
+  const variance = average(values.map((value) => (value - mean) ** 2))
+  return Math.sqrt(variance)
 }
 
 const commanderRows = computed((): CommanderRow[] => {
@@ -632,6 +782,7 @@ const commanderRows = computed((): CommanderRow[] => {
     const achievements = [...cmdAchIds]
       .map((id) => ACHIEVEMENTS[id])
       .filter(Boolean)
+      .sort((a, b) => (RARITY_ORDER[a.rarity] ?? 0) - (RARITY_ORDER[b.rarity] ?? 0) || a.name.localeCompare(b.name))
       .map((def) => ({ id: def.id, name: def.name, description: def.description, icon: def.icon, points: def.points }))
 
     return {
@@ -751,6 +902,16 @@ const edgePreview = reactive<{
 }>({
   visible: false,
   commander: null,
+  x: 0,
+  y: 0,
+})
+const consistencyPreview = reactive({
+  visible: false,
+  x: 0,
+  y: 0,
+})
+const clutchPreview = reactive({
+  visible: false,
   x: 0,
   y: 0,
 })
@@ -880,6 +1041,42 @@ function onEdgeLeave() {
   edgePreview.commander = null
 }
 
+function onConsistencyEnter(e: MouseEvent) {
+  consistencyPreview.visible = true
+  const pos = calcPreviewPosition(e, 340, 170)
+  consistencyPreview.x = pos.x
+  consistencyPreview.y = pos.y
+}
+
+function onConsistencyMove(e: MouseEvent) {
+  if (!consistencyPreview.visible) return
+  const pos = calcPreviewPosition(e, 340, 170)
+  consistencyPreview.x = pos.x
+  consistencyPreview.y = pos.y
+}
+
+function onConsistencyLeave() {
+  consistencyPreview.visible = false
+}
+
+function onClutchEnter(e: MouseEvent) {
+  clutchPreview.visible = true
+  const pos = calcPreviewPosition(e, 340, 150)
+  clutchPreview.x = pos.x
+  clutchPreview.y = pos.y
+}
+
+function onClutchMove(e: MouseEvent) {
+  if (!clutchPreview.visible) return
+  const pos = calcPreviewPosition(e, 340, 150)
+  clutchPreview.x = pos.x
+  clutchPreview.y = pos.y
+}
+
+function onClutchLeave() {
+  clutchPreview.visible = false
+}
+
 // ── Sort ──────────────────────────────────────────────────────────────────────
 
 const sortOptions = [
@@ -950,12 +1147,7 @@ function formatSignedPercent(value: number) {
 }
 
 function getAchievementRarityClass(id: string): string {
-  const def = ACHIEVEMENTS[id]
-  if (!def) return 'common'
-  if (def.points >= 3) return 'mythic'
-  if (def.points >= 2 || !def.repeatable) return 'rare'
-  if (def.points >= 1) return 'uncommon'
-  return 'common'
+  return ACHIEVEMENTS[id]?.rarity ?? 'common'
 }
 
 function fmtAchPts(value: number): string {
@@ -1002,7 +1194,7 @@ function getEdgeTooltipText(cmd: CommanderRow) {
   }
 
   &__stat {
-    background: $color-bg-card;
+    background: rgba(0,0,0,0.35);
     border: 1px solid $border-color;
     border-radius: $border-radius-md;
     padding: $spacing-3 $spacing-4;
@@ -1011,6 +1203,16 @@ function getEdgeTooltipText(cmd: CommanderRow) {
     align-items: center;
     gap: $spacing-1;
     min-width: 90px;
+
+    &--hoverable {
+      cursor: pointer;
+      transition: background $transition-fast, border-color $transition-fast;
+
+      &:hover {
+        background: rgba($color-primary, 0.1);
+        border-color: rgba($color-primary-light, 0.3);
+      }
+    }
   }
 
   &__stat-val {
@@ -1044,7 +1246,7 @@ function getEdgeTooltipText(cmd: CommanderRow) {
     margin-bottom: $spacing-6;
     border-radius: $border-radius-lg;
     border: 1px solid $border-color;
-    background: $color-bg-card;
+    background: rgba(30,10,45,0.5);
     overflow: hidden;
   }
 
@@ -1055,11 +1257,22 @@ function getEdgeTooltipText(cmd: CommanderRow) {
     padding: $spacing-4 $spacing-6;
   }
 
+  &__placement-portrait {
+    width: 80px;
+    aspect-ratio: 1 / 1;
+    object-fit: cover;
+    object-position: center top;
+    border-radius: $border-radius-lg;
+    flex-shrink: 0;
+    align-self: center;
+  }
+
   &__placement-card {
     display: flex;
     flex-direction: column;
     justify-content: flex-end;
     min-width: 0;
+
   }
 
   &__placement-card--current {
@@ -1142,7 +1355,9 @@ function getEdgeTooltipText(cmd: CommanderRow) {
   }
 
   &__placement-picks {
-    margin-left: auto;
+    grid-column: 3;
+    grid-row: 1 / 4;
+    align-self: end;
     display: flex;
     flex-direction: column;
     justify-content: flex-end;
@@ -1195,9 +1410,9 @@ function getEdgeTooltipText(cmd: CommanderRow) {
   &__focus-tip {
     border-top: 1px solid $border-color;
     padding: $spacing-4 $spacing-6;
-    background: rgba(0, 0, 0, 0.25);
+    background: rgba(0,0,0, 0.35);
     display: grid;
-    grid-template-columns: 56px 1fr;
+    grid-template-columns: 56px 1fr auto;
     grid-template-rows: auto auto auto;
     column-gap: $spacing-4;
     row-gap: $spacing-1;
@@ -1259,27 +1474,69 @@ function getEdgeTooltipText(cmd: CommanderRow) {
   }
 
   &__league-panel {
+    position: relative;
+    left: 50%;
+    transform: translateX(-50%);
+    width: 100vw;
+    padding: $spacing-8 max(#{$spacing-8}, calc(50vw - 720px));
+    background: rgba(0, 0, 0, 0.35);
+    box-shadow: inset 0 12px 28px rgba(0, 0, 0, 0.28), inset 0 -12px 28px rgba(0, 0, 0, 0.28);
+    margin-bottom: $spacing-8;
     display: flex;
     align-items: stretch;
     gap: $spacing-3;
-    margin-bottom: $spacing-8;
     min-width: 0;
   }
 
   &__league-chart {
-    flex: 0 0 600px;
-    height:300px;
+    flex: 1 1 600px;
+    height: 340px;
     min-width: 0;
+    display: flex;
+    flex-direction: column;
+    gap: $spacing-2;
+    overflow: hidden;
+  }
+
+  &__league-chart-switcher {
+    display: inline-flex;
+    align-items: center;
+    gap: $spacing-2;
+    flex-wrap: wrap;
+  }
+
+  &__league-chart-switch {
+    padding: $spacing-1 $spacing-3;
+    font-size: $font-size-xs;
+    font-family: inherit;
+    color: $color-text-muted;
+    background: rgba(16,16,16,0.45);
+    border: 1px solid $border-color;
+    border-radius: 5px;
+    cursor: pointer;
+    transition: color $transition-fast, background $transition-fast, border-color $transition-fast;
+
+    &:hover {
+      color: $color-text;
+      border-color: rgba($color-primary, 0.55);
+    }
+
+    &--active {
+      color: $color-primary-light;
+      background: rgba($color-primary, 0.15);
+      border-color: rgba($color-primary, 0.5);
+    }
   }
 
   &__league-achievements {
     width: 220px;
     flex: 1 0 220px;
-    height:300px;
+    height: 340px;
     display: flex;
     flex-direction: column;
     gap: $spacing-2;
-    border-radius: $border-radius-md;
+    background: $color-bg-card;
+    border-radius: $border-radius-lg;
     padding: $spacing-3;
   }
 
@@ -1322,9 +1579,9 @@ function getEdgeTooltipText(cmd: CommanderRow) {
     font-size: $font-size-xs;
     font-family: inherit;
     color: $color-text-muted;
-    background: $color-bg-card;
+    background: rgba(0,0,0,0.25);
     border: 1px solid $border-color;
-    border-radius: $border-radius-full;
+    border-radius:4px;
     cursor: pointer;
     transition: color $transition-fast, background $transition-fast, border-color $transition-fast;
 
@@ -1487,6 +1744,7 @@ function getEdgeTooltipText(cmd: CommanderRow) {
     flex: 1;
     min-width: 0;
     padding: $spacing-3 $spacing-4 $spacing-3 0;
+    background: rgba(0,0,0,0.15);
     display: flex;
     flex-direction: column;
     gap: $spacing-2;
@@ -1596,7 +1854,7 @@ function getEdgeTooltipText(cmd: CommanderRow) {
     align-items: center;
     min-width: 56px;
     padding: $spacing-2 $spacing-3;
-    background: $color-bg-elevated;
+    background: rgba(0,0,0,0.25);
     border: 1px solid $border-color;
     border-radius: $border-radius-md;
     transition: background $transition-fast, border-color $transition-fast;
@@ -1714,6 +1972,10 @@ function getEdgeTooltipText(cmd: CommanderRow) {
     display: flex;
     flex-wrap: wrap;
     gap: $spacing-2;
+    background: rgba(0, 0, 0, 0.2);
+    padding: 10px;
+    border-bottom-right-radius: 10px;
+    border-bottom-left-radius: 10px;
   }
 
   &__timeline {
@@ -1806,7 +2068,8 @@ function getEdgeTooltipText(cmd: CommanderRow) {
       linear-gradient(180deg, rgba(10, 15, 15, 0.97), rgba(9, 12, 12, 0.97));
 
     &:hover { border-color: rgba(82, 200, 168, 0.44); box-shadow: 0 6px 14px rgba(0, 0, 0, 0.3), 0 0 10px rgba(82, 200, 168, 0.12); }
-    .mini-ach__name { color: rgba($color-text, 0.95); }
+    .mini-ach__name { color: #52c8a8; }
+    .mini-ach__pts  { color: #52c8a8; }
   }
 
   &--rarity-rare {
@@ -1816,7 +2079,8 @@ function getEdgeTooltipText(cmd: CommanderRow) {
       linear-gradient(180deg, rgba(12, 9, 20, 0.97), rgba(10, 8, 17, 0.97));
 
     &:hover { border-color: rgba(155, 110, 232, 0.52); box-shadow: 0 6px 14px rgba(0, 0, 0, 0.3), 0 0 12px rgba(155, 110, 232, 0.18); }
-    .mini-ach__name { font-family: $font-family-display; font-size: 10px; }
+    .mini-ach__name { color: #9b6ee8; }
+    .mini-ach__pts  { color: #9b6ee8; }
   }
 
   &--rarity-mythic {
@@ -1827,7 +2091,7 @@ function getEdgeTooltipText(cmd: CommanderRow) {
 
     &::before { background: linear-gradient(90deg, #d04010, #ffb830, #ffe870, #ffb830, #d04010); }
     &:hover { border-color: rgba(255, 148, 50, 0.6); box-shadow: 0 6px 14px rgba(0, 0, 0, 0.3), 0 0 14px rgba(255, 130, 40, 0.22); }
-    .mini-ach__name { font-family: $font-family-display; font-size: 10px; color: #fff0d8; }
+    .mini-ach__name { font-size: 10px; color: #fff0d8; }
     .mini-ach__pts { color: #ffb840; }
   }
 }

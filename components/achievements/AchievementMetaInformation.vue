@@ -36,7 +36,7 @@
 
 <script setup lang="ts">
 import { computed } from 'vue'
-import { ACHIEVEMENTS } from '~/utils/achievements'
+import { ACHIEVEMENTS, type AchievementRarity } from '~/utils/achievements'
 
 const props = defineProps<{ achievementId: string }>()
 
@@ -50,16 +50,18 @@ const earnedByPlayers = computed(() =>
     .map((p) => p.name),
 )
 
-const rarityLabel = computed(() => {
-  const d = def.value
-  if (!d) return 'Common'
-  if (d.points >= 3) return 'Mythic'
-  if (d.points >= 2 || !d.repeatable) return 'Rare'
-  if (d.points >= 1) return 'Uncommon'
-  return 'Common'
-})
+const rarityLabel = computed(() => getRarityLabel(def.value?.rarity ?? 'common'))
 
-const rarityClass = computed(() => rarityLabel.value.toLowerCase())
+const rarityClass = computed(() => def.value?.rarity ?? 'common')
+
+function getRarityLabel(rarity: AchievementRarity) {
+  return {
+    common: 'Common',
+    uncommon: 'Uncommon',
+    rare: 'Rare',
+    mythic: 'Mythic',
+  }[rarity]
+}
 
 function formatPoints(value: number): string {
   return value % 1 === 0 ? String(value) : value.toFixed(2).replace(/\.?0+$/, '')

@@ -120,8 +120,9 @@
 <script setup lang="ts">
 import { computed, reactive, ref, watch } from 'vue'
 import type { ProcessedGame, ProcessedGamePlayer } from '~/composables/useLeagueState'
-import { TIER_META, blendScore, getTier, type Tier } from '~/utils/tiers'
+import { TIER_META, type Tier } from '~/utils/tiers'
 import { ACHIEVEMENTS } from '~/utils/achievements'
+import { getHistoricalCommanderTierAtGame } from '~/utils/historicalCommanderTier'
 
 const props = defineProps<{ game: ProcessedGame; highlightPlayer?: string | null }>()
 const { preloadCommanderImages, getCachedCommanderImage } = useImageCache()
@@ -142,31 +143,16 @@ function placementLabel(p: number) {
   return ['🥇', '🥈', '🥉'][p - 1] ?? `${p}.`
 }
 
-const { commanders, gameRecords } = useLeagueState()
-
-const globalCommanderBaseline = computed(() => {
-  const scores = Object.values(commanders.value)
-    .filter((commander) => commander.gamesPlayed > 0)
-    .map((commander) => blendScore(
-      commander.totalBasePoints / commander.gamesPlayed,
-      commander.wins / commander.gamesPlayed,
-    ))
-
-  if (scores.length === 0) return 0
-  return scores.reduce((sum, score) => sum + score, 0) / scores.length
-})
+const { games, gameRecords } = useLeagueState()
 
 function playerTier(playerName: string, commander: string): Tier | null {
-  const records = Object.values(gameRecords.value[playerName] ?? {}).filter(
-    (record) => record.commander === commander,
+  return getHistoricalCommanderTierAtGame(
+    playerName,
+    commander,
+    props.game.gameId,
+    games.value,
+    gameRecords.value,
   )
-  if (records.length === 0) return null
-
-  const totalBasePoints = records.reduce((sum, record) => sum + record.basePoints, 0)
-  const wins = records.filter((record) => record.basePoints === 1).length
-  const rawScore = blendScore(totalBasePoints / records.length, wins / records.length)
-
-  return getTier(rawScore, globalCommanderBaseline.value, records.length)
 }
 
 function getTierMeta(playerName: string, commander: string) {
@@ -313,7 +299,7 @@ function rankDelta(playerName: string): number {
 
   &:hover {
     border-color: $color-primary;
-    transform:scale(1.05);
+    transform:scale(1.03);
     @include dropshadow();
     transition:0.3s;
   }
@@ -381,9 +367,9 @@ function rankDelta(playerName: string): number {
     display: flex;
     justify-content: space-between;
     align-items: center;
-    margin-bottom: $spacing-3;
-    padding-bottom: $spacing-3;
-    border-bottom: 1px solid $border-color;
+    margin-bottom: $spacing-2;
+    padding:$spacing-2 $spacing-4;
+    background:rgba(0,0,0,0.25);
   }
 
   &__id {

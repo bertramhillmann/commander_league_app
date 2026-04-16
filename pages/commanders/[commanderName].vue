@@ -172,6 +172,7 @@
                   v-for="ach in row.achievements"
                   :key="ach.id"
                   class="player-row__ach"
+                  :class="`player-row__ach--${ach.rarity}`"
                   :title="ach.description"
                 >
                   <span class="player-row__ach-icon">{{ ach.icon }}</span>
@@ -284,7 +285,7 @@ interface PlayerRow {
   xpScorePts: number
   timeline: PlacementTimelinePoint[]
   title: CommanderTitleResult
-  achievements: Array<{ id: string; name: string; description: string; icon: string; points: number }>
+  achievements: Array<{ id: string; name: string; description: string; icon: string; points: number; rarity: string }>
 }
 
 const playerRows = computed((): PlayerRow[] => {
@@ -356,7 +357,7 @@ const playerRows = computed((): PlayerRow[] => {
     const achievements = [...earnedIds]
       .map((id) => ACHIEVEMENTS[id])
       .filter(Boolean)
-      .map((def) => ({ id: def.id, name: def.name, description: def.description, icon: def.icon, points: def.points }))
+      .map((def) => ({ id: def.id, name: def.name, description: def.description, icon: def.icon, points: def.points, rarity: def.rarity }))
 
     rows.push({
       playerName, plays, first, second, last, winRate: winRatePct, avgPoints,
@@ -545,7 +546,7 @@ function onTitleLeave() {
   }
 
   &__agg-stat {
-    background: $color-bg-card;
+    background: rgba(0,0,0,0.25);
     border: 1px solid $border-color;
     border-radius: $border-radius-md;
     padding: $spacing-3 $spacing-4;
@@ -605,9 +606,9 @@ function onTitleLeave() {
     font-size: $font-size-xs;
     font-family: inherit;
     color: $color-text-muted;
-    background: $color-bg-card;
+    background: rgba(0,0,0,0.25);
     border: 1px solid $border-color;
-    border-radius: $border-radius-full;
+    border-radius: 4px;
     cursor: pointer;
     transition: color $transition-fast, background $transition-fast, border-color $transition-fast;
 
@@ -754,7 +755,7 @@ function onTitleLeave() {
     align-items: center;
     min-width: 56px;
     padding: $spacing-2 $spacing-3;
-    background: $color-bg-elevated;
+    background: rgba(0,0,0,0.25);
     border: 1px solid $border-color;
     border-radius: $border-radius-md;
     transition: background $transition-fast, border-color $transition-fast;
@@ -858,16 +859,48 @@ function onTitleLeave() {
     display: inline-flex;
     align-items: center;
     gap: 5px;
-    background: rgba($color-accent, 0.08);
-    border: 1px solid rgba($color-accent, 0.2);
     border-radius: $border-radius-full;
     padding: 2px $spacing-2;
     cursor: default;
+
+    // ── default / common ─────────────────────────────────────────────────────
+    background: rgba(158, 144, 112, 0.08);
+    border: 1px solid rgba(158, 144, 112, 0.22);
+
+    .player-row__ach-name { color: #a09070; }
+    .player-row__ach-pts  { color: #b0a27e; }
+
+    // ── uncommon ─────────────────────────────────────────────────────────────
+    &--uncommon {
+      background: rgba(82, 200, 168, 0.08);
+      border-color: rgba(82, 200, 168, 0.24);
+
+      .player-row__ach-name { color: rgba(82, 200, 168, 0.8); }
+      .player-row__ach-pts  { color: #52c8a8; }
+    }
+
+    // ── rare ─────────────────────────────────────────────────────────────────
+    &--rare {
+      background: rgba(155, 110, 232, 0.1);
+      border-color: rgba(155, 110, 232, 0.3);
+
+      .player-row__ach-name { color: rgba(155, 110, 232, 0.85); }
+      .player-row__ach-pts  { color: #9b6ee8; }
+    }
+
+    // ── mythic ───────────────────────────────────────────────────────────────
+    &--mythic {
+      background: rgba(255, 148, 50, 0.1);
+      border-color: rgba(255, 148, 50, 0.32);
+
+      .player-row__ach-name { color: rgba(255, 170, 64, 0.85); }
+      .player-row__ach-pts  { color: #ffb840; }
+    }
   }
 
   &__ach-icon  { font-size: 11px; line-height: 1; }
-  &__ach-name  { font-size: $font-size-xs; color: $color-text-muted; }
-  &__ach-pts   { font-size: $font-size-xs; color: $color-accent; font-weight: $font-weight-semibold; }
+  &__ach-name  { font-size: $font-size-xs; font-weight: $font-weight-semibold; }
+  &__ach-pts   { font-size: $font-size-xs; font-weight: $font-weight-semibold; }
 }
 
 @media (max-width: 1180px) {

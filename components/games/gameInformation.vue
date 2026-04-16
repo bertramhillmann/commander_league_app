@@ -107,15 +107,16 @@
 <script setup lang="ts">
 import { computed } from 'vue'
 import { ACHIEVEMENTS } from '~/utils/achievements'
-import { TIER_META, blendScore, getTier, type Tier } from '~/utils/tiers'
+import { TIER_META, type Tier } from '~/utils/tiers'
 import { getLeagueStandingMetrics } from '~/composables/useLeagueState'
+import { getHistoricalCommanderTierAtGame } from '~/utils/historicalCommanderTier'
 
 const props = defineProps<{
   playerName: string
   gameId: string
 }>()
 
-const { players, commanders, gameRecords, standings } = useLeagueState()
+const { games, players, gameRecords, standings } = useLeagueState()
 
 const record = computed(() => gameRecords.value[props.playerName]?.[props.gameId])
 
@@ -148,31 +149,16 @@ const commanderPlayerAvg = computed(() => {
   return round3(all.reduce((s, r) => s + r.finalPoints, 0) / all.length)
 })
 
-const globalCommanderBaseline = computed(() => {
-  const scores = Object.values(commanders.value)
-    .filter((commander) => commander.gamesPlayed > 0)
-    .map((commander) => blendScore(
-      commander.totalBasePoints / commander.gamesPlayed,
-      commander.wins / commander.gamesPlayed,
-    ))
-
-  if (scores.length === 0) return 0
-  return scores.reduce((sum, score) => sum + score, 0) / scores.length
-})
-
 const commanderTier = computed((): Tier | null => {
   if (!record.value) return null
 
-  const commanderRecords = Object.values(gameRecords.value[props.playerName] ?? {}).filter(
-    (currentRecord) => currentRecord.commander === record.value!.commander,
+  return getHistoricalCommanderTierAtGame(
+    props.playerName,
+    record.value.commander,
+    props.gameId,
+    games.value,
+    gameRecords.value,
   )
-  if (commanderRecords.length === 0) return null
-
-  const totalBasePoints = commanderRecords.reduce((sum, currentRecord) => sum + currentRecord.basePoints, 0)
-  const wins = commanderRecords.filter((currentRecord) => currentRecord.basePoints === 1).length
-  const rawScore = blendScore(totalBasePoints / commanderRecords.length, wins / commanderRecords.length)
-
-  return getTier(rawScore, globalCommanderBaseline.value, commanderRecords.length)
 })
 
 // ── Rank change ───────────────────────────────────────────────────────────────

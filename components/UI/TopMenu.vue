@@ -13,7 +13,15 @@
     </div>
 
     <div class="top-menu__auth">
-      <span v-if="user" class="top-menu__user">{{ user }}</span>
+      <div v-if="user" class="top-menu__user">
+        <img
+          v-if="userImageUrl"
+          :src="userImageUrl"
+          :alt="user"
+          class="top-menu__user-avatar"
+        />
+        <span class="top-menu__user-name">{{ user }}</span>
+      </div>
       <NuxtLink
         v-if="isAdmin"
         to="/admin/createGame"
@@ -30,6 +38,14 @@
 <script setup lang="ts">
 const route = useRoute()
 const { user, isAdmin, logout } = useAuth()
+
+const playerImages = import.meta.glob('../../assets/img/*.png', { eager: true, import: 'default' }) as Record<string, string>
+
+const userImageUrl = computed(() => {
+  if (!user.value) return null
+  const key = `../../assets/img/${user.value.toLowerCase()}.png`
+  return playerImages[key] ?? null
+})
 
 const items = [
   { label: 'Dashboard', to: '/dashboard', match: ['/dashboard'] },
@@ -122,11 +138,27 @@ async function signOut() {
 }
 
 .top-menu__user {
-  color: $color-text-muted;
+  display: inline-flex;
+  align-items: center;
+  gap: $spacing-2;
+}
+
+.top-menu__user-avatar {
+  width: 36px;
+  height: 36px;
+  border-radius: $border-radius-sm;
+  object-fit: cover;
+  object-position: center top;
+  border: 1px solid rgba($color-accent, 0.45);
+}
+
+.top-menu__user-name {
+  color: $color-accent;
   font-size: $font-size-xs;
-  font-weight: $font-weight-semibold;
+  font-weight: $font-weight-bold;
   text-transform: uppercase;
-  letter-spacing: 0.05em;
+  letter-spacing: 0.07em;
+  text-shadow: 0 0 12px rgba($color-accent, 0.35);
 }
 
 .top-menu__logout {

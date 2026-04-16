@@ -13,6 +13,8 @@ import { getTier, blendScore, type Tier } from '~/utils/tiers'
 import { ACHIEVEMENTS, type EarnedAchievement } from '~/utils/achievements'
 import { getMissedGameLoosterPoints } from '~/utils/loosterPoints'
 import { formatPlayerName } from '~/utils/playerNames'
+import { getArchEnemySummary } from '~/utils/archEnemy'
+import { getFeaturedPlayerName } from '~/utils/featuredPlayer'
 
 // ─── Types ────────────────────────────────────────────────────────────────────
 
@@ -558,6 +560,10 @@ export function useLeagueState() {
           null,
         )
         const leaderName = leaderEntry?.name ?? ''
+        const featuredPlayerName = getFeaturedPlayerName(
+          recordsMap,
+          new Map(processedGames.map((processedGame, index) => [processedGame.gameId, index])),
+        )
 
         // Snapshot ratings before this game
         const ratingsBefore: Record<string, number> = {}
@@ -817,6 +823,25 @@ export function useLeagueState() {
             if (leaderInGame && leaderName !== p.name && !wd.beatLeaderDone) {
               wd.beatLeaderDone = true
               earn('beat_leader')
+            }
+
+            const archEnemy = getArchEnemySummary(p.name, processedGames, recordsMap)
+            const archEnemyPlayer = archEnemy.enemyName
+              ? computed.find((participant) => participant.name === archEnemy.enemyName)
+              : null
+            const beatCurrentArchEnemy = Boolean(archEnemyPlayer && archEnemyPlayer.placement > 1)
+            if (beatCurrentArchEnemy) {
+              earn('beat_arch_enemy')
+            }
+
+            const featuredPlayer = featuredPlayerName
+              ? computed.find((participant) => participant.name === featuredPlayerName)
+              : null
+            const beatCurrentFeaturedPlayer = Boolean(
+              featuredPlayer && featuredPlayer.name !== p.name && featuredPlayer.placement > 1,
+            )
+            if (beatCurrentFeaturedPlayer) {
+              earn('beat_featured_player')
             }
 
             // Straggler / Hyper Straggler: win against player with many more games

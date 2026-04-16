@@ -9,8 +9,9 @@
 }
 
 html {
-  font-size: 16px;
+  font-size: 18px;
   scroll-behavior: smooth;
+  overflow-x: clip;
   background:
     linear-gradient(180deg, #1a1424 0%, #100b17 46%, #09070d 100%);
 }
@@ -21,7 +22,7 @@ body {
   font-weight: $font-weight-normal;
   color: $color-text;
   background:
-    linear-gradient(-120deg, rgba(28, 18, 40, 0.9), rgba(12, 9, 20, 0.7)),
+    radial-gradient(ellipse at center, rgba(12, 9, 20, 0.45) 0%, rgba(28, 18, 40, 0.92) 100%),
     url('~/assets/img/grunge_bg.jpg') center top / cover fixed no-repeat;
   line-height: 1.6;
   min-height: 100vh;
@@ -78,6 +79,6 @@ a {
 
 .page {
   padding: $spacing-8;
-  max-width: 1280px;
+  max-width: 1440px;
   margin: 0 auto;
 }

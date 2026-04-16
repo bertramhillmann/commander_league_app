@@ -35,7 +35,7 @@
             :class="[
               `achievement-card--${item.def.scope}`,
               `achievement-card--${item.status}`,
-              `achievement-card--rarity-${getRarityLabel(item.def).toLowerCase()}`,
+              `achievement-card--rarity-${item.def.rarity}`,
             ]"
             @mouseenter="onEnter(item.def.id, $event)"
             @mousemove="onMove($event)"
@@ -46,7 +46,7 @@
 
               <div class="achievement-card__top">
                 <span class="achievement-card__scope">{{ item.def.scope }}</span>
-                <span class="achievement-card__rarity">{{ getRarityLabel(item.def) }}</span>
+                <span class="achievement-card__rarity">{{ getRarityLabel(item.def.rarity) }}</span>
               </div>
 
               <div class="achievement-card__main">
@@ -90,7 +90,7 @@
         class="achievement-card"
         :class="[
           `achievement-card--${def.scope}`,
-          `achievement-card--rarity-${getRarityLabel(def).toLowerCase()}`,
+          `achievement-card--rarity-${def.rarity}`,
         ]"
         @mouseenter="onEnter(def.id, $event)"
         @mousemove="onMove($event)"
@@ -101,7 +101,7 @@
 
           <div class="achievement-card__top">
             <span class="achievement-card__scope">{{ def.scope }}</span>
-            <span class="achievement-card__rarity">{{ getRarityLabel(def) }}</span>
+            <span class="achievement-card__rarity">{{ getRarityLabel(def.rarity) }}</span>
           </div>
 
           <div class="achievement-card__main">
@@ -137,7 +137,8 @@
 <script setup lang="ts">
 import { computed, reactive } from 'vue'
 import { formatPlayerName } from '~/utils/playerNames'
-import { ACHIEVEMENTS, type AchievementDef, type EarnedAchievement } from '~/utils/achievements'
+import { ACHIEVEMENTS, type AchievementDef, type AchievementRarity, type EarnedAchievement } from '~/utils/achievements'
+import { getArchEnemySummary } from '~/utils/archEnemy'
 
 interface SectionItem {
   def: AchievementDef
@@ -154,7 +155,7 @@ interface SectionGroup {
   items: SectionItem[]
 }
 
-const { players, games } = useLeagueState()
+const { players, games, gameRecords } = useLeagueState()
 const { user, ensureSession } = useAuth()
 
 await ensureSession()
@@ -199,6 +200,11 @@ const earnedThisWeek = computed(() => {
   return ids
 })
 
+const activePlayerArchEnemy = computed(() => {
+  if (!activePlayer.value) return null
+  return getArchEnemySummary(activePlayer.value.name, games.value, gameRecords.value)
+})
+
 const playerSections = computed<SectionGroup[]>(() => {
   if (!activePlayer.value) return []
 
@@ -210,7 +216,7 @@ const playerSections = computed<SectionGroup[]>(() => {
 
   const availableThisWeek = playerRepeatable
     .filter((def) => !earnedThisWeek.value.has(def.id))
-    .map((def) => buildItem(def, 'open', 'Available this week'))
+    .map((def) => buildItem(def, 'open', 'Available this week', getRepeatablePlayerDetail(def.id)))
 
   const claimedThisWeek = playerRepeatable
     .filter((def) => earnedThisWeek.value.has(def.id))
@@ -220,7 +226,7 @@ const playerSections = computed<SectionGroup[]>(() => {
         def,
         'earned',
         'Claimed this week',
-        count > 1 ? `Recorded ${count} times this week.` : 'Already earned in the current calendar week.',
+        getClaimedRepeatablePlayerDetail(def.id, count),
       )
     })
 
@@ -321,7 +327,7 @@ let frameId = 0
 
 function sortAchievements(defs: AchievementDef[]) {
   return [...defs].sort((a, b) => {
-    const rarityDiff = getRarityRank(a) - getRarityRank(b)
+    const rarityDiff = getRarityRank(a.rarity) - getRarityRank(b.rarity)
     if (rarityDiff !== 0) return rarityDiff
 
     const pointDiff = a.points - b.points
@@ -335,18 +341,22 @@ function formatPoints(value: number): string {
   return value % 1 === 0 ? String(value) : value.toFixed(2).replace(/\.?0+$/, '')
 }
 
-function getRarityRank(def: { points: number; repeatable: boolean }) {
-  if (def.points >= 3) return 4
-  if (def.points >= 2 || !def.repeatable) return 3
-  if (def.points >= 1) return 2
-  return 1
+function getRarityRank(rarity: AchievementRarity) {
+  return {
+    common: 1,
+    uncommon: 2,
+    rare: 3,
+    mythic: 4,
+  }[rarity]
 }
 
-function getRarityLabel(def: { points: number; repeatable: boolean }) {
-  if (def.points >= 3) return 'Mythic'
-  if (def.points >= 2 || !def.repeatable) return 'Rare'
-  if (def.points >= 1) return 'Uncommon'
-  return 'Common'
+function getRarityLabel(rarity: AchievementRarity) {
+  return {
+    common: 'Common',
+    uncommon: 'Uncommon',
+    rare: 'Rare',
+    mythic: 'Mythic',
+  }[rarity]
 }
 
 function buildItem(
@@ -371,6 +381,30 @@ function countCurrentWeekEarns(id: string) {
   return (earnedById.value.get(id) ?? []).filter(
     (earned) => gameWeekById.value.get(earned.gameId) === currentWeekAbs.value,
   ).length
+}
+
+function getRepeatablePlayerDetail(id: string) {
+  if (id !== 'beat_arch_enemy') return undefined
+
+  const archEnemy = activePlayerArchEnemy.value
+  if (!archEnemy?.enemyName || !archEnemy.matchup) {
+    return 'No active arch enemy right now. Lose a few tracked games to the same player first.'
+  }
+
+  const losses = archEnemy.matchup.losses
+  return `Current arch enemy: ${archEnemy.enemyName} (${losses} tracked loss${losses === 1 ? '' : 'es'}). Beat them in a game this week to claim it.`
+}
+
+function getClaimedRepeatablePlayerDetail(id: string, count: number) {
+  if (id === 'beat_arch_enemy') {
+    const archEnemy = activePlayerArchEnemy.value
+    const currentTarget = archEnemy?.enemyName
+      ? ` Current target: ${archEnemy.enemyName}.`
+      : ''
+    return `${count > 1 ? `Recorded ${count} times this week.` : 'Already earned in the current calendar week.'}${currentTarget}`
+  }
+
+  return count > 1 ? `Recorded ${count} times this week.` : 'Already earned in the current calendar week.'
 }
 
 function uniqueCommandersFor(id: string) {
@@ -668,7 +702,6 @@ function absWeek(date: Date) {
   }
 
   &__rarity {
-    font-family: $font-family-display;
     font-size: 10px;
     font-weight: $font-weight-semibold;
     letter-spacing: 0.12em;
@@ -831,10 +864,6 @@ function absWeek(date: Date) {
     color: #9b6ee8;
   }
 
-  &--rarity-rare .achievement-card__name {
-    font-family: $font-family-display;
-    font-size: 14px;
-  }
 
   &--rarity-rare .achievement-card__icon {
     background: rgba(155, 110, 232, 0.1);
@@ -880,8 +909,6 @@ function absWeek(date: Date) {
   }
 
   &--rarity-mythic .achievement-card__name {
-    font-family: $font-family-display;
-    font-size: 14px;
     color: #fff0d8;
   }
 

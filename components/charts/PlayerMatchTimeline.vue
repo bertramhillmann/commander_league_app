@@ -1,38 +1,38 @@
 <template>
-  <div class="league-chart" :class="{ 'league-chart--compact': compact }">
-    <div class="league-chart__header">
-      <span class="league-chart__title">{{ title }}</span>
-      <span class="league-chart__summary">{{ points.length }} games</span>
+  <div class="match-chart" :class="{ 'match-chart--compact': compact }">
+    <div class="match-chart__header">
+      <span class="match-chart__title">{{ title }}</span>
+      <span class="match-chart__summary">{{ points.length }} games</span>
     </div>
 
-    <div v-if="points.length > 0" class="league-chart__frame">
-      <canvas ref="canvasRef" class="league-chart__canvas" />
+    <div v-if="points.length > 0" class="match-chart__frame">
+      <canvas ref="canvasRef" class="match-chart__canvas" />
     </div>
 
-    <div v-else class="league-chart__empty">
-      No league history yet.
+    <div v-else class="match-chart__empty">
+      No match history yet.
     </div>
   </div>
 </template>
 
 <script setup lang="ts">
-import type { Chart, ChartConfiguration, Plugin, TooltipItem } from 'chart.js'
-import type { LeagueRankTimelinePoint } from '~/utils/playerLeagueTimeline'
+import type { Chart, ChartConfiguration, TooltipItem } from 'chart.js'
+import type { PlayerMatchTimelinePoint } from '~/utils/playerMatchTimeline'
 
 const props = withDefaults(defineProps<{
-  points: LeagueRankTimelinePoint[]
+  points: PlayerMatchTimelinePoint[]
   title?: string
   compact?: boolean
 }>(), {
-  title: 'League Placement Over Time',
+  title: 'Match Results Over Time',
   compact: false,
 })
 
 const canvasRef = ref<HTMLCanvasElement | null>(null)
 let chart: Chart | null = null
 
-const maxRank = computed(() =>
-  Math.max(...props.points.map((point) => point.totalPlayers), 4),
+const maxPlacement = computed(() =>
+  Math.max(...props.points.map((point) => point.playerCount), 4),
 )
 
 watch(
@@ -59,41 +59,25 @@ async function renderChart() {
   chart = new ChartJS(canvasRef.value, buildConfig())
 }
 
-function buildConfig(): ChartConfiguration<'line' | 'scatter'> {
-  const labels = props.points.map((point) => point.dateLabel)
-  const ranks = props.points.map((point) => point.rank)
-  const missedGames = props.points.map((point, index) =>
-    point.participated ? { x: index, y: null } : { x: index, y: point.rank },
-  )
-
+function buildConfig(): ChartConfiguration<'line'> {
   return {
     type: 'line',
     data: {
-      labels,
+      labels: props.points.map((point) => point.dateLabel),
       datasets: [
         {
-          type: 'line',
-          label: 'League Rank',
-          data: ranks,
-          borderColor: '#2c9c6a',
-          backgroundColor: 'rgba(44, 156, 106, 0.12)',
-          tension: 0.24,
+          label: 'Placement',
+          data: props.points.map((point) => point.placement),
+          borderColor: '#d08a34',
+          backgroundColor: 'rgba(208, 138, 52, 0.14)',
+          tension: 0.28,
           borderWidth: props.compact ? 1.6 : 1.9,
-          pointRadius: props.compact ? 1.5 : 2.1,
-          pointHoverRadius: props.compact ? 3 : 3.6,
-          pointBackgroundColor: '#2c9c6a',
+          pointRadius: props.compact ? 1.8 : 2.6,
+          pointHoverRadius: props.compact ? 3 : 4,
+          pointBackgroundColor: props.points.map((point) => pointColor(point)),
           pointBorderColor: '#242438',
           pointBorderWidth: 0.9,
           fill: false,
-        },
-        {
-          type: 'scatter',
-          label: 'Missed Game',
-          data: missedGames,
-          pointRadius: 0,
-          pointHoverRadius: 0,
-          pointBackgroundColor: 'rgba(0, 0, 0, 0)',
-          pointBorderWidth: 0,
         },
       ],
     },
@@ -114,7 +98,7 @@ function buildConfig(): ChartConfiguration<'line' | 'scatter'> {
         tooltip: {
           displayColors: false,
           backgroundColor: 'rgba(36, 36, 56, 0.96)',
-          borderColor: 'rgba(44, 156, 106, 0.24)',
+          borderColor: 'rgba(208, 138, 52, 0.24)',
           borderWidth: 1,
           titleColor: '#f3f3ff',
           bodyColor: '#c8c8df',
@@ -125,12 +109,19 @@ function buildConfig(): ChartConfiguration<'line' | 'scatter'> {
               const point = props.points[item.dataIndex]
               return point?.dateLabel ?? item.label
             },
-            label(item: TooltipItem<'line' | 'scatter'>) {
+            label(item: TooltipItem<'line'>) {
               const point = props.points[item.dataIndex]
               if (!point) return ''
-              const bits = [`Rank ${point.rank} of ${point.totalPlayers}`, `${fmt(point.totalScore)} score`]
-              if (!point.participated) bits.push('Did not participate')
-              return bits.join(' • ')
+
+              return [
+                `${ordinal(point.placement)} of ${point.playerCount}`,
+                point.commander,
+                `${fmt(point.finalPoints)} total pts`,
+                point.lPoints > 0 ? `${fmt(point.lPoints)} L-Points` : '0 L-Points',
+                point.rankBefore && point.rankAfter
+                  ? `Rank #${point.rankBefore} to #${point.rankAfter}`
+                  : '',
+              ].filter(Boolean).join(' | ')
             },
           },
         },
@@ -150,51 +141,43 @@ function buildConfig(): ChartConfiguration<'line' | 'scatter'> {
         y: {
           reverse: true,
           min: 0.5,
-          max: maxRank.value + 0.5,
+          max: maxPlacement.value + 0.5,
           ticks: {
             autoSkip: false,
             color: 'rgba(136, 136, 170, 0.78)',
             callback(value) {
               const numericValue = Number(value)
               if (!Number.isInteger(numericValue)) return ''
-              return `${numericValue}`
+              return ordinal(numericValue)
             },
             font: { size: 9 },
             padding: 6,
           },
           grid: {
             color: 'rgba(136, 136, 170, 0.1)',
+            borderDash: [2, 3],
             drawTicks: false,
           },
-          border: { display: false, dash: [2, 3] },
+          border: { display: false },
         },
       },
     },
-    plugins: [missedGamePlugin],
   }
 }
 
-const missedGamePlugin: Plugin<'line' | 'scatter'> = {
-  id: 'missed-game-labels',
-  afterDatasetsDraw(chartInstance) {
-    const datasetMeta = chartInstance.getDatasetMeta(1)
-    if (!datasetMeta) return
+function pointColor(point: PlayerMatchTimelinePoint) {
+  if (point.placement === 1) return '#f0c24b'
+  if (point.placement === point.playerCount) return '#cf5c73'
+  if (point.placement === 2) return '#7ab8ff'
+  return '#d08a34'
+}
 
-    const { ctx } = chartInstance
-    ctx.save()
-    ctx.textAlign = 'center'
-    ctx.textBaseline = 'middle'
-    ctx.font = '700 9px sans-serif'
-
-    datasetMeta.data.forEach((element, index) => {
-      const point = props.points[index]
-      if (point?.participated) return
-      ctx.fillStyle = 'rgba(136, 136, 170, 0.88)'
-      ctx.fillText('x', element.x, element.y - 9)
-    })
-
-    ctx.restore()
-  },
+function ordinal(value: number) {
+  if (value % 100 >= 11 && value % 100 <= 13) return `${value}th`
+  if (value % 10 === 1) return `${value}st`
+  if (value % 10 === 2) return `${value}nd`
+  if (value % 10 === 3) return `${value}rd`
+  return `${value}th`
 }
 
 function fmt(n: number) {
@@ -204,7 +187,7 @@ function fmt(n: number) {
 </script>
 
 <style lang="scss" scoped>
-.league-chart {
+.match-chart {
   background: rgba($color-bg-elevated, 0.45);
   border: 1px solid $border-color;
   border-radius: $border-radius-lg;
