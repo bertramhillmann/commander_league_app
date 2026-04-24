@@ -159,7 +159,8 @@
 
 <script setup lang="ts">
 import { compareGamesChronological } from '~/composables/useLeagueState'
-import { getCommanderPerformanceTitle, type CommanderTitleResult } from '~/utils/titles'
+import { normalizeDeckIdentityKey } from '~/utils/deckLinks'
+import { getCommanderTitleSummary, type CommanderTitleResult } from '~/utils/titles'
 
 type PairStats = {
   player: string
@@ -176,7 +177,7 @@ type PairStats = {
   title: CommanderTitleResult
 }
 
-const { gameRecords, games, standings } = useLeagueState()
+const { gameRecords, games, commanderTitleSelections, standings } = useLeagueState()
 const { preloadCommanderImages, getCachedCommanderImage } = useImageCache()
 
 const artUrls = reactive<Record<string, string>>({})
@@ -253,7 +254,7 @@ const rankedEntries = computed<PairStats[]>(() => {
         winRateDiff: relativeDiff(winRate, leagueWinRate),
         avgPointsDiff: relativeDiff(avgPoints, leagueAvgPoints),
         zeroPointAvoidanceDiff: relativeDiff(zeroPointAvoidance, leagueZeroPointAvoidance),
-        title: getCommanderPerformanceTitle({
+        title: getCommanderTitleSummary({
           playerName: player,
           commanderName: commander,
           commanderRecords,
@@ -261,7 +262,7 @@ const rankedEntries = computed<PairStats[]>(() => {
           allRecords,
           games: chronologicalGames.value,
           standings: standings.value,
-        }),
+        }, commanderTitleSelections.value[normalizeDeckIdentityKey(player)]?.[normalizeDeckIdentityKey(commander)]).displayTitle,
       })
     }
   }

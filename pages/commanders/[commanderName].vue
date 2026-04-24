@@ -208,15 +208,16 @@
 import { compareGamesChronological } from '~/composables/useLeagueState'
 import { getCommanderLevelProgress } from '~/utils/commanderExperience'
 import { buildCommanderPlacementTimeline, type PlacementTimelinePoint } from '~/utils/commanderTimeline'
+import { normalizeDeckIdentityKey } from '~/utils/deckLinks'
 import { TIER_META, blendScore, getTier, smoothedTierScore } from '~/utils/tiers'
-import { ACHIEVEMENTS } from '~/utils/achievements'
-import { getCommanderPerformanceTitle, type CommanderTitleResult } from '~/utils/titles'
+import { getAchievementDefinition } from '~/utils/achievements'
+import { getCommanderTitleSummary, type CommanderTitleResult } from '~/utils/titles'
 import type { Tier } from '~/utils/tiers'
 
 const route = useRoute()
 const commanderName = computed(() => route.params.commanderName as string)
 
-const { games, commanders, players, gameRecords, standings } = useLeagueState()
+const { games, commanders, players, gameRecords, commanderTitleSelections, standings } = useLeagueState()
 const { getCommanderImage } = useImageCache()
 
 const cmdState = computed(() => commanders.value[commanderName.value] ?? null)
@@ -338,7 +339,7 @@ const playerRows = computed((): PlayerRow[] => {
       playerName,
       name,
     )
-    const title = getCommanderPerformanceTitle({
+    const titleSummary = getCommanderTitleSummary({
       playerName,
       commanderName: name,
       commanderRecords: cmdRecords,
@@ -346,7 +347,7 @@ const playerRows = computed((): PlayerRow[] => {
       allRecords: Object.values(gameRecords.value).flatMap((entry) => Object.values(entry)),
       games: chronologicalGames.value,
       standings: standings.value,
-    })
+    }, commanderTitleSelections.value[normalizeDeckIdentityKey(playerName)]?.[normalizeDeckIdentityKey(name)])
 
     // Commander-scoped achievements for this player with this commander
     const earnedIds = new Set(
@@ -355,13 +356,13 @@ const playerRows = computed((): PlayerRow[] => {
         .map((a) => a.id),
     )
     const achievements = [...earnedIds]
-      .map((id) => ACHIEVEMENTS[id])
+      .map((id) => getAchievementDefinition(id))
       .filter(Boolean)
       .map((def) => ({ id: def.id, name: def.name, description: def.description, icon: def.icon, points: def.points, rarity: def.rarity }))
 
     rows.push({
       playerName, plays, first, second, last, winRate: winRatePct, avgPoints,
-      tier, projectedTier, level, levelPct: progressPct, xp, currentLevelXP, levelSpanXP, xpToNext, isMaxLevel, xpScorePts, timeline, title, achievements,
+      tier, projectedTier, level, levelPct: progressPct, xp, currentLevelXP, levelSpanXP, xpToNext, isMaxLevel, xpScorePts, timeline, title: titleSummary.displayTitle, achievements,
     })
   }
 

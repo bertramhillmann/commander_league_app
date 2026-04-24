@@ -106,7 +106,7 @@
 
 <script setup lang="ts">
 import { computed } from 'vue'
-import { ACHIEVEMENTS } from '~/utils/achievements'
+import { getAchievementDefinition } from '~/utils/achievements'
 import { TIER_META, type Tier } from '~/utils/tiers'
 import { getLeagueStandingMetrics } from '~/composables/useLeagueState'
 import { getHistoricalCommanderTierAtGame } from '~/utils/historicalCommanderTier'
@@ -122,7 +122,7 @@ const record = computed(() => gameRecords.value[props.playerName]?.[props.gameId
 
 const gameAchievements = computed(() =>
   (record.value?.achievements ?? [])
-    .map((a) => ACHIEVEMENTS[a.id])
+    .map((a) => getAchievementDefinition(a.id))
     .filter(Boolean),
 )
 const playerState = computed(() => players.value[props.playerName])

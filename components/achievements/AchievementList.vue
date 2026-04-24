@@ -20,7 +20,7 @@
 
 <script setup lang="ts">
 import { computed } from 'vue'
-import { ACHIEVEMENTS } from '~/utils/achievements'
+import { getAchievementDefinition } from '~/utils/achievements'
 
 const props = defineProps<{ playerName: string; commanderName?: string }>()
 
@@ -31,7 +31,7 @@ const rows = computed(() => {
   const grouped: Record<string, { count: number; pointsEach: number }> = {}
 
   for (const e of earned) {
-    const def = ACHIEVEMENTS[e.id]
+    const def = getAchievementDefinition(e.id)
     if (!def) continue
     if (props.commanderName) {
       if (def.scope !== 'commander') continue
@@ -44,8 +44,8 @@ const rows = computed(() => {
   return Object.entries(grouped)
     .map(([id, g]) => ({
       id,
-      icon: ACHIEVEMENTS[id].icon,
-      name: ACHIEVEMENTS[id].name,
+      icon: getAchievementDefinition(id)?.icon ?? '',
+      name: getAchievementDefinition(id)?.name ?? id,
       count: g.count,
       totalPoints: Math.round(g.count * g.pointsEach * 1000) / 1000,
     }))

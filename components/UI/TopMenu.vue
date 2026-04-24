@@ -33,6 +33,16 @@
         Create Game
       </NuxtLink>
       <button type="button" class="top-menu__logout" @click="signOut">Logout</button>
+      <NuxtLink
+        v-if="isAdmin"
+        to="/admin/settings"
+        class="top-menu__icon-link"
+        :class="{ 'top-menu__icon-link--active': route.path === '/admin/settings' }"
+        aria-label="Settings"
+        title="Settings"
+      >
+        ⚙
+      </NuxtLink>
     </div>
 
     <!-- Mobile: compact header row (avatar + name + hamburger) -->
@@ -80,6 +90,15 @@
       >
         Create Game
       </NuxtLink>
+      <NuxtLink
+        v-if="isAdmin"
+        to="/admin/settings"
+        class="top-menu__drawer-link"
+        :class="{ 'top-menu__drawer-link--active': route.path === '/admin/settings' }"
+        @click="menuOpen = false"
+      >
+        Settings
+      </NuxtLink>
       <div class="top-menu__drawer-divider" />
       <button type="button" class="top-menu__drawer-logout" @click="() => { signOut(); menuOpen = false }">
         Logout
@@ -110,12 +129,21 @@ const items = [
   { label: 'Games', to: '/games', match: ['/games', '/gameList'] },
   { label: 'Players', to: '/players', match: ['/players'] },
   { label: 'Commanders', to: '/commanders', match: ['/commanders'] },
+  { label: 'Pairings', to: '/commanders/pairings', match: ['/commanders/pairings'] },
   { label: 'Achievements', to: '/achievements', match: ['/achievements'] },
   { label: 'Shop', to: '/shop', match: ['/shop'] },
 ] as const
 
 function isActive(item: (typeof items)[number]) {
-  return item.match.some((prefix) => route.path === prefix || route.path.startsWith(`${prefix}/`))
+  const path = route.path
+  const matchLen = (i: (typeof items)[number]) =>
+    i.match.reduce((best, prefix) => {
+      if (path === prefix || path.startsWith(`${prefix}/`)) return Math.max(best, prefix.length)
+      return best
+    }, 0)
+  const myLen = matchLen(item)
+  if (myLen === 0) return false
+  return (items as readonly (typeof items)[number][]).every((other) => matchLen(other) <= myLen)
 }
 
 async function signOut() {
@@ -240,6 +268,36 @@ async function signOut() {
     color: $color-text;
     border-color: rgba($color-primary, 0.4);
     background: rgba($color-bg-elevated, 0.78);
+  }
+}
+
+.top-menu__icon-link {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: 38px;
+  height: 38px;
+  border-radius: $border-radius-md;
+  border: 1px solid rgba($border-color, 0.75);
+  background: rgba($color-bg-card, 0.52);
+  color: $color-text-muted;
+  text-decoration: none;
+  font-size: 18px;
+  line-height: 1;
+  transition: color $transition-fast, border-color $transition-fast, background $transition-fast, transform $transition-fast;
+
+  &:hover {
+    color: $color-accent;
+    border-color: rgba($color-accent, 0.4);
+    background: rgba($color-bg-elevated, 0.78);
+    transform: rotate(20deg);
+  }
+
+  &--active {
+    color: $color-accent;
+    border-color: rgba($color-accent, 0.6);
+    background: rgba($color-accent, 0.12);
+    box-shadow: 0 0 10px rgba($color-accent, 0.25), inset 0 0 6px rgba($color-accent, 0.08);
   }
 }
 

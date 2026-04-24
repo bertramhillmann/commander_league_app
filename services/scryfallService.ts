@@ -1,4 +1,5 @@
 const BASE_URL = 'https://api.scryfall.com'
+const COLLECTION_CHUNK_SIZE = 75
 
 export interface ScryfallCard {
   id: string
@@ -13,7 +14,7 @@ export interface ScryfallCard {
     art_crop: string
     border_crop: string
   }
-  // double-faced cards store images per face
+  // Double-faced cards store images per face.
   card_faces?: {
     name: string
     image_uris?: ScryfallCard['image_uris']
@@ -28,8 +29,26 @@ export interface ScryfallCard {
   scryfall_uri: string
 }
 
-// Module-level cache — persists for the lifetime of the page
+interface ScryfallCollectionResponse {
+  data: ScryfallCard[]
+}
+
+// Module-level cache persists for the lifetime of the page.
 const cache = new Map<string, ScryfallCard | null>()
+
+function normalizeCardName(name: string) {
+  return name.trim().toLowerCase()
+}
+
+function chunk<T>(items: T[], size: number) {
+  const chunks: T[][] = []
+
+  for (let i = 0; i < items.length; i += size) {
+    chunks.push(items.slice(i, i + size))
+  }
+
+  return chunks
+}
 
 /**
  * Fetch a card by exact or fuzzy name match.
@@ -48,6 +67,57 @@ export async function fetchCardByName(name: string): Promise<ScryfallCard | null
     cache.set(name, null)
     return null
   }
+}
+
+/**
+ * Fetch many cards at once through Scryfall's collection endpoint.
+ * Falls back to fuzzy single-card lookups for any unresolved chunk.
+ */
+export async function fetchCardsByName(names: string[]): Promise<Map<string, ScryfallCard | null>> {
+  const uniqueNames = [...new Set(names.map((name) => name.trim()).filter(Boolean))]
+  const results = new Map<string, ScryfallCard | null>()
+
+  if (uniqueNames.length === 0) return results
+
+  const uncachedNames = uniqueNames.filter((name) => !cache.has(name))
+
+  for (const namesChunk of chunk(uncachedNames, COLLECTION_CHUNK_SIZE)) {
+    try {
+      const response = await $fetch<ScryfallCollectionResponse>(`${BASE_URL}/cards/collection`, {
+        method: 'POST',
+        body: {
+          identifiers: namesChunk.map((name) => ({ name })),
+        },
+      })
+
+      const cardsByName = new Map(
+        response.data.map((card) => [normalizeCardName(card.name), card] as const),
+      )
+
+      for (const requestedName of namesChunk) {
+        const match = cardsByName.get(normalizeCardName(requestedName)) ?? null
+
+        if (match) {
+          cache.set(requestedName, match)
+          continue
+        }
+
+        await fetchCardByName(requestedName)
+      }
+    } catch {
+      await Promise.all(namesChunk.map(async (name) => {
+        if (!cache.has(name)) {
+          await fetchCardByName(name)
+        }
+      }))
+    }
+  }
+
+  for (const name of uniqueNames) {
+    results.set(name, cache.get(name) ?? null)
+  }
+
+  return results
 }
 
 /**

@@ -36,6 +36,10 @@ export default defineEventHandler(async (event) => {
   await connectToDatabase()
   const ensuredPlayer = await ensurePlayerExists(playerName)
   const { query: playerLookup } = buildPlayerLookup(playerName)
+  const existingPlayer = await Player.findOne(playerLookup).lean()
+  const existingEntry = (existingPlayer?.commanderDecks ?? []).find((entry) =>
+    entry.commanderNameKey === commanderNameKey || entry.commanderName === commanderName,
+  )
 
   if (!archidektUrl) {
     await Player.updateOne(
@@ -51,6 +55,24 @@ export default defineEventHandler(async (event) => {
         },
       },
     )
+
+    if (existingEntry?.selectedTitle) {
+      await Player.updateOne(
+        playerLookup,
+        {
+          $push: {
+            commanderDecks: {
+              commanderName: existingEntry.commanderName,
+              commanderNameKey,
+              archidektUrl: '',
+              archidektDeckId: '',
+              selectedTitle: existingEntry.selectedTitle,
+            },
+          },
+        },
+      )
+    }
+
     return { ok: true, deleted: true }
   }
 
@@ -94,6 +116,7 @@ export default defineEventHandler(async (event) => {
           commanderNameKey,
           archidektUrl: normalizedUrl,
           archidektDeckId,
+          selectedTitle: existingEntry?.selectedTitle ?? '',
         },
       },
     },
@@ -116,6 +139,7 @@ export default defineEventHandler(async (event) => {
           commanderNameKey: link.commanderNameKey,
           archidektUrl: link.archidektUrl,
           archidektDeckId: link.archidektDeckId,
+          selectedTitle: link.selectedTitle || undefined,
           updatedAt: link.updatedAt,
         }
       : null,

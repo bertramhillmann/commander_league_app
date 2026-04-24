@@ -8,7 +8,7 @@
         <tr>
           <th class="standings__th standings__th--rank">#</th>
           <th class="standings__th standings__th--name">Player</th>
-          <th class="standings__th standings__th--num" title="(Points + Achievement Points + Commander XP Points) × Performance Multiplier&#10;Multiplier rewards win rate and avg points per game relative to the league">
+          <th class="standings__th standings__th--num" title="((Points + Missed-Game Compensation) + Achievement Points + Commander XP Points) × Performance Multiplier&#10;Compensation decays toward the league floor and is always discounted versus real games&#10;Multiplier rewards win rate and avg points per game relative to the league">
             <button
               type="button"
               class="standings__sort-button standings__sort-button--num"
@@ -19,6 +19,7 @@
             </button>
           </th>
           <th class="standings__th standings__th--num standings__th--mult" title="Performance multiplier applied to base score&#10;1.0 = league average · &gt;1.0 = above average · &lt;1.0 = below average">×Mult</th>
+          <th class="standings__th standings__th--num" title="Projected compensation for missed games compared to the most active player&#10;Always discounted and not affected by the multiplier">Comp.</th>
           <th class="standings__th standings__th--num">
             <button
               type="button"
@@ -118,6 +119,12 @@
             @mousemove="onMouseMove($event)"
             @mouseleave="onMultLeave"
           >{{ fmt(row.perfMult) }}</td>
+          <td
+            class="standings__td standings__td--num standings__td--comp standings__td--hoverable-comp"
+            @mouseenter="onCompEnter(row, $event)"
+            @mousemove="onMouseMove($event)"
+            @mouseleave="onCompLeave"
+          >{{ fmt(row.projectedPoints) }}</td>
           <td class="standings__td standings__td--num">{{ fmt(row.totalPoints) }}</td>
           <td
             class="standings__td standings__td--num standings__td--achv standings__td--hoverable"
@@ -226,169 +233,34 @@
       </div>
     </section>
 
+    <section v-if="performanceChartData.series.length > 0" class="dashboard__perf-section">
+      <div class="dashboard__perf-switcher">
+        <button
+          type="button"
+          class="dashboard__perf-switch"
+          :class="{ 'dashboard__perf-switch--active': activeChart === 'performance' }"
+          @click="activeChart = 'performance'"
+        >Performance</button>
+        <button
+          type="button"
+          class="dashboard__perf-switch"
+          :class="{ 'dashboard__perf-switch--active': activeChart === 'total' }"
+          @click="activeChart = 'total'"
+        >Total Points</button>
+      </div>
+      <ChartsPerformanceTimeline
+        v-if="activeChart === 'performance'"
+        :labels="performanceChartData.labels"
+        :series="performanceChartData.series"
+      />
+      <ChartsPerformanceTimeline
+        v-else
+        :labels="totalPointsChartData.labels"
+        :series="totalPointsChartData.series"
+      />
+    </section>
+
     <CommandersTopCommander />
-
-    <h2 class="dashboard__subtitle">Player × Commander Pairings</h2>
-
-    <div class="standings-wrap">
-    <table class="standings">
-      <thead>
-        <tr>
-          <th class="standings__th standings__th--rank">#</th>
-          <th class="standings__th standings__th--name">Player × Commander</th>
-          <th class="standings__th standings__th--num">
-            <button
-              type="button"
-              class="standings__sort-button standings__sort-button--num"
-              @click="togglePairingSort('totalScore')"
-            >
-              <span>Total</span>
-              <span class="standings__sort-indicator">{{ pairingSortIndicator('totalScore') }}</span>
-            </button>
-          </th>
-          <th class="standings__th standings__th--num standings__th--mult">×Mult</th>
-          <th class="standings__th standings__th--num">
-            <button
-              type="button"
-              class="standings__sort-button standings__sort-button--num"
-              @click="togglePairingSort('totalPoints')"
-            >
-              <span>Points</span>
-              <span class="standings__sort-indicator">{{ pairingSortIndicator('totalPoints') }}</span>
-            </button>
-          </th>
-          <th class="standings__th standings__th--num">
-            <button
-              type="button"
-              class="standings__sort-button standings__sort-button--num"
-              @click="togglePairingSort('achievementPoints')"
-            >
-              <span>Achv. Pts</span>
-              <span class="standings__sort-indicator">{{ pairingSortIndicator('achievementPoints') }}</span>
-            </button>
-          </th>
-          <th class="standings__th standings__th--num">
-            <button
-              type="button"
-              class="standings__sort-button standings__sort-button--num"
-              @click="togglePairingSort('xpPoints')"
-            >
-              <span>XP Pts</span>
-              <span class="standings__sort-indicator">{{ pairingSortIndicator('xpPoints') }}</span>
-            </button>
-          </th>
-          <th class="standings__th standings__th--num">
-            <button
-              type="button"
-              class="standings__sort-button standings__sort-button--num"
-              @click="togglePairingSort('gamesPlayed')"
-            >
-              <span>Games</span>
-              <span class="standings__sort-indicator">{{ pairingSortIndicator('gamesPlayed') }}</span>
-            </button>
-          </th>
-          <th class="standings__th standings__th--num">
-            <button
-              type="button"
-              class="standings__sort-button standings__sort-button--num"
-              @click="togglePairingSort('totalLosses')"
-            >
-              <span>Losses</span>
-              <span class="standings__sort-indicator">{{ pairingSortIndicator('totalLosses') }}</span>
-            </button>
-          </th>
-          <th class="standings__th standings__th--num">
-            <button
-              type="button"
-              class="standings__sort-button standings__sort-button--num"
-              @click="togglePairingSort('winRate')"
-            >
-              <span>Win %</span>
-              <span class="standings__sort-indicator">{{ pairingSortIndicator('winRate') }}</span>
-            </button>
-          </th>
-          <th class="standings__th standings__th--num">
-            <button
-              type="button"
-              class="standings__sort-button standings__sort-button--num"
-              @click="togglePairingSort('avgPerGame')"
-            >
-              <span>Avg / Game</span>
-              <span class="standings__sort-indicator">{{ pairingSortIndicator('avgPerGame') }}</span>
-            </button>
-          </th>
-          <th class="standings__th standings__th--num">
-            <button
-              type="button"
-              class="standings__sort-button standings__sort-button--num"
-              @click="togglePairingSort('totalLPoints')"
-            >
-              <span>L-Points</span>
-              <span class="standings__sort-indicator">{{ pairingSortIndicator('totalLPoints') }}</span>
-            </button>
-          </th>
-        </tr>
-      </thead>
-      <tbody>
-        <tr
-          v-for="row in pairingTable"
-          :key="row.key"
-          class="standings__row"
-          :class="{
-            'standings__row--top1': row.rank === 1,
-            'standings__row--top2': row.rank === 2,
-            'standings__row--top3': row.rank === 3
-          }"
-        >
-          <td class="standings__td standings__td--rank">
-            <span class="standings__rank" :class="`standings__rank--${row.rank}`">
-              {{ rankLabel(row.rank) }}
-            </span>
-          </td>
-          <td class="standings__td standings__td--name">
-            <div class="standings__pairing-name">
-              <IconsTierIcon
-                v-if="row.commanderTier"
-                :tier="row.commanderTier"
-                :size="12"
-              />
-              <NuxtLink class="standings__player-link" :to="`/players/${encodeURIComponent(row.playerName)}`">{{ row.playerName }}</NuxtLink>
-              <span class="standings__pairing-separator">×</span>
-              <NuxtLink
-                class="standings__commander-name"
-                :to="`/commanders/${encodeURIComponent(row.commanderName)}`"
-                @mouseenter="onCommanderEnter(row.playerName, row.commanderName, $event)"
-                @mousemove="onMouseMove($event)"
-                @mouseleave="onCommanderLeave"
-              >
-                {{ row.commanderName }}
-              </NuxtLink>
-            </div>
-          </td>
-          <td class="standings__td standings__td--num standings__td--total">{{ fmt(row.totalScore) }}</td>
-          <td
-            class="standings__td standings__td--num standings__td--mult standings__td--hoverable-mult"
-            @mouseenter="onMultEnter(row, $event)"
-            @mousemove="onMouseMove($event)"
-            @mouseleave="onMultLeave"
-          >{{ fmt(row.perfMult) }}</td>
-          <td class="standings__td standings__td--num">{{ fmt(row.totalPoints) }}</td>
-          <td
-            class="standings__td standings__td--num standings__td--achv standings__td--hoverable"
-            @mouseenter="onAchvEnter(row.playerName, $event, row.commanderName)"
-            @mousemove="onMouseMove($event)"
-            @mouseleave="onAchvLeave"
-          >{{ fmt(row.achievementPoints) }}</td>
-          <td class="standings__td standings__td--num standings__td--xp">{{ fmt(row.xpPoints) }}</td>
-          <td class="standings__td standings__td--num">{{ row.gamesPlayed }}</td>
-          <td class="standings__td standings__td--num">{{ row.totalLosses }}</td>
-          <td class="standings__td standings__td--num">{{ row.winRate }}%</td>
-          <td class="standings__td standings__td--num">{{ fmt(row.avgPerGame) }}</td>
-          <td class="standings__td standings__td--num standings__td--lp">{{ fmt(row.totalLPoints) }}</td>
-        </tr>
-      </tbody>
-    </table>
-    </div>
 
     <Teleport to="body">
       <div
@@ -467,12 +339,73 @@
         </table>
       </div>
     </Teleport>
+
+    <Teleport to="body">
+      <div
+        v-if="compHover.visible"
+        class="floating-panel mult-tooltip"
+        :style="{ top: `${compHover.y}px`, left: `${compHover.x}px` }"
+      >
+        <div class="mult-tooltip__title">Compensation</div>
+        <table class="mult-tooltip__table">
+          <tr>
+            <td class="mult-tooltip__label">Games</td>
+            <td class="mult-tooltip__op"></td>
+            <td class="mult-tooltip__detail">{{ compHover.gamesPlayed }} played / {{ compHover.maxGamesPlayed }} max</td>
+            <td class="mult-tooltip__value">{{ compHover.missingGames }}</td>
+          </tr>
+          <tr>
+            <td class="mult-tooltip__label">Projected</td>
+            <td class="mult-tooltip__op">=</td>
+            <td class="mult-tooltip__detail">min(missing, {{ compHover.maxProjectedGames }})</td>
+            <td class="mult-tooltip__value">{{ compHover.cappedMissingGames }}</td>
+          </tr>
+          <tr>
+            <td class="mult-tooltip__label">Optimistic</td>
+            <td class="mult-tooltip__op"></td>
+            <td class="mult-tooltip__detail">player avg / game</td>
+            <td class="mult-tooltip__value">{{ fmt(compHover.averageScore) }}</td>
+          </tr>
+          <tr>
+            <td class="mult-tooltip__label">Floor</td>
+            <td class="mult-tooltip__op"></td>
+            <td class="mult-tooltip__detail">league worst avg / game</td>
+            <td class="mult-tooltip__value">{{ fmt(compHover.leagueFloorScore) }}</td>
+          </tr>
+          <tr>
+            <td class="mult-tooltip__label">Decay</td>
+            <td class="mult-tooltip__op"></td>
+            <td class="mult-tooltip__detail">exp(-i / {{ fmt(compHover.decayFactor) }}) per game</td>
+            <td class="mult-tooltip__value">decay</td>
+          </tr>
+          <tr>
+            <td class="mult-tooltip__label">Discounts</td>
+            <td class="mult-tooltip__op">×</td>
+            <td class="mult-tooltip__detail">{{ fmt(compHover.gameValueFactor) }} value × {{ fmt(compHover.sampleFactor) }} sample</td>
+            <td class="mult-tooltip__value">{{ fmt(compHover.gameValueFactor * compHover.sampleFactor) }}</td>
+          </tr>
+          <tr class="mult-tooltip__row--sep">
+            <td class="mult-tooltip__label">Sample</td>
+            <td class="mult-tooltip__op"></td>
+            <td class="mult-tooltip__detail">{{ compHover.gamesPlayed }} / ({{ compHover.gamesPlayed }} + {{ fmt(compHover.sampleSmoothingGames) }})</td>
+            <td class="mult-tooltip__value">{{ fmt(compHover.sampleFactor) }}</td>
+          </tr>
+          <tr>
+            <td class="mult-tooltip__label">Total Comp.</td>
+            <td class="mult-tooltip__op">=</td>
+            <td class="mult-tooltip__detail">added after ×Mult</td>
+            <td class="mult-tooltip__value">{{ fmt(compHover.projectedPoints) }}</td>
+          </tr>
+        </table>
+      </div>
+    </Teleport>
   </div>
 </template>
 
 <script setup lang="ts">
 import { computed, reactive, ref } from 'vue'
-import { compareGamesChronological, getPlayerCommanderMetrics } from '~/composables/useLeagueState'
+import { calculateProjectedPoints, compareGamesChronological, type PlayerGameRecord } from '~/composables/useLeagueState'
+import type { PerformancePlayerSeries } from '~/components/charts/PerformanceTimeline.vue'
 import { getArchEnemySummary } from '~/utils/archEnemy'
 import { getFeaturedPlayers, type FeaturedPlayerCandidate } from '~/utils/featuredPlayer'
 import { formatPlayerName } from '~/utils/playerNames'
@@ -486,7 +419,7 @@ import {
 } from '~/utils/placements'
 import { computeGlobalCommanderBaseline, computePlayerCommanderTier, type Tier } from '~/utils/tiers'
 
-const { commanders, gameRecords, games, players, standings } = useLeagueState()
+const { commanders, gameRecords, games, leagueSnapshots, players, standings } = useLeagueState()
 const { user, ensureSession } = useAuth()
 
 type SortKey =
@@ -502,8 +435,6 @@ type SortKey =
 
 const sortKey = ref<SortKey>('totalScore')
 const sortDirection = ref<'desc' | 'asc'>('desc')
-const pairingSortKey = ref<SortKey>('totalScore')
-const pairingSortDirection = ref<'desc' | 'asc'>('desc')
 const chronologicalGames = computed(() => [...games.value].sort(compareGamesChronological))
 const playerPortraitModules = import.meta.glob('../assets/img/*.png', { eager: true, import: 'default' })
 const playerPortraits = Object.fromEntries(
@@ -537,6 +468,21 @@ type MultRow = {
   avgTerm: number
   perfMultRaw: number
   perfMult: number
+}
+
+type CompensationRow = {
+  projectedPoints: number
+  gamesPlayed: number
+  projectionMissingGames: number
+  projectionCappedMissingGames: number
+  projectionMaxGamesPlayed: number
+  projectionLeagueFloorScore: number
+  projectionAverageScore: number
+  projectionSampleFactor: number
+  projectionDecayFactor: number
+  projectionGameValueFactor: number
+  projectionMaxProjectedGames: number
+  projectionSampleSmoothingGames: number
 }
 
 // ── Commander XP points: 1 pt per level per commander ────────────────────────
@@ -605,12 +551,27 @@ const table = computed(() => {
       p.baseWins,
       leagueAvgPerGame,
     )
+    const projection = calculateProjectedPoints(
+      { totalPoints: p.totalPoints, gamesPlayed: p.gamesPlayed },
+      players.value,
+    )
 
     const tc = topCommander(p.name)
     return {
       rank: p.rank,
       name: p.name,
       totalScore: p.totalScore,
+      projectedPoints: p.projectedPoints,
+      projectionMissingGames: projection.missingGames,
+      projectionCappedMissingGames: projection.cappedMissingGames,
+      projectionMaxGamesPlayed: projection.maxGamesPlayed,
+      projectionLeagueFloorScore: projection.leagueFloorScore,
+      projectionAverageScore: projection.averageScore,
+      projectionSampleFactor: projection.sampleFactor,
+      projectionDecayFactor: projection.decayFactor,
+      projectionGameValueFactor: projection.projectedGameValueFactor,
+      projectionMaxProjectedGames: projection.maxProjectedGames,
+      projectionSampleSmoothingGames: projection.sampleSmoothingGames,
       totalPoints: p.totalPoints,
       achievementPoints: p.achievementPoints,
       xpPoints: p.xpPoints,
@@ -640,69 +601,6 @@ const table = computed(() => {
   })
 })
 
-const pairingTable = computed(() => {
-  const rows = Object.entries(gameRecords.value).flatMap(([playerName, recordsMap]) => {
-    const byCommander = new Set(Object.values(recordsMap).map((record) => record.commander))
-
-    return Array.from(byCommander).flatMap((commanderName) => {
-      const metrics = getPlayerCommanderMetrics(playerName, commanderName, gameRecords.value, players.value)
-      if (!metrics) return []
-
-      return {
-        key: `${playerName}::${commanderName}`,
-        playerName,
-        commanderName,
-        commanderTier: playerCommanderTier(playerName, commanderName),
-        totalPoints: metrics.totalFinalPoints,
-        achievementPoints: metrics.achievementPoints,
-        xpPoints: metrics.xpPoints,
-        gamesPlayed: metrics.plays,
-        totalLosses: metrics.totalLosses,
-        baseWins: metrics.first,
-        totalLPoints: metrics.totalLPoints,
-      }
-    })
-  })
-
-  const totalGames = rows.reduce((sum, row) => sum + row.gamesPlayed, 0)
-  const totalPoints = rows.reduce((sum, row) => sum + row.totalPoints, 0)
-  const leagueAvgPerGame = totalGames > 0 ? totalPoints / totalGames : 1
-
-  const enrichedRows = rows.map((row) => {
-    const performance = buildPerformanceMetrics(
-      row.totalPoints,
-      row.gamesPlayed,
-      row.baseWins,
-      leagueAvgPerGame,
-    )
-    const totalScore = r3((row.totalPoints + row.achievementPoints + row.xpPoints) * performance.perfMult)
-
-    return {
-      ...row,
-      totalScore,
-      winRate: performance.winRate,
-      avgPerGame: performance.avgPerGame,
-      leagueAvgPerGame: performance.leagueAvgPerGame,
-      perfMult: performance.perfMult,
-      perfMultRaw: performance.perfMultRaw,
-      winRateFraction: performance.winRateFraction,
-      winRateTerm: performance.winRateTerm,
-      avgFraction: performance.avgFraction,
-      avgTerm: performance.avgTerm,
-    }
-  })
-
-  return enrichedRows
-    .sort((a, b) => {
-      const direction = pairingSortDirection.value === 'desc' ? -1 : 1
-      const delta = a[pairingSortKey.value] - b[pairingSortKey.value]
-
-      if (delta !== 0) return delta * direction
-
-      return a.key.localeCompare(b.key) * direction
-    })
-    .map((row, index) => ({ ...row, rank: index + 1 }))
-})
 
 const featuredPlayers = computed<FeaturedPlayerCandidate[]>(() => {
   // Prefer players who have a portrait image
@@ -755,6 +653,98 @@ const honorableMentions = computed(() =>
 
 function r3(n: number): number { return Math.round(n * 1000) / 1000 }
 
+// ── Performance timeline chart ────────────────────────────────────────────────
+
+const PERF_CHART_LAMBDA = 0.1
+const PERF_CHART_COLORS = [
+  '#f0c24b', '#7ab8ff', '#2c9c6a', '#cf5c73',
+  '#b97cf3', '#f97316', '#22d3ee', '#a78bfa',
+  '#fb923c', '#34d399',
+]
+
+function computeWeightedScore(records: PlayerGameRecord[]): number {
+  if (records.length === 0) return 0
+  let weightedSum = 0
+  let totalWeight = 0
+  for (let i = 0; i < records.length; i++) {
+    const age = records.length - 1 - i
+    const weight = Math.exp(-PERF_CHART_LAMBDA * age)
+    weightedSum += weight * records[i].finalPoints
+    totalWeight += weight
+  }
+  return totalWeight > 0 ? r3(weightedSum / totalWeight) : 0
+}
+
+const activeChart = ref<'performance' | 'total'>('performance')
+
+function fmtGameDate(date: string | Date) {
+  return new Date(date).toLocaleDateString('de-DE', { day: '2-digit', month: '2-digit', year: '2-digit' })
+}
+
+const performanceChartData = computed<{ labels: string[], series: PerformancePlayerSeries[] }>(() => {
+  const games = chronologicalGames.value
+  if (games.length === 0) return { labels: [], series: [] }
+
+  const labels = games.map((game) => fmtGameDate(game.date))
+  const playerNames = standings.value.map((s) => s.name)
+
+  const series: PerformancePlayerSeries[] = playerNames
+    .map((playerName, index) => {
+      const accumulated: PlayerGameRecord[] = []
+      const data: (number | null)[] = []
+
+      for (const game of games) {
+        const record = gameRecords.value[playerName]?.[game.gameId]
+        if (record) {
+          accumulated.push(record)
+          data.push(computeWeightedScore(accumulated))
+        } else {
+          data.push(null)
+        }
+      }
+
+      return {
+        name: playerName,
+        color: PERF_CHART_COLORS[index % PERF_CHART_COLORS.length],
+        data,
+      }
+    })
+    .filter((s) => s.data.some((v) => v !== null))
+
+  return { labels, series }
+})
+
+const totalPointsChartData = computed<{ labels: string[], series: PerformancePlayerSeries[] }>(() => {
+  const games = chronologicalGames.value
+  if (games.length === 0) return { labels: [], series: [] }
+
+  const labels = games.map((game) => fmtGameDate(game.date))
+  const playerNames = standings.value.map((s) => s.name)
+
+  const series: PerformancePlayerSeries[] = playerNames
+    .map((playerName, index) => {
+      const data: number[] = []
+      let lastScore = 0
+
+      for (const game of games) {
+        const snapshot = leagueSnapshots.value[game.gameId]?.[playerName]
+        if (snapshot) {
+          lastScore = snapshot.totalScore
+        }
+        data.push(lastScore)
+      }
+
+      return {
+        name: playerName,
+        color: PERF_CHART_COLORS[index % PERF_CHART_COLORS.length],
+        data,
+      }
+    })
+    .filter((s) => s.data.some((v) => v > 0))
+
+  return { labels, series }
+})
+
 function getPlayerPortrait(playerName: string) {
   return playerPortraits[playerName.toLowerCase()] ?? ''
 }
@@ -774,26 +764,13 @@ function sortIndicator(key: SortKey) {
   return sortDirection.value === 'desc' ? '↓' : '↑'
 }
 
-function togglePairingSort(key: SortKey) {
-  if (pairingSortKey.value === key) {
-    pairingSortDirection.value = pairingSortDirection.value === 'desc' ? 'asc' : 'desc'
-    return
-  }
-
-  pairingSortKey.value = key
-  pairingSortDirection.value = 'desc'
-}
-
-function pairingSortIndicator(key: SortKey) {
-  if (pairingSortKey.value !== key) return '↕'
-  return pairingSortDirection.value === 'desc' ? '↓' : '↑'
-}
 
 function rankLabel(rank: number) {
   return ['🥇', '🥈', '🥉'][rank - 1] ?? `${rank}.`
 }
 
-function fmt(n: number): string {
+function fmt(n: number | null | undefined): string {
+  if (typeof n !== 'number' || Number.isNaN(n)) return '0'
   if (n === 0) return '0'
   return n % 1 === 0 ? String(n) : n.toFixed(3).replace(/\.?0+$/, '')
 }
@@ -842,6 +819,11 @@ function onMouseMove(e: MouseEvent) {
     const pos = calcMultPosition(e)
     multHover.x = pos.x
     multHover.y = pos.y
+  }
+  if (compHover.visible) {
+    const pos = calcCompPosition(e)
+    compHover.x = pos.x
+    compHover.y = pos.y
   }
 }
 
@@ -930,11 +912,55 @@ const multHover = reactive<MultHoverData>({
   perfMult: 1,
 })
 
+type CompensationHoverData = {
+  visible: boolean
+  x: number
+  y: number
+  projectedPoints: number
+  gamesPlayed: number
+  missingGames: number
+  cappedMissingGames: number
+  maxGamesPlayed: number
+  leagueFloorScore: number
+  averageScore: number
+  sampleFactor: number
+  decayFactor: number
+  gameValueFactor: number
+  maxProjectedGames: number
+  sampleSmoothingGames: number
+}
+
+const compHover = reactive<CompensationHoverData>({
+  visible: false,
+  x: 0,
+  y: 0,
+  projectedPoints: 0,
+  gamesPlayed: 0,
+  missingGames: 0,
+  cappedMissingGames: 0,
+  maxGamesPlayed: 0,
+  leagueFloorScore: 0,
+  averageScore: 0,
+  sampleFactor: 0,
+  decayFactor: 0,
+  gameValueFactor: 0,
+  maxProjectedGames: 0,
+  sampleSmoothingGames: 0,
+})
+
 function calcMultPosition(e: MouseEvent) {
   let x = e.clientX + OFFSET_X
   let y = e.clientY + OFFSET_Y
   if (x + 240 > window.innerWidth) x = e.clientX - 240 - OFFSET_X
   if (y + 200 > window.innerHeight) y = e.clientY - 200 - OFFSET_Y
+  return { x: x + window.scrollX, y: y + window.scrollY }
+}
+
+function calcCompPosition(e: MouseEvent) {
+  let x = e.clientX + OFFSET_X
+  let y = e.clientY + OFFSET_Y
+  if (x + 320 > window.innerWidth) x = e.clientX - 320 - OFFSET_X
+  if (y + 320 > window.innerHeight) y = e.clientY - 320 - OFFSET_Y
   return { x: x + window.scrollX, y: y + window.scrollY }
 }
 
@@ -957,6 +983,29 @@ function onMultEnter(row: MultRow, e: MouseEvent) {
 function onMultLeave() {
   multHover.visible = false
 }
+
+function onCompEnter(row: CompensationRow, e: MouseEvent) {
+  compHover.visible = true
+  compHover.projectedPoints = row.projectedPoints
+  compHover.gamesPlayed = row.gamesPlayed
+  compHover.missingGames = row.projectionMissingGames
+  compHover.cappedMissingGames = row.projectionCappedMissingGames
+  compHover.maxGamesPlayed = row.projectionMaxGamesPlayed
+  compHover.leagueFloorScore = row.projectionLeagueFloorScore
+  compHover.averageScore = row.projectionAverageScore
+  compHover.sampleFactor = row.projectionSampleFactor
+  compHover.decayFactor = row.projectionDecayFactor
+  compHover.gameValueFactor = row.projectionGameValueFactor
+  compHover.maxProjectedGames = row.projectionMaxProjectedGames
+  compHover.sampleSmoothingGames = row.projectionSampleSmoothingGames
+  const pos = calcCompPosition(e)
+  compHover.x = pos.x
+  compHover.y = pos.y
+}
+
+function onCompLeave() {
+  compHover.visible = false
+}
 </script>
 
 <style lang="scss" scoped>
@@ -967,12 +1016,6 @@ function onMultLeave() {
   margin-bottom: $spacing-6;
 }
 
-.dashboard__subtitle {
-  font-size: $font-size-lg;
-  font-weight: $font-weight-semibold;
-  color: $color-text;
-  margin: $spacing-8 0 $spacing-4;
-}
 
 .dashboard__spotlight {
   display: grid;
@@ -1235,6 +1278,41 @@ function onMultLeave() {
   }
 }
 
+.dashboard__perf-section {
+  margin: $spacing-8 0;
+  display: flex;
+  flex-direction: column;
+  gap: $spacing-3;
+}
+
+.dashboard__perf-switcher {
+  display: flex;
+  gap: $spacing-2;
+}
+
+.dashboard__perf-switch {
+  padding: 4px 14px;
+  border-radius: $border-radius-full;
+  border: 1px solid rgba($border-color, 0.6);
+  background: transparent;
+  color: $color-text-muted;
+  font-size: $font-size-xs;
+  font-weight: $font-weight-medium;
+  cursor: pointer;
+  transition: color $transition-fast, border-color $transition-fast, background $transition-fast;
+
+  &:hover {
+    color: $color-text;
+    border-color: rgba($color-primary-light, 0.4);
+  }
+
+  &--active {
+    color: $color-text;
+    border-color: rgba($color-primary-light, 0.5);
+    background: rgba($color-primary, 0.12);
+  }
+}
+
 .standings-wrap {
   overflow-x: auto;
   -webkit-overflow-scrolling: touch;
@@ -1328,9 +1406,11 @@ function onMultLeave() {
     &--hoverable { cursor: default; text-decoration: underline dotted $color-accent; }
     &--hoverable-xp { cursor: default; text-decoration: underline dotted $color-primary-light; }
     &--xp    { color: $color-primary-light; }
+    &--comp  { color: #f08bb4; }
+    &--hoverable-comp { cursor: default; text-decoration: underline dotted #f08bb4; }
     &--lp    { color: $color-danger; }
-        &--mult  { color: $color-text-muted; font-size: $font-size-xs; }
-        &--hoverable-mult { cursor: default; text-decoration: underline dotted $color-text-muted; }
+    &--mult  { color: $color-text-muted; font-size: $font-size-xs; }
+    &--hoverable-mult { cursor: default; text-decoration: underline dotted $color-text-muted; }
   }
 
   &__rank {
@@ -1438,6 +1518,7 @@ function onMultLeave() {
     &-name {
       font-size: $font-size-lg;
     }
+
   }
 }
 </style>

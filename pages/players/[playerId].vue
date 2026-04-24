@@ -290,6 +290,26 @@
                 >
                   {{ cmd.title.name }}
                 </button>
+                <label
+                  v-if="isOwnProfile && cmd.availableTitles.length > 1"
+                  class="cmd-row__title-select-wrap"
+                >
+                  <span class="cmd-row__title-select-label">Display Title</span>
+                  <select
+                    :value="getCommanderSelectedTitleValue(cmd)"
+                    class="cmd-row__title-select"
+                    :disabled="titleSaving[cmd.name]"
+                    @change="onCommanderTitleChange(cmd, $event)"
+                  >
+                    <option
+                      v-for="titleOption in cmd.availableTitles"
+                      :key="`${cmd.name}-${titleOption.id}`"
+                      :value="titleOption.id"
+                    >
+                      {{ titleOption.name }}
+                    </option>
+                  </select>
+                </label>
                 <span v-if="cmd.tierDetail" class="cmd-row__tier">
                   <UITierBadge :detail="cmd.tierDetail" :context="cmd.tierContext" />
                 </span>
@@ -324,6 +344,9 @@
               </div>
 
               <div v-if="deckPopoverOpen === cmd.name" class="cmd-row__deck-popover">
+                <span v-if="titleErrors[cmd.name]" class="cmd-row__deck-error">
+                  {{ titleErrors[cmd.name] }}
+                </span>
                 <div v-if="isOwnProfile" class="cmd-row__deck-popover-row">
                   <input
                     v-model="commanderDeckInputs[cmd.name]"
@@ -713,7 +736,7 @@
 <script setup lang="ts">
 import { compareGamesChronological, getLeagueStandingMetrics, getPlayerCommanderPerformanceEdgeMetrics, getPlayerCommanderMetrics } from '~/composables/useLeagueState'
 import { useAuth } from '~/composables/useAuth'
-import { fetchCardByName, getCardImageUrl } from '~/services/scryfallService'
+import { fetchCardsByName, getCardImageUrl, type ScryfallCard } from '~/services/scryfallService'
 import { xpToLevel, getCommanderLevelProgress } from '~/utils/commanderExperience'
 import { getArchEnemySummary } from '~/utils/archEnemy'
 import { extractArchidektDeckId } from '~/utils/archidekt'
@@ -725,10 +748,11 @@ import { formatPlayerName } from '~/utils/playerNames'
 import { normalizeDeckIdentityKey } from '~/utils/deckLinks'
 import { buildPlayerSuggestion, type PlayerCommanderPickSuggestion } from '~/utils/playerSuggestions'
 import { computeGlobalCommanderBaseline, computePlayerCommanderTier, smoothedTierScore, getTierDetail, type TierDetail, type TierContext } from '~/utils/tiers'
-import { ACHIEVEMENTS } from '~/utils/achievements'
+import { getAchievementDefinition } from '~/utils/achievements'
+import type { CommanderTitleId } from '~/utils/titles'
 
 const RARITY_ORDER: Record<string, number> = { common: 0, uncommon: 1, rare: 2, mythic: 3 }
-import { getCommanderPerformanceTitle, type CommanderTitleResult } from '~/utils/titles'
+import { getCommanderTitleSummary, type CommanderTitleResult } from '~/utils/titles'
 
 const route = useRoute()
 const playerId = computed(() => route.params.playerId as string)
@@ -747,7 +771,7 @@ const playerPortraits = Object.fromEntries(
 )
 const playerPortraitUrl = computed(() => playerPortraits[playerId.value.toLowerCase()] ?? '')
 
-const { games, commanders, players, gameRecords, leagueSnapshots, standings } = useLeagueState()
+const { games, commanders, players, gameRecords, leagueSnapshots, commanderTitleSelections, standings } = useLeagueState()
 const { preloadCommanderImages, getCachedCommanderImage } = useImageCache()
 const isOwnProfile = computed(() =>
   Boolean(user.value) && formatPlayerName(user.value ?? '').toLowerCase() === displayPlayerName.value.toLowerCase(),
@@ -780,14 +804,15 @@ const playerSuggestion = computed(() =>
 const playerAchievements = computed(() => {
   const counts = new Map<string, number>()
   for (const achievement of player.value?.earnedAchievements ?? []) {
-    const def = ACHIEVEMENTS[achievement.id]
+    const def = getAchievementDefinition(achievement.id)
     if (!def || def.scope !== 'player') continue
     counts.set(def.id, (counts.get(def.id) ?? 0) + 1)
   }
 
   return [...counts.entries()]
     .map(([id, count]) => {
-      const def = ACHIEVEMENTS[id]
+      const def = getAchievementDefinition(id)
+      if (!def) return null
       return {
         id: def.id,
         name: def.name,
@@ -797,9 +822,10 @@ const playerAchievements = computed(() => {
         count,
       }
     })
+    .filter((entry): entry is NonNullable<typeof entry> => Boolean(entry))
     .sort((a, b) => {
-      const ra = RARITY_ORDER[ACHIEVEMENTS[a.id]?.rarity ?? 'common'] ?? 0
-      const rb = RARITY_ORDER[ACHIEVEMENTS[b.id]?.rarity ?? 'common'] ?? 0
+      const ra = RARITY_ORDER[getAchievementDefinition(a.id)?.rarity ?? 'common'] ?? 0
+      const rb = RARITY_ORDER[getAchievementDefinition(b.id)?.rarity ?? 'common'] ?? 0
       return ra - rb || a.name.localeCompare(b.name)
     })
 })
@@ -889,7 +915,9 @@ interface CommanderRow {
   edgeLowPoolSample: boolean
   edgeReliable: boolean
   timeline: PlacementTimelinePoint[]
+  currentTitle: CommanderTitleResult
   title: CommanderTitleResult
+  availableTitles: CommanderTitleResult[]
   achievements: Array<{ id: string; name: string; description: string; icon: string; points: number }>
 }
 
@@ -908,6 +936,7 @@ type CommanderDeckLinkRecord = {
   commanderNameKey?: string
   archidektUrl: string
   archidektDeckId: string
+  selectedTitle?: CommanderTitleId
   updatedAt?: string
 }
 
@@ -948,6 +977,59 @@ type DeckPanelData = {
   url: string
   cardCount: number
   groups: DeckPanelGroup[]
+}
+
+const commanderDeckLinks = ref<Record<string, CommanderDeckLinkRecord>>({})
+const commanderDeckInputs = reactive<Record<string, string>>({})
+const deckLinkSaving = reactive<Record<string, boolean>>({})
+const titleSaving = reactive<Record<string, boolean>>({})
+const deckPopoverOpen = ref<string | null>(null)
+const deckLinkErrors = reactive<Record<string, string>>({})
+const titleErrors = reactive<Record<string, string>>({})
+
+function getCommanderDeckLink(commanderName: string) {
+  const normalizedCommanderName = normalizeDeckIdentityKey(commanderName)
+  const directMatch = commanderDeckLinks.value[normalizedCommanderName]
+  if (directMatch?.archidektUrl) return directMatch
+
+  return Object.values(commanderDeckLinks.value).find(
+    (link) =>
+      Boolean(link.archidektUrl) &&
+      (link.commanderNameKey ?? normalizeDeckIdentityKey(link.commanderName)) === normalizedCommanderName,
+  )
+}
+
+function getCommanderDeckEntry(commanderName: string) {
+  const normalizedCommanderName = normalizeDeckIdentityKey(commanderName)
+  return commanderDeckLinks.value[normalizedCommanderName]
+    ?? Object.values(commanderDeckLinks.value).find(
+      (link) => (link.commanderNameKey ?? normalizeDeckIdentityKey(link.commanderName)) === normalizedCommanderName,
+    )
+}
+
+function getCommanderSelectedTitleId(commanderName: string) {
+  const deckEntry = getCommanderDeckEntry(commanderName)
+  if (deckEntry?.selectedTitle) return deckEntry.selectedTitle
+
+  const playerKey = normalizeDeckIdentityKey(displayPlayerName.value)
+  const commanderKey = normalizeDeckIdentityKey(commanderName)
+  return commanderTitleSelections.value[playerKey]?.[commanderKey]
+}
+
+function getCommanderSelectedTitleValue(commander: CommanderRow) {
+  return getCommanderSelectedTitleId(commander.name) ?? commander.currentTitle.id
+}
+
+function toggleDeckPopover(commanderName: string) {
+  if (deckPopoverOpen.value === commanderName) {
+    deckPopoverOpen.value = null
+    return
+  }
+
+  const savedLink = getCommanderDeckLink(commanderName)
+  commanderDeckInputs[commanderName] = savedLink?.archidektUrl ?? commanderDeckInputs[commanderName] ?? ''
+  deckLinkErrors[commanderName] = ''
+  deckPopoverOpen.value = commanderName
 }
 
 function normalizePlacement(placement: number, playerCount: number) {
@@ -1020,7 +1102,7 @@ const commanderRows = computed((): CommanderRow[] => {
       playerId.value,
       name,
     )
-    const title = getCommanderPerformanceTitle({
+    const titleSummary = getCommanderTitleSummary({
       playerName: playerId.value,
       commanderName: name,
       commanderRecords: records,
@@ -1028,12 +1110,12 @@ const commanderRows = computed((): CommanderRow[] => {
       allRecords: Object.values(gameRecords.value).flatMap((entry) => Object.values(entry)),
       games: chronologicalGames.value,
       standings: standings.value,
-    })
+    }, getCommanderSelectedTitleId(name))
 
     // Commander-scoped achievements (deduplicated by id)
     const cmdAchIds = earnedByCommander[name] ?? new Set()
     const achievements = [...cmdAchIds]
-      .map((id) => ACHIEVEMENTS[id])
+      .map((id) => getAchievementDefinition(id))
       .filter(Boolean)
       .sort((a, b) => (RARITY_ORDER[a.rarity] ?? 0) - (RARITY_ORDER[b.rarity] ?? 0) || a.name.localeCompare(b.name))
       .map((def) => ({ id: def.id, name: def.name, description: def.description, icon: def.icon, points: def.points }))
@@ -1071,7 +1153,9 @@ const commanderRows = computed((): CommanderRow[] => {
       edgeLowPoolSample: edgeMetrics?.hasLowPoolSample ?? true,
       edgeReliable: edgeMetrics?.isReliable ?? false,
       timeline,
-      title,
+      currentTitle: titleSummary.currentTitle,
+      title: titleSummary.displayTitle,
+      availableTitles: titleSummary.earnedTitles,
       achievements,
     }
   }).filter((row): row is CommanderRow => !!row)
@@ -1158,33 +1242,6 @@ const edgePreview = reactive<{
   x: 0,
   y: 0,
 })
-const commanderDeckLinks = ref<Record<string, CommanderDeckLinkRecord>>({})
-const commanderDeckInputs = reactive<Record<string, string>>({})
-const deckLinkSaving = reactive<Record<string, boolean>>({})
-const deckPopoverOpen = ref<string | null>(null)
-
-function getCommanderDeckLink(commanderName: string) {
-  const normalizedCommanderName = normalizeDeckIdentityKey(commanderName)
-  const directMatch = commanderDeckLinks.value[normalizedCommanderName]
-  if (directMatch) return directMatch
-
-  return Object.values(commanderDeckLinks.value).find(
-    (link) => (link.commanderNameKey ?? normalizeDeckIdentityKey(link.commanderName)) === normalizedCommanderName,
-  )
-}
-
-function toggleDeckPopover(commanderName: string) {
-  if (deckPopoverOpen.value === commanderName) {
-    deckPopoverOpen.value = null
-    return
-  }
-
-  const savedLink = getCommanderDeckLink(commanderName)
-  commanderDeckInputs[commanderName] = savedLink?.archidektUrl ?? commanderDeckInputs[commanderName] ?? ''
-  deckLinkErrors[commanderName] = ''
-  deckPopoverOpen.value = commanderName
-}
-const deckLinkErrors = reactive<Record<string, string>>({})
 const deckPanel = reactive<{
   open: boolean
   loading: boolean
@@ -1512,6 +1569,73 @@ async function saveCommanderDeckLink(commanderName: string) {
   }
 }
 
+async function saveCommanderTitle(commander: CommanderRow, selectedTitle: CommanderTitleId) {
+  const commanderName = commander.name
+  titleSaving[commanderName] = true
+  titleErrors[commanderName] = ''
+
+  if (!commander.availableTitles.some((title) => title.id === selectedTitle)) {
+    titleErrors[commanderName] = 'This commander has not earned that title yet.'
+    titleSaving[commanderName] = false
+    return
+  }
+
+  try {
+    const result = await $fetch<{
+      ok: boolean
+      selection: {
+        playerName: string
+        playerNameKey?: string
+        commanderName: string
+        commanderNameKey?: string
+        selectedTitle: CommanderTitleId
+      }
+    }>('/api/commander-titles', {
+      method: 'PUT',
+      body: {
+        playerName: displayPlayerName.value,
+        commanderName,
+        selectedTitle,
+      },
+    })
+
+    const commanderKey = result.selection.commanderNameKey ?? normalizeDeckIdentityKey(commanderName)
+    const existingEntry = getCommanderDeckEntry(commanderName)
+
+    commanderDeckLinks.value = {
+      ...commanderDeckLinks.value,
+      [commanderKey]: {
+        playerName: displayPlayerName.value,
+        playerNameKey: result.selection.playerNameKey,
+        commanderName: result.selection.commanderName,
+        commanderNameKey: commanderKey,
+        archidektUrl: existingEntry?.archidektUrl ?? '',
+        archidektDeckId: existingEntry?.archidektDeckId ?? '',
+        selectedTitle: result.selection.selectedTitle,
+        updatedAt: existingEntry?.updatedAt,
+      },
+    }
+
+    const playerKey = result.selection.playerNameKey ?? normalizeDeckIdentityKey(displayPlayerName.value)
+    commanderTitleSelections.value = {
+      ...commanderTitleSelections.value,
+      [playerKey]: {
+        ...(commanderTitleSelections.value[playerKey] ?? {}),
+        [commanderKey]: result.selection.selectedTitle,
+      },
+    }
+  } catch (error: any) {
+    titleErrors[commanderName] = error?.data?.statusMessage ?? 'Could not save commander title.'
+  } finally {
+    titleSaving[commanderName] = false
+  }
+}
+
+function onCommanderTitleChange(commander: CommanderRow, event: Event) {
+  const selectedTitle = (event.target as HTMLSelectElement).value as CommanderTitleId
+  void saveCommanderTitle(commander, selectedTitle)
+}
+
 async function clearCommanderDeckLink(commanderName: string) {
   deckLinkSaving[commanderName] = true
   deckLinkErrors[commanderName] = ''
@@ -1644,44 +1768,14 @@ function getDeckCardGroup(typeLine: string, categories: string[]) {
   return TYPE_GROUPS[9]
 }
 
-function sleep(ms: number) {
-  return new Promise<void>((resolve) => setTimeout(resolve, ms))
-}
-
 async function buildDeckPanelData(deck: ArchidektDeckResponse): Promise<DeckPanelData> {
   // Scryfall asks for 50–100 ms between requests.
   // Process in batches of 6 with an 600 ms pause between batches so we
   // never exceed ~10 req/s, even for large decks.
-  const BATCH_SIZE = 6
-  const BATCH_DELAY_MS = 600
-
-  const enrichedCards: DeckPanelCard[] = []
-
-  for (let i = 0; i < deck.cards.length; i += BATCH_SIZE) {
-    if (i > 0) await sleep(BATCH_DELAY_MS)
-    const batch = deck.cards.slice(i, i + BATCH_SIZE)
-    const results = await Promise.all(
-      batch.map(async (card): Promise<DeckPanelCard> => {
-        const scryfallCard = await fetchCardByName(card.name)
-        const typeLine = scryfallCard?.type_line ?? 'Unknown'
-        const manaValue = Number(scryfallCard?.cmc ?? 0)
-        const group = getDeckCardGroup(typeLine, card.categories)
-
-        return {
-          ...card,
-          imageUrl: scryfallCard ? getCardImageUrl(scryfallCard, 'small') : null,
-          hoverImageUrl: scryfallCard ? getCardImageUrl(scryfallCard, 'normal') : null,
-          manaValue,
-          typeLine,
-          scryfallUri: scryfallCard?.scryfall_uri ?? '',
-          groupLabel: group.label,
-          groupOrder: group.order,
-          loading: false,
-        }
-      }),
-    )
-    enrichedCards.push(...results)
-  }
+  const scryfallCards = await fetchCardsByName(deck.cards.map((card) => card.name))
+  const enrichedCards = deck.cards.map((card): DeckPanelCard =>
+    createDeckPanelCardWithScryfall(card, scryfallCards.get(card.name) ?? null),
+  )
 
   const groupsMap = new Map<string, DeckPanelGroup>()
   for (const card of enrichedCards) {
@@ -1766,6 +1860,24 @@ function createDeckPanelCard(card: ArchidektDeckCard): DeckPanelCard {
   }
 }
 
+function createDeckPanelCardWithScryfall(card: ArchidektDeckCard, scryfallCard: ScryfallCard | null): DeckPanelCard {
+  const typeLine = scryfallCard?.type_line ?? 'Unknown'
+  const manaValue = Number(scryfallCard?.cmc ?? 999)
+  const group = getDeckCardGroup(typeLine, card.categories)
+
+  return {
+    ...card,
+    imageUrl: scryfallCard ? getCardImageUrl(scryfallCard, 'small') : null,
+    hoverImageUrl: scryfallCard ? getCardImageUrl(scryfallCard, 'normal') : null,
+    manaValue,
+    typeLine,
+    scryfallUri: scryfallCard?.scryfall_uri ?? '',
+    groupLabel: group.label,
+    groupOrder: group.order,
+    loading: false,
+  }
+}
+
 function createDeckPanelData(deck: ArchidektDeckResponse): DeckPanelData {
   const cards = deck.cards.map(createDeckPanelCard)
 
@@ -1779,54 +1891,30 @@ function createDeckPanelData(deck: ArchidektDeckResponse): DeckPanelData {
 }
 
 async function hydrateDeckPanelData(deck: ArchidektDeckResponse, loadToken: number): Promise<DeckPanelData> {
-  const BATCH_SIZE = 4
-  const REQUEST_DELAY_MS = 180
-  const BATCH_DELAY_MS = 900
   const cards = deck.cards.map(createDeckPanelCard)
+  const scryfallCards = await fetchCardsByName(cards.map((card) => card.name))
 
-  for (let i = 0; i < cards.length; i += BATCH_SIZE) {
-    const batch = cards.slice(i, i + BATCH_SIZE)
+  for (const card of cards) {
+    if (loadToken !== activeDeckLoadToken) {
+      return {
+        name: deck.name,
+        owner: deck.owner,
+        url: deck.url,
+        cardCount: deck.cards.reduce((sum, entry) => sum + entry.quantity, 0),
+        groups: buildDeckPanelGroups(cards),
+      }
+    }
 
-    for (const card of batch) {
-      if (loadToken !== activeDeckLoadToken) {
-        return {
-          name: deck.name,
-          owner: deck.owner,
-          url: deck.url,
-          cardCount: deck.cards.reduce((sum, entry) => sum + entry.quantity, 0),
+    Object.assign(card, createDeckPanelCardWithScryfall(card, scryfallCards.get(card.name) ?? null))
+
+    if (loadToken === activeDeckLoadToken) {
+      deckPanel.loadedCards += 1
+      if (deckPanel.deck) {
+        deckPanel.deck = {
+          ...deckPanel.deck,
           groups: buildDeckPanelGroups(cards),
         }
       }
-
-      const scryfallCard = await fetchCardByName(card.name)
-      const typeLine = scryfallCard?.type_line ?? 'Unknown'
-      const manaValue = Number(scryfallCard?.cmc ?? 999)
-      const group = getDeckCardGroup(typeLine, card.categories)
-
-      card.imageUrl = scryfallCard ? getCardImageUrl(scryfallCard, 'small') : null
-      card.hoverImageUrl = scryfallCard ? getCardImageUrl(scryfallCard, 'normal') : null
-      card.manaValue = manaValue
-      card.typeLine = typeLine
-      card.scryfallUri = scryfallCard?.scryfall_uri ?? ''
-      card.groupLabel = group.label
-      card.groupOrder = group.order
-      card.loading = false
-
-      if (loadToken === activeDeckLoadToken) {
-        deckPanel.loadedCards += 1
-        if (deckPanel.deck) {
-          deckPanel.deck = {
-            ...deckPanel.deck,
-            groups: buildDeckPanelGroups(cards),
-          }
-        }
-      }
-
-      await sleep(REQUEST_DELAY_MS)
-    }
-
-    if (i + BATCH_SIZE < cards.length) {
-      await sleep(BATCH_DELAY_MS)
     }
   }
 
@@ -1886,7 +1974,7 @@ function formatSignedPercent(value: number) {
 }
 
 function getAchievementRarityClass(id: string): string {
-  return ACHIEVEMENTS[id]?.rarity ?? 'common'
+  return getAchievementDefinition(id)?.rarity ?? 'common'
 }
 
 function fmtAchPts(value: number): string {
@@ -2663,6 +2751,43 @@ function getEdgeTooltipText(cmd: CommanderRow) {
     box-shadow:
       inset 0 0 0 1px rgba(255, 225, 155, 0.04),
       0 6px 16px rgba(0, 0, 0, 0.22);
+  }
+
+  &__title-select-wrap {
+    display: inline-flex;
+    align-items: center;
+    gap: 8px;
+    padding: 2px 0;
+  }
+
+  &__title-select-label {
+    font-size: 10px;
+    font-weight: $font-weight-semibold;
+    letter-spacing: 0.08em;
+    text-transform: uppercase;
+    color: rgba($color-text-muted, 0.82);
+  }
+
+  &__title-select {
+    min-width: 170px;
+    padding: 6px 10px;
+    border: 1px solid rgba($color-primary-light, 0.22);
+    border-radius: $border-radius-sm;
+    background: rgba(11, 9, 16, 0.9);
+    color: $color-text;
+    font: inherit;
+    font-size: 11px;
+
+    &:focus {
+      outline: none;
+      border-color: rgba($color-primary-light, 0.45);
+      box-shadow: 0 0 0 2px rgba($color-primary, 0.14);
+    }
+
+    &:disabled {
+      opacity: 0.7;
+      cursor: wait;
+    }
   }
 
   &__tier {

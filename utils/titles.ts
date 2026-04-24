@@ -32,6 +32,12 @@ export interface CommanderTitleResult extends CommanderTitleDef {
   reason: string
 }
 
+export interface CommanderTitleSummary {
+  currentTitle: CommanderTitleResult
+  displayTitle: CommanderTitleResult
+  earnedTitles: CommanderTitleResult[]
+}
+
 export const TITLES: Record<CommanderTitleId, CommanderTitleDef> = {
   chaotic_force: {
     id: 'chaotic_force',
@@ -294,6 +300,58 @@ export function getCommanderPerformanceTitle(context: CommanderTitleContext): Co
   }
 
   return selected
+}
+
+export function getCommanderTitleHistory(context: CommanderTitleContext): CommanderTitleResult[] {
+  const currentTitle = getCommanderPerformanceTitle(context)
+  if (context.commanderRecords.length === 0) return [currentTitle]
+
+  const gameOrder = new Map(context.games.map((game, index) => [game.gameId, index]))
+  const orderedGames = [...context.games]
+  const orderedCommanderRecords = [...context.commanderRecords].sort(
+    (a, b) => (gameOrder.get(a.gameId) ?? 0) - (gameOrder.get(b.gameId) ?? 0),
+  )
+  const orderedPlayerRecords = [...context.playerRecords].sort(
+    (a, b) => (gameOrder.get(a.gameId) ?? 0) - (gameOrder.get(b.gameId) ?? 0),
+  )
+  const orderedAllRecords = [...context.allRecords].sort(
+    (a, b) => (gameOrder.get(a.gameId) ?? 0) - (gameOrder.get(b.gameId) ?? 0),
+  )
+
+  const earnedById = new Map<CommanderTitleId, CommanderTitleResult>()
+
+  for (let index = 0; index < orderedCommanderRecords.length; index++) {
+    const latestCommanderRecord = orderedCommanderRecords[index]
+    const lastGameIndex = gameOrder.get(latestCommanderRecord.gameId) ?? index
+    const title = getCommanderPerformanceTitle({
+      ...context,
+      commanderRecords: orderedCommanderRecords.slice(0, index + 1),
+      playerRecords: orderedPlayerRecords.filter((record) => (gameOrder.get(record.gameId) ?? 0) <= lastGameIndex),
+      allRecords: orderedAllRecords.filter((record) => (gameOrder.get(record.gameId) ?? 0) <= lastGameIndex),
+      games: orderedGames.slice(0, lastGameIndex + 1),
+    })
+
+    earnedById.set(title.id, title)
+  }
+
+  return [...earnedById.values()]
+}
+
+export function getCommanderTitleSummary(
+  context: CommanderTitleContext,
+  selectedTitleId?: CommanderTitleId | null,
+): CommanderTitleSummary {
+  const currentTitle = getCommanderPerformanceTitle(context)
+  const earnedTitles = getCommanderTitleHistory(context)
+  const displayTitle = selectedTitleId
+    ? earnedTitles.find((title) => title.id === selectedTitleId) ?? currentTitle
+    : currentTitle
+
+  return {
+    currentTitle,
+    displayTitle,
+    earnedTitles,
+  }
 }
 
 function evaluateTitle(

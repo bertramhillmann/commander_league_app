@@ -80,16 +80,17 @@
 <script setup lang="ts">
 import { computed, ref, watch } from 'vue'
 import { compareGamesChronological } from '~/composables/useLeagueState'
+import { normalizeDeckIdentityKey } from '~/utils/deckLinks'
 import { computeGlobalCommanderBaseline, computePlayerCommanderTier, type TierDetail, type TierContext } from '~/utils/tiers'
 import { getCommanderLevelProgress } from '~/utils/commanderExperience'
-import { getCommanderPerformanceTitle } from '~/utils/titles'
+import { getCommanderTitleSummary } from '~/utils/titles'
 
 const props = defineProps<{
   playerName: string
   commanderName: string
 }>()
 
-const { players, commanders, gameRecords, games, standings } = useLeagueState()
+const { players, commanders, gameRecords, games, commanderTitleSelections, standings } = useLeagueState()
 const { getCommanderImage } = useImageCache()
 
 // ── Card image ─────────────────────────────────────────────────────────────────
@@ -128,7 +129,7 @@ const tierContext = computed((): TierContext | undefined =>
 )
 
 const commanderTitle = computed(() =>
-  getCommanderPerformanceTitle({
+  getCommanderTitleSummary({
     playerName: props.playerName,
     commanderName: props.commanderName,
     commanderRecords: commanderRecords.value,
@@ -136,7 +137,7 @@ const commanderTitle = computed(() =>
     allRecords: Object.values(gameRecords.value).flatMap((entry) => Object.values(entry)),
     games: [...games.value].sort(compareGamesChronological),
     standings: standings.value,
-  }),
+  }, commanderTitleSelections.value[normalizeDeckIdentityKey(props.playerName)]?.[normalizeDeckIdentityKey(props.commanderName)]).displayTitle,
 )
 
 // ── Level & XP progress ────────────────────────────────────────────────────────

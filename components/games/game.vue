@@ -121,7 +121,7 @@
 import { computed, reactive, ref, watch } from 'vue'
 import type { ProcessedGame, ProcessedGamePlayer } from '~/composables/useLeagueState'
 import { TIER_META, type Tier } from '~/utils/tiers'
-import { ACHIEVEMENTS } from '~/utils/achievements'
+import { getAchievementDefinition } from '~/utils/achievements'
 import { getHistoricalCommanderTierAtGame } from '~/utils/historicalCommanderTier'
 
 const props = defineProps<{ game: ProcessedGame; highlightPlayer?: string | null }>()
@@ -162,7 +162,7 @@ function getTierMeta(playerName: string, commander: string) {
 
 function gameAchievements(playerName: string) {
   return (gameRecords.value[playerName]?.[props.game.gameId]?.achievements ?? [])
-    .map((a) => ACHIEVEMENTS[a.id])
+    .map((a) => getAchievementDefinition(a.id))
     .filter(Boolean)
 }
 

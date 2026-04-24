@@ -137,7 +137,8 @@
 <script setup lang="ts">
 import { computed, reactive } from 'vue'
 import { formatPlayerName } from '~/utils/playerNames'
-import { ACHIEVEMENTS, type AchievementDef, type AchievementRarity, type EarnedAchievement } from '~/utils/achievements'
+import { type EarnedAchievement } from '~/utils/achievements'
+import { type AchievementDef, type AchievementRarity } from '~/utils/scoringDefaults'
 import { getArchEnemySummary } from '~/utils/archEnemy'
 
 interface SectionItem {
@@ -157,10 +158,11 @@ interface SectionGroup {
 
 const { players, games, gameRecords } = useLeagueState()
 const { user, ensureSession } = useAuth()
+const { achievementDefs } = useLeagueSettings()
 
 await ensureSession()
 
-const allAchievements = computed(() => sortAchievements(Object.values(ACHIEVEMENTS)))
+const allAchievements = computed(() => sortAchievements(Object.values(achievementDefs.value)))
 
 const normalizedUserName = computed(() => (user.value ? formatPlayerName(user.value) : null))
 const activePlayer = computed(() =>

@@ -10,11 +10,13 @@ import {
 import { applyModifiers, type ModifierResult } from '~/utils/modifiers'
 import { calculateXPGained, xpToLevel } from '~/utils/commanderExperience'
 import { getTier, blendScore, type Tier } from '~/utils/tiers'
-import { ACHIEVEMENTS, type EarnedAchievement } from '~/utils/achievements'
+import { getAchievementDefinition, type EarnedAchievement } from '~/utils/achievements'
 import { getMissedGameLoosterPoints } from '~/utils/loosterPoints'
 import { formatPlayerName } from '~/utils/playerNames'
 import { getArchEnemySummary } from '~/utils/archEnemy'
 import { getFeaturedPlayerName } from '~/utils/featuredPlayer'
+import { normalizeDeckIdentityKey } from '~/utils/deckLinks'
+import type { CommanderTitleId } from '~/utils/titles'
 
 // ─── Types ────────────────────────────────────────────────────────────────────
 
@@ -82,6 +84,8 @@ export interface PlayerState {
   achievementPoints: number
 }
 
+export type CommanderTitleSelectionMap = Record<string, Record<string, CommanderTitleId>>
+
 export interface CommanderState {
   name: string
   totalPoints: number
@@ -97,6 +101,8 @@ export interface LeagueStanding {
   totalScore: number
   rank: number
   totalPoints: number
+  projectedPoints: number
+  compensatedTotalPoints: number
   achievementPoints: number
   xpPoints: number
   perfMult: number
@@ -114,6 +120,8 @@ export interface LeagueSnapshotEntry {
 export interface LeagueStandingMetrics {
   totalScore: number
   totalPoints: number
+  projectedPoints: number
+  compensatedTotalPoints: number
   achievementPoints: number
   xpPoints: number
   perfMult: number
@@ -207,6 +215,82 @@ export function getLeagueAveragePerGame(playerMap: Record<string, PlayerState>) 
   return totalGames > 0 ? totalPoints / totalGames : 1
 }
 
+const PROJECTED_GAMES_DECAY_FACTOR = 6
+const PROJECTED_GAMES_MAX = 30
+const PROJECTED_GAME_VALUE_FACTOR = 0.7
+const PROJECTED_SAMPLE_SMOOTHING = 8
+
+export interface ProjectedPointsResult {
+  projectedPoints: number
+  compensatedTotalPoints: number
+  missingGames: number
+  cappedMissingGames: number
+  maxGamesPlayed: number
+  leagueFloorScore: number
+  averageScore: number
+  sampleFactor: number
+  decayFactor: number
+  projectedGameValueFactor: number
+  maxProjectedGames: number
+  sampleSmoothingGames: number
+}
+
+export function calculateProjectedPoints(
+  player: Pick<PlayerState, 'totalPoints' | 'gamesPlayed'>,
+  playerMap: Record<string, Pick<PlayerState, 'totalPoints' | 'gamesPlayed'>>,
+  options?: {
+    decayFactor?: number
+    maxProjectedGames?: number
+    projectedGameValueFactor?: number
+    sampleSmoothingGames?: number
+  },
+): ProjectedPointsResult {
+  const decayFactor = Math.max(options?.decayFactor ?? PROJECTED_GAMES_DECAY_FACTOR, 0.001)
+  const maxProjectedGames = Math.max(0, Math.floor(options?.maxProjectedGames ?? PROJECTED_GAMES_MAX))
+  const projectedGameValueFactor = Math.min(Math.max(options?.projectedGameValueFactor ?? PROJECTED_GAME_VALUE_FACTOR, 0), 1)
+  const sampleSmoothingGames = Math.max(options?.sampleSmoothingGames ?? PROJECTED_SAMPLE_SMOOTHING, 0)
+
+  const allPlayers = Object.values(playerMap)
+  const maxGamesPlayed = allPlayers.reduce((maxGames, candidate) => Math.max(maxGames, candidate.gamesPlayed), 0)
+  const activePlayers = allPlayers.filter((candidate) => candidate.gamesPlayed > 0)
+  const leagueFloorScore = activePlayers.length > 0
+    ? Math.min(...activePlayers.map((candidate) => candidate.totalPoints / candidate.gamesPlayed))
+    : 0
+
+  const missingGames = Math.max(0, maxGamesPlayed - player.gamesPlayed)
+  const cappedMissingGames = Math.min(missingGames, maxProjectedGames)
+  const averageScore = player.gamesPlayed > 0 ? player.totalPoints / player.gamesPlayed : leagueFloorScore
+  const sampleFactor = player.gamesPlayed > 0
+    ? player.gamesPlayed / (player.gamesPlayed + sampleSmoothingGames)
+    : 0
+
+  let projectedPoints = 0
+  for (let i = 1; i <= cappedMissingGames; i++) {
+    const confidence = Math.exp(-i / decayFactor)
+    const projectedGameScore =
+      (averageScore * confidence) +
+      (leagueFloorScore * (1 - confidence))
+
+    projectedPoints += projectedGameScore * projectedGameValueFactor * sampleFactor
+  }
+
+  const roundedProjectedPoints = round3(projectedPoints)
+  return {
+    projectedPoints: roundedProjectedPoints,
+    compensatedTotalPoints: round3(player.totalPoints + roundedProjectedPoints),
+    missingGames,
+    cappedMissingGames,
+    maxGamesPlayed,
+    leagueFloorScore: round3(leagueFloorScore),
+    averageScore: round3(averageScore),
+    sampleFactor: round3(sampleFactor),
+    decayFactor: round3(decayFactor),
+    projectedGameValueFactor: round3(projectedGameValueFactor),
+    maxProjectedGames,
+    sampleSmoothingGames: round3(sampleSmoothingGames),
+  }
+}
+
 export function getLeagueStandingMetrics(
   player: PlayerState,
   playerMap: Record<string, PlayerState>,
@@ -214,6 +298,8 @@ export function getLeagueStandingMetrics(
   const xpPoints = getXpPoints(player)
   const avgPerGame = player.gamesPlayed > 0 ? round3(player.totalPoints / player.gamesPlayed) : 0
   const leagueAvgPerGame = getLeagueAveragePerGame(playerMap)
+  const projection = calculateProjectedPoints(player, playerMap)
+  const compensatedTotalPoints = projection.compensatedTotalPoints
   const winRateFraction = player.gamesPlayed > 0
     ? player.baseWins / player.gamesPlayed
     : EXPECTED_WIN_RATE
@@ -224,12 +310,14 @@ export function getLeagueStandingMetrics(
   const perfMult = player.gamesPlayed > 0
     ? Math.min(PERF_MULT_MAX, Math.max(PERF_MULT_MIN, perfMultRaw))
     : 1
-  const baseScore = player.totalPoints + player.achievementPoints + xpPoints
-  const totalScore = round3(baseScore * perfMult)
+  const multipliedScore = (player.totalPoints + player.achievementPoints + xpPoints) * perfMult
+  const totalScore = round3(multipliedScore + projection.projectedPoints)
 
   return {
     totalScore,
     totalPoints: player.totalPoints,
+    projectedPoints: projection.projectedPoints,
+    compensatedTotalPoints,
     achievementPoints: player.achievementPoints,
     xpPoints,
     perfMult: round3(perfMult),
@@ -254,7 +342,7 @@ export function getPlayerCommanderAchievementPoints(
   commanderName: string,
 ) {
   const gameScopedPoints = records.reduce((sum, record) => sum + record.achievements.reduce((achievementSum, achievement) => {
-    const achievementDef = ACHIEVEMENTS[achievement.id]
+    const achievementDef = getAchievementDefinition(achievement.id)
     if (!achievementDef || achievementDef.scope !== 'commander') return achievementSum
     if (achievement.commander !== commanderName) return achievementSum
     return achievementSum + achievementDef.points
@@ -262,12 +350,12 @@ export function getPlayerCommanderAchievementPoints(
 
   const postScopedPoints = (player?.earnedAchievements ?? [])
     .filter((achievement) => {
-      const achievementDef = ACHIEVEMENTS[achievement.id]
+      const achievementDef = getAchievementDefinition(achievement.id)
       return achievement.gameId === 'post'
         && achievement.commander === commanderName
         && achievementDef?.scope === 'commander'
     })
-    .reduce((sum, achievement) => sum + (ACHIEVEMENTS[achievement.id]?.points ?? 0), 0)
+    .reduce((sum, achievement) => sum + (getAchievementDefinition(achievement.id)?.points ?? 0), 0)
 
   return round3(gameScopedPoints + postScopedPoints)
 }
@@ -449,7 +537,13 @@ const useGameRecordsState = () =>
   useState<Record<string, Record<string, PlayerGameRecord>>>('league:gameRecords', () => ({}))
 const useLeagueSnapshotsState = () =>
   useState<Record<string, Record<string, LeagueSnapshotEntry>>>('league:leagueSnapshots', () => ({}))
+const useCommanderTitleSelectionsState = () =>
+  useState<CommanderTitleSelectionMap>('league:commanderTitleSelections', () => ({}))
 const useLoadedState = () => useState<boolean>('league:loaded', () => false)
+const useLoadingState = () => useState<boolean>('league:loading', () => false)
+const useErrorState = () => useState<string | null>('league:error', () => null)
+
+let pendingLeagueInit: Promise<void> | null = null
 
 // ─── Composable ───────────────────────────────────────────────────────────────
 
@@ -459,26 +553,39 @@ export function useLeagueState() {
   const commanders = useCommandersState()
   const gameRecords = useGameRecordsState()
   const leagueSnapshots = useLeagueSnapshotsState()
+  const commanderTitleSelections = useCommanderTitleSelectionsState()
   const loaded = useLoadedState()
-  const loading = ref(false)
-  const error = ref<string | null>(null)
+  const loading = useLoadingState()
+  const error = useErrorState()
 
   async function init(force = false) {
     if (loaded.value && !force) return
+    if (pendingLeagueInit) return await pendingLeagueInit
 
-    loading.value = true
-    error.value = null
+    pendingLeagueInit = (async () => {
+      loading.value = true
+      error.value = null
 
-    try {
-      const [raw, roster] = await Promise.all([
-        $fetch<any[]>('/api/games'),
-        $fetch<string[]>('/api/players'),
-      ])
+      try {
+        const { init: initLeagueSettings } = useLeagueSettings()
+        await initLeagueSettings(force)
 
-      const canonicalPlayerNames = new Map<string, string>()
-      for (const playerName of roster) {
-        canonicalPlayerNames.set(playerName.trim().toLowerCase(), formatPlayerName(playerName.trim()))
-      }
+        const [raw, roster, savedCommanderTitles] = await Promise.all([
+          $fetch<any[]>('/api/games'),
+          $fetch<string[]>('/api/players'),
+          $fetch<Array<{
+            playerName: string
+            playerNameKey?: string
+            commanderName: string
+            commanderNameKey?: string
+            selectedTitle: CommanderTitleId
+          }>>('/api/commander-titles').catch(() => []),
+        ])
+
+        const canonicalPlayerNames = new Map<string, string>()
+        for (const playerName of roster) {
+          canonicalPlayerNames.set(playerName.trim().toLowerCase(), formatPlayerName(playerName.trim()))
+        }
 
       const normalizePlayerName = (name: string) => {
         const trimmed = name.trim()
@@ -684,7 +791,8 @@ export function useLeagueState() {
           const witherData = playerCommanderWitherData[p.name][p.commander] ?? { failures: 0, active: false }
 
           const earn = (id: string, commander?: string) => {
-            const def = ACHIEVEMENTS[id]
+            const def = getAchievementDefinition(id)
+            if (!def) return
             if (def.repeatable && weeklyRepeatables.has(id)) return
 
             const entry: EarnedAchievement = { id, gameId: game.gameId, commander }
@@ -947,7 +1055,7 @@ export function useLeagueState() {
               recordsMap[p.name][game.gameId].achievements.push(achEntry)
               playerMap[p.name].earnedAchievements.push(achEntry)
               playerMap[p.name].achievementPoints = round3(
-                playerMap[p.name].achievementPoints + ACHIEVEMENTS.king_maker.points,
+                playerMap[p.name].achievementPoints + (getAchievementDefinition('king_maker')?.points ?? 0),
               )
             }
           }
@@ -1061,7 +1169,7 @@ export function useLeagueState() {
             const entry: EarnedAchievement = { id: achId, gameId: record.gameId, commander: cmdName }
             recordsMap[playerName][record.gameId].achievements.push(entry)
             ps.earnedAchievements.push(entry)
-            ps.achievementPoints = round3(ps.achievementPoints + ACHIEVEMENTS[achId].points)
+            ps.achievementPoints = round3(ps.achievementPoints + (getAchievementDefinition(achId)?.points ?? 0))
           }
 
           // Hit rock bottom: 0% win rate after 5+ games
@@ -1071,7 +1179,7 @@ export function useLeagueState() {
               cmdOneTime.add(key)
               const entry: EarnedAchievement = { id: 'hit_rock_bottom', gameId: 'post', commander: cmdName }
               ps.earnedAchievements.push(entry)
-              ps.achievementPoints = round3(ps.achievementPoints + ACHIEVEMENTS.hit_rock_bottom.points)
+              ps.achievementPoints = round3(ps.achievementPoints + (getAchievementDefinition('hit_rock_bottom')?.points ?? 0))
             }
           }
 
@@ -1081,7 +1189,7 @@ export function useLeagueState() {
               cmdOneTime.add(key)
               const entry: EarnedAchievement = { id: 'cursed_commander', gameId: 'post', commander: cmdName }
               ps.earnedAchievements.push(entry)
-              ps.achievementPoints = round3(ps.achievementPoints + ACHIEVEMENTS.cursed_commander.points)
+              ps.achievementPoints = round3(ps.achievementPoints + (getAchievementDefinition('cursed_commander')?.points ?? 0))
             }
           }
 
@@ -1091,7 +1199,7 @@ export function useLeagueState() {
               cmdOneTime.add(key)
               const entry: EarnedAchievement = { id: 'false_promise', gameId: 'post', commander: cmdName }
               ps.earnedAchievements.push(entry)
-              ps.achievementPoints = round3(ps.achievementPoints + ACHIEVEMENTS.false_promise.points)
+              ps.achievementPoints = round3(ps.achievementPoints + (getAchievementDefinition('false_promise')?.points ?? 0))
             }
           }
 
@@ -1101,7 +1209,7 @@ export function useLeagueState() {
               cmdOneTime.add(key)
               const entry: EarnedAchievement = { id: 'lapdog', gameId: 'post', commander: cmdName }
               ps.earnedAchievements.push(entry)
-              ps.achievementPoints = round3(ps.achievementPoints + ACHIEVEMENTS.lapdog.points)
+              ps.achievementPoints = round3(ps.achievementPoints + (getAchievementDefinition('lapdog')?.points ?? 0))
             }
           }
         }
@@ -1131,17 +1239,28 @@ export function useLeagueState() {
         }
       }
 
-      games.value = [...processedGames].sort(compareGamesForDisplay)
-      players.value = playerMap
-      commanders.value = commanderMap
-      gameRecords.value = recordsMap
-      leagueSnapshots.value = snapshotMap
-      loaded.value = true
-    } catch (e: any) {
-      error.value = e.message ?? 'Failed to load league data'
-    } finally {
-      loading.value = false
-    }
+        games.value = [...processedGames].sort(compareGamesForDisplay)
+        players.value = playerMap
+        commanders.value = commanderMap
+        gameRecords.value = recordsMap
+        leagueSnapshots.value = snapshotMap
+        commanderTitleSelections.value = savedCommanderTitles.reduce<CommanderTitleSelectionMap>((acc, entry) => {
+          const playerKey = entry.playerNameKey ?? normalizeDeckIdentityKey(entry.playerName)
+          const commanderKey = entry.commanderNameKey ?? normalizeDeckIdentityKey(entry.commanderName)
+          if (!acc[playerKey]) acc[playerKey] = {}
+          acc[playerKey][commanderKey] = entry.selectedTitle
+          return acc
+        }, {})
+        loaded.value = true
+      } catch (e: any) {
+        error.value = e.message ?? 'Failed to load league data'
+      } finally {
+        loading.value = false
+        pendingLeagueInit = null
+      }
+    })()
+
+    await pendingLeagueInit
   }
 
   const standings = computed(() => buildLeagueStandings(players.value))
@@ -1150,7 +1269,20 @@ export function useLeagueState() {
     await init(true)
   }
 
-  return { games, players, commanders, gameRecords, leagueSnapshots, standings, loaded, loading, error, init, refresh }
+  return {
+    games,
+    players,
+    commanders,
+    gameRecords,
+    leagueSnapshots,
+    commanderTitleSelections,
+    standings,
+    loaded,
+    loading,
+    error,
+    init,
+    refresh,
+  }
 }
 
 function round3(n: number): number {
@@ -1180,6 +1312,8 @@ function buildLeagueStandings(playerMap: Record<string, PlayerState>): LeagueSta
         totalScore: metrics.totalScore,
         rank: 0,
         totalPoints: metrics.totalPoints,
+        projectedPoints: metrics.projectedPoints,
+        compensatedTotalPoints: metrics.compensatedTotalPoints,
         achievementPoints: metrics.achievementPoints,
         xpPoints: metrics.xpPoints,
         perfMult: metrics.perfMult,

@@ -36,11 +36,13 @@
 
 <script setup lang="ts">
 import { computed } from 'vue'
-import { ACHIEVEMENTS, type AchievementRarity } from '~/utils/achievements'
+import { type AchievementRarity } from '~/utils/scoringDefaults'
 
 const props = defineProps<{ achievementId: string }>()
 
-const def = computed(() => ACHIEVEMENTS[props.achievementId])
+const { achievementDefs } = useLeagueSettings()
+
+const def = computed(() => achievementDefs.value[props.achievementId])
 
 const { players } = useLeagueState()
 

@@ -25,6 +25,7 @@ export default defineEventHandler(async (event) => {
       commanderNameKey: link.commanderNameKey,
       archidektUrl: link.archidektUrl,
       archidektDeckId: link.archidektDeckId,
+      selectedTitle: link.selectedTitle || undefined,
       updatedAt: link.updatedAt,
     }))
     .sort((a, b) => a.commanderName.localeCompare(b.commanderName))

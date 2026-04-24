@@ -1,3 +1,4 @@
+import type { CommanderTitleId } from '~/utils/titles'
 import mongoose, { Schema, Document, Model } from 'mongoose'
 
 export interface IPlayerPurchase {
@@ -13,8 +14,9 @@ export interface IPlayerPurchase {
 export interface IPlayerCommanderDeck {
   commanderName: string
   commanderNameKey: string
-  archidektUrl: string
-  archidektDeckId: string
+  archidektUrl?: string
+  archidektDeckId?: string
+  selectedTitle?: CommanderTitleId
   createdAt?: Date
   updatedAt?: Date
 }
@@ -44,8 +46,9 @@ const PlayerCommanderDeckSchema = new Schema<IPlayerCommanderDeck>(
   {
     commanderName: { type: String, required: true },
     commanderNameKey: { type: String, required: true, index: true },
-    archidektUrl: { type: String, required: true },
-    archidektDeckId: { type: String, required: true },
+    archidektUrl: { type: String, default: '' },
+    archidektDeckId: { type: String, default: '' },
+    selectedTitle: { type: String, default: '' },
   },
   { _id: false, timestamps: true }
 )

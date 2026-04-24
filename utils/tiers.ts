@@ -242,6 +242,32 @@ export function computeGlobalCommanderBaseline(
 }
 
 /**
+ * Convenience helper for consumers that only have per-player game records.
+ * This produces the same league-wide commander baseline as `computeGlobalCommanderBaseline()`
+ * after aggregating all player×commander records into commander totals.
+ */
+export function computeGlobalCommanderBaselineFromRecords(
+  gameRecords: Record<string, Record<string, { commander: string; basePoints: number; placement: number }>>,
+): number {
+  const commanders: Record<string, { gamesPlayed: number; totalBasePoints: number; wins: number }> = {}
+
+  for (const recordsByGame of Object.values(gameRecords)) {
+    for (const record of Object.values(recordsByGame)) {
+      if (!commanders[record.commander]) {
+        commanders[record.commander] = { gamesPlayed: 0, totalBasePoints: 0, wins: 0 }
+      }
+
+      const commander = commanders[record.commander]
+      commander.gamesPlayed++
+      commander.totalBasePoints += record.basePoints
+      if (record.placement === 1) commander.wins++
+    }
+  }
+
+  return computeGlobalCommanderBaseline(commanders)
+}
+
+/**
  * TierDetail + TierContext for a single player × commander pairing.
  *
  * **Win criterion**: `placement === 1`.  Using `basePoints === 1` is wrong for

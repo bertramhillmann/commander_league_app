@@ -1,4 +1,4 @@
-import { blendScore, getTier, smoothedTierScore, type Tier } from '~/utils/tiers'
+import { blendScore, computeGlobalCommanderBaselineFromRecords, getTier, smoothedTierScore, type Tier } from '~/utils/tiers'
 import type { PlayerGameRecord, ProcessedGame } from '~/composables/useLeagueState'
 
 export interface PlacementTimelinePoint {
@@ -15,12 +15,6 @@ export interface PlacementTimelinePoint {
 }
 
 interface PairTotals {
-  games: number
-  wins: number
-  totalBasePoints: number
-}
-
-interface CommanderTotals {
   games: number
   wins: number
   totalBasePoints: number
@@ -51,7 +45,7 @@ export function buildCommanderPlacementTimeline(
 ): PlacementTimelinePoint[] {
   const playerTotals: Record<string, PlayerTotals> = {}
   const pairTotals: Record<string, Record<string, PairTotals>> = {}
-  const commanderTotals: Record<string, CommanderTotals> = {}
+  const globalBaseline = computeGlobalCommanderBaselineFromRecords(gameRecords)
   let previousTier: Tier | null = null
   const timeline: PlacementTimelinePoint[] = []
 
@@ -67,13 +61,9 @@ export function buildCommanderPlacementTimeline(
       if (!pairTotals[participant.name][record.commander]) {
         pairTotals[participant.name][record.commander] = { games: 0, wins: 0, totalBasePoints: 0 }
       }
-      if (!commanderTotals[record.commander]) {
-        commanderTotals[record.commander] = { games: 0, wins: 0, totalBasePoints: 0 }
-      }
 
       const playerState = playerTotals[participant.name]
       const pairState = pairTotals[participant.name][record.commander]
-      const commanderState = commanderTotals[record.commander]
 
       playerState.games++
       playerState.totalBasePoints += record.basePoints
@@ -82,24 +72,10 @@ export function buildCommanderPlacementTimeline(
       pairState.games++
       pairState.totalBasePoints += record.basePoints
       if (record.placement === 1) pairState.wins++
-
-      commanderState.games++
-      commanderState.totalBasePoints += record.basePoints
-      if (record.placement === 1) commanderState.wins++
     }
 
     const targetRecord = gameRecords[playerName]?.[game.gameId]
     if (!targetRecord || targetRecord.commander !== commanderName) continue
-
-    const globalScores = Object.values(commanderTotals)
-      .filter((commander) => commander.games > 0)
-      .map((commander) =>
-        blendScore(commander.totalBasePoints / commander.games, commander.wins / commander.games),
-      )
-
-    const globalAverage = globalScores.length
-      ? globalScores.reduce((sum, score) => sum + score, 0) / globalScores.length
-      : 0
 
     const targetPlayer = playerTotals[playerName]
     const targetPair = pairTotals[playerName]?.[commanderName]
@@ -108,7 +84,7 @@ export function buildCommanderPlacementTimeline(
     const rawScore = targetPair.games > 0
       ? blendScore(targetPair.totalBasePoints / targetPair.games, targetPair.wins / targetPair.games)
       : 0
-    const tier = getTier(rawScore, globalAverage, targetPair.games)
+    const tier = getTier(rawScore, globalBaseline, targetPair.games)
 
     const playerAvgPoints = targetPlayer.games > 0 ? targetPlayer.totalBasePoints / targetPlayer.games : 0
     const playerWinRate = targetPlayer.games > 0 ? targetPlayer.wins / targetPlayer.games : 0
@@ -119,7 +95,7 @@ export function buildCommanderPlacementTimeline(
       playerAvgPoints,
       playerWinRate,
     )
-    const projectedTier = getTier(projectedScore, globalAverage, targetPair.games)
+    const projectedTier = getTier(projectedScore, globalBaseline, targetPair.games)
 
     let tierChange: 'rise' | 'drop' | null = null
     if (previousTier) {
