@@ -357,7 +357,7 @@
           <tr>
             <td class="mult-tooltip__label">Projected</td>
             <td class="mult-tooltip__op">=</td>
-            <td class="mult-tooltip__detail">min(missing, {{ compHover.maxProjectedGames }})</td>
+            <td class="mult-tooltip__detail">min(missing, max(30, {{ compHover.gamesPlayed }}))</td>
             <td class="mult-tooltip__value">{{ compHover.cappedMissingGames }}</td>
           </tr>
           <tr>

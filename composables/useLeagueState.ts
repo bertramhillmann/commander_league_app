@@ -246,7 +246,7 @@ export function calculateProjectedPoints(
   },
 ): ProjectedPointsResult {
   const decayFactor = Math.max(options?.decayFactor ?? PROJECTED_GAMES_DECAY_FACTOR, 0.001)
-  const maxProjectedGames = Math.max(0, Math.floor(options?.maxProjectedGames ?? PROJECTED_GAMES_MAX))
+  const baseMaxProjectedGames = Math.max(0, Math.floor(options?.maxProjectedGames ?? PROJECTED_GAMES_MAX))
   const projectedGameValueFactor = Math.min(Math.max(options?.projectedGameValueFactor ?? PROJECTED_GAME_VALUE_FACTOR, 0), 1)
   const sampleSmoothingGames = Math.max(options?.sampleSmoothingGames ?? PROJECTED_SAMPLE_SMOOTHING, 0)
 
@@ -258,6 +258,7 @@ export function calculateProjectedPoints(
     : 0
 
   const missingGames = Math.max(0, maxGamesPlayed - player.gamesPlayed)
+  const maxProjectedGames = Math.max(baseMaxProjectedGames, player.gamesPlayed)
   const cappedMissingGames = Math.min(missingGames, maxProjectedGames)
   const averageScore = player.gamesPlayed > 0 ? player.totalPoints / player.gamesPlayed : leagueFloorScore
   const sampleFactor = player.gamesPlayed > 0

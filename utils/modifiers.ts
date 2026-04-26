@@ -27,7 +27,7 @@ export interface ModifierContext {
 
 // ─── Constants ────────────────────────────────────────────────────────────────
 
-const UNDERDOG_BONUS_PER_PLAYER = 0.1
+const UNDERDOG_BONUS_PER_PLAYER = 0
 const LEVEL_UP_BONUS = 1
 
 // ─── Individual modifiers ────────────────────────────────────────────────────
