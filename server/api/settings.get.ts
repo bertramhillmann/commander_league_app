@@ -12,6 +12,7 @@ export default defineEventHandler(async () => {
           points: doc.points ?? undefined,
           achievements: doc.achievements ?? undefined,
           level: doc.level ?? undefined,
+          standings: doc.standings ?? undefined,
         }
       : null,
   }

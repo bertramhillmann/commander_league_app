@@ -29,6 +29,7 @@ export default defineEventHandler(async (event) => {
         points: nextSettings.points ?? undefined,
         achievements: nextSettings.achievements ?? undefined,
         level: nextSettings.level ?? undefined,
+        standings: nextSettings.standings ?? undefined,
       },
     },
     { new: true, upsert: true, setDefaultsOnInsert: true },
@@ -41,6 +42,7 @@ export default defineEventHandler(async (event) => {
           points: updated.points ?? undefined,
           achievements: updated.achievements ?? undefined,
           level: updated.level ?? undefined,
+          standings: updated.standings ?? undefined,
         }
       : null,
   }
@@ -52,4 +54,5 @@ function isEmptySettings(settings: LeagueSettingsDocument) {
     && Object.keys(settings.level?.xpPerGame ?? {}).length === 0
     && Object.keys(settings.level?.winBonusXp ?? {}).length === 0
     && (settings.level?.thresholds?.length ?? 0) === 0
+    && settings.standings?.usePerformanceModifier === undefined
 }

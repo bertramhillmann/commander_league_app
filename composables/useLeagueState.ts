@@ -308,7 +308,8 @@ export function getLeagueStandingMetrics(
   const winRateTerm = round3(PERF_WIN_RATE_WEIGHT * (winRateFraction / EXPECTED_WIN_RATE))
   const avgTerm = round3(PERF_AVG_WEIGHT * avgFraction)
   const perfMultRaw = round3(PERF_BASE_WEIGHT + winRateTerm + avgTerm)
-  const perfMult = player.gamesPlayed > 0
+  const usePerformanceModifier = getResolvedLeagueSettings().standings.usePerformanceModifier
+  const perfMult = usePerformanceModifier && player.gamesPlayed > 0
     ? Math.min(PERF_MULT_MAX, Math.max(PERF_MULT_MIN, perfMultRaw))
     : 1
   const multipliedScore = (player.totalPoints + player.achievementPoints + xpPoints) * perfMult

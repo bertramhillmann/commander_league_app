@@ -14,7 +14,7 @@
                 <span class="standings__sort-indicator">{{ sortIndicator('totalScore') }}</span>
               </button>
             </th>
-            <th class="standings__th standings__th--num standings__th--mult">×Mult</th>
+            <th v-if="settings.standings.usePerformanceModifier" class="standings__th standings__th--num standings__th--mult">×Mult</th>
             <th class="standings__th standings__th--num">
               <button type="button" class="standings__sort-button standings__sort-button--num" @click="toggleSort('totalPoints')">
                 <span>Points</span>
@@ -99,6 +99,7 @@
             </td>
             <td class="standings__td standings__td--num standings__td--total">{{ fmt(row.totalScore) }}</td>
             <td
+              v-if="settings.standings.usePerformanceModifier"
               class="standings__td standings__td--num standings__td--mult standings__td--hoverable-mult"
               @mouseenter="onMultEnter(row, $event)"
               @mousemove="onMouseMove($event)"
@@ -224,6 +225,7 @@ import {
 import { computeGlobalCommanderBaseline, computePlayerCommanderTier, type Tier } from '~/utils/tiers'
 
 const { commanders, gameRecords, players } = useLeagueState()
+const { settings } = useLeagueSettings()
 
 type SortKey =
   | 'totalScore'
@@ -251,7 +253,13 @@ function playerCommanderTier(playerName: string, commanderName: string): Tier | 
   return detail?.tier ?? null
 }
 
-function buildPerformanceMetrics(totalPoints: number, gamesPlayed: number, baseWins: number, leagueAvgPerGame: number) {
+function buildPerformanceMetrics(
+  totalPoints: number,
+  gamesPlayed: number,
+  baseWins: number,
+  leagueAvgPerGame: number,
+  usePerformanceModifier: boolean,
+) {
   const avgPerGame = gamesPlayed > 0 ? r3(totalPoints / gamesPlayed) : 0
   const winRate = gamesPlayed > 0 ? Math.round((baseWins / gamesPlayed) * 100) : 0
   const winRateFraction = gamesPlayed > 0 ? baseWins / gamesPlayed : EXPECTED_WIN_RATE
@@ -259,7 +267,7 @@ function buildPerformanceMetrics(totalPoints: number, gamesPlayed: number, baseW
   const winRateTerm = r3(PERF_WIN_RATE_WEIGHT * (winRateFraction / EXPECTED_WIN_RATE))
   const avgTerm = r3(PERF_AVG_WEIGHT * avgFraction)
   const perfMultRaw = r3(PERF_BASE_WEIGHT + winRateTerm + avgTerm)
-  const perfMult = gamesPlayed > 0
+  const perfMult = usePerformanceModifier && gamesPlayed > 0
     ? r3(Math.min(PERF_MULT_MAX, Math.max(PERF_MULT_MIN, perfMultRaw)))
     : 1
 
@@ -277,6 +285,7 @@ function buildPerformanceMetrics(totalPoints: number, gamesPlayed: number, baseW
 }
 
 const pairingTable = computed(() => {
+  const usePerformanceModifier = settings.value.standings.usePerformanceModifier
   const rows = Object.entries(gameRecords.value).flatMap(([playerName, recordsMap]) => {
     const byCommander = new Set(Object.values(recordsMap).map((record) => record.commander))
 
@@ -310,6 +319,7 @@ const pairingTable = computed(() => {
       row.gamesPlayed,
       row.baseWins,
       leagueAvgPerGame,
+      usePerformanceModifier,
     )
     const totalScore = r3((row.totalPoints + row.achievementPoints + row.xpPoints) * performance.perfMult)
 

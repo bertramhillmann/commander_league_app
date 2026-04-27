@@ -9,6 +9,9 @@ export interface ISettings extends Document {
     winBonusXp?: Record<string, number>
     thresholds?: number[]
   }
+  standings?: {
+    usePerformanceModifier?: boolean
+  }
   createdAt: Date
   updatedAt: Date
 }
@@ -19,6 +22,7 @@ const SettingsSchema = new Schema<ISettings>(
     points: { type: Schema.Types.Mixed, default: undefined },
     achievements: { type: Schema.Types.Mixed, default: undefined },
     level: { type: Schema.Types.Mixed, default: undefined },
+    standings: { type: Schema.Types.Mixed, default: undefined },
   },
   { timestamps: true },
 )

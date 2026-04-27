@@ -111,6 +111,23 @@
       <section class="settings-card">
         <div class="settings-card__header">
           <div>
+            <h2 class="settings-card__title">Standings</h2>
+            <p class="settings-card__subtitle">Control whether the performance multiplier affects standings totals.</p>
+          </div>
+        </div>
+
+        <label class="toggle-field">
+          <input v-model="form.standings.usePerformanceModifier" type="checkbox" class="toggle-field__input" />
+          <span class="toggle-field__copy">
+            <span class="toggle-field__label">Use performance modifier</span>
+            <span class="toggle-field__hint">When off, standings use a fixed multiplier of 1.0.</span>
+          </span>
+        </label>
+      </section>
+
+      <section class="settings-card">
+        <div class="settings-card__header">
+          <div>
             <h2 class="settings-card__title">Achievement Points</h2>
             <p class="settings-card__subtitle">Every achievement stays listed here, but only the points are adjustable.</p>
           </div>
@@ -175,6 +192,9 @@ type EditableSettingsState = {
     xpPerGame: Record<number, number>
     winBonusXp: Record<number, number>
     thresholds: number[]
+  }
+  standings: {
+    usePerformanceModifier: boolean
   }
 }
 
@@ -276,6 +296,9 @@ function createEditableSettings(source: ReturnType<typeof getResolvedLeagueSetti
       winBonusXp: { ...source.level.winBonusXp },
       thresholds: [...source.level.thresholds],
     },
+    standings: {
+      usePerformanceModifier: source.standings.usePerformanceModifier,
+    },
   }
 }
 
@@ -293,6 +316,7 @@ function applyEditableSettings(target: EditableSettingsState, source: ReturnType
   target.level.xpPerGame = { ...source.level.xpPerGame }
   target.level.winBonusXp = { ...source.level.winBonusXp }
   target.level.thresholds = [...source.level.thresholds]
+  target.standings.usePerformanceModifier = source.standings.usePerformanceModifier
 }
 
 function toDocument(source: EditableSettingsState): LeagueSettingsDocument {
@@ -321,6 +345,9 @@ function toDocument(source: EditableSettingsState): LeagueSettingsDocument {
       thresholds: source.level.thresholds.map((value, index) =>
         index === 0 ? 0 : sanitizeInteger(value),
       ),
+    },
+    standings: {
+      usePerformanceModifier: source.standings.usePerformanceModifier,
     },
   }
 }
@@ -547,6 +574,34 @@ function getRarityRank(rarity: AchievementDef['rarity']) {
   display: flex;
   flex-direction: column;
   gap: $spacing-1;
+}
+
+.toggle-field {
+  display: flex;
+  align-items: flex-start;
+  gap: $spacing-3;
+  padding: $spacing-3 0;
+  cursor: pointer;
+}
+
+.toggle-field__input {
+  margin-top: 2px;
+}
+
+.toggle-field__copy {
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+}
+
+.toggle-field__label {
+  color: $color-text;
+  font-weight: $font-weight-semibold;
+}
+
+.toggle-field__hint {
+  color: $color-text-muted;
+  font-size: $font-size-sm;
 }
 
 .form-label {

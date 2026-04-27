@@ -18,8 +18,22 @@
               <span class="standings__sort-indicator">{{ sortIndicator('totalScore') }}</span>
             </button>
           </th>
-          <th class="standings__th standings__th--num standings__th--mult" title="Performance multiplier applied to base score&#10;1.0 = league average · &gt;1.0 = above average · &lt;1.0 = below average">×Mult</th>
+          <th
+            v-if="settings.standings.usePerformanceModifier"
+            class="standings__th standings__th--num standings__th--mult"
+            title="Performance multiplier applied to base score&#10;1.0 = league average · &gt;1.0 = above average · &lt;1.0 = below average"
+          >×Mult</th>
           <th class="standings__th standings__th--num" title="Projected compensation for missed games compared to the most active player&#10;Always discounted and not affected by the multiplier">Comp.</th>
+          <th class="standings__th standings__th--num" title="Base points plus missed-game compensation&#10;Does not include achievements or commander XP">
+            <button
+              type="button"
+              class="standings__sort-button standings__sort-button--num"
+              @click="toggleSort('compensatedTotalPoints')"
+            >
+              <span>Pts + Comp</span>
+              <span class="standings__sort-indicator">{{ sortIndicator('compensatedTotalPoints') }}</span>
+            </button>
+          </th>
           <th class="standings__th standings__th--num">
             <button
               type="button"
@@ -110,10 +124,17 @@
             </span>
           </td>
           <td class="standings__td standings__td--name">
-            <NuxtLink class="standings__player-link" :to="`/players/${encodeURIComponent(row.name)}`">{{ row.name }}</NuxtLink>
+            <NuxtLink
+              class="standings__player-link"
+              :to="`/players/${encodeURIComponent(row.name)}`"
+              @mouseenter="onPlayerEnter(row, $event)"
+              @mousemove="onMouseMove($event)"
+              @mouseleave="onPlayerLeave"
+            >{{ row.name }}</NuxtLink>
           </td>
           <td class="standings__td standings__td--num standings__td--total">{{ fmt(row.totalScore) }}</td>
           <td
+            v-if="settings.standings.usePerformanceModifier"
             class="standings__td standings__td--num standings__td--mult standings__td--hoverable-mult"
             @mouseenter="onMultEnter(row, $event)"
             @mousemove="onMouseMove($event)"
@@ -125,6 +146,7 @@
             @mousemove="onMouseMove($event)"
             @mouseleave="onCompLeave"
           >{{ fmt(row.projectedPoints) }}</td>
+          <td class="standings__td standings__td--num">{{ fmt(row.compensatedTotalPoints) }}</td>
           <td class="standings__td standings__td--num">{{ fmt(row.totalPoints) }}</td>
           <td
             class="standings__td standings__td--num standings__td--achv standings__td--hoverable"
@@ -261,6 +283,54 @@
     </section>
 
     <CommandersTopCommander />
+
+    <Teleport to="body">
+      <div
+        v-if="catchupHover.visible"
+        class="floating-panel mult-tooltip"
+        :style="{ top: `${catchupHover.y}px`, left: `${catchupHover.x}px` }"
+      >
+        <div class="mult-tooltip__title">Catch-Up</div>
+        <table class="mult-tooltip__table">
+          <tr>
+            <td class="mult-tooltip__label">Target</td>
+            <td class="mult-tooltip__op"></td>
+            <td class="mult-tooltip__detail"></td>
+            <td class="mult-tooltip__value">{{ catchupHover.targetName }}</td>
+          </tr>
+          <tr>
+            <td class="mult-tooltip__label">Gap</td>
+            <td class="mult-tooltip__op"></td>
+            <td class="mult-tooltip__detail">their total - your total</td>
+            <td class="mult-tooltip__value">{{ fmt(catchupHover.gap) }}</td>
+          </tr>
+          <tr>
+            <td class="mult-tooltip__label">Your avg</td>
+            <td class="mult-tooltip__op"></td>
+            <td class="mult-tooltip__detail">points per game</td>
+            <td class="mult-tooltip__value">{{ fmt(catchupHover.avgPerGame) }}</td>
+          </tr>
+          <tr>
+            <td class="mult-tooltip__label">Comp swing</td>
+            <td class="mult-tooltip__op"></td>
+            <td class="mult-tooltip__detail">next game vs compensation</td>
+            <td class="mult-tooltip__value">{{ fmt(catchupHover.nextCompDelta) }}</td>
+          </tr>
+          <tr>
+            <td class="mult-tooltip__label">Net gain</td>
+            <td class="mult-tooltip__op"></td>
+            <td class="mult-tooltip__detail">expected total next game</td>
+            <td class="mult-tooltip__value">{{ fmt(catchupHover.nextNetGain) }}</td>
+          </tr>
+          <tr class="mult-tooltip__row--sep">
+            <td class="mult-tooltip__label">Catch up</td>
+            <td class="mult-tooltip__op">=</td>
+            <td class="mult-tooltip__detail">{{ catchupHover.message }}</td>
+            <td class="mult-tooltip__value">{{ catchupHover.gamesNeededLabel }}</td>
+          </tr>
+        </table>
+      </div>
+    </Teleport>
 
     <Teleport to="body">
       <div
@@ -420,10 +490,12 @@ import {
 import { computeGlobalCommanderBaseline, computePlayerCommanderTier, type Tier } from '~/utils/tiers'
 
 const { commanders, gameRecords, games, leagueSnapshots, players, standings } = useLeagueState()
+const { settings } = useLeagueSettings()
 const { user, ensureSession } = useAuth()
 
 type SortKey =
   | 'totalScore'
+  | 'compensatedTotalPoints'
   | 'totalPoints'
   | 'achievementPoints'
   | 'xpPoints'
@@ -453,6 +525,7 @@ const loggedInArchEnemy = computed(() => {
   if (!players.value[playerName]) return null
   return getArchEnemySummary(playerName, chronologicalGames.value, gameRecords.value)
 })
+const loggedInPlayerName = computed(() => (user.value ? formatPlayerName(user.value) : ''))
 
 onMounted(async () => {
   await ensureSession()
@@ -509,7 +582,13 @@ function playerCommanderTier(playerName: string, commanderName: string): Tier | 
   return detail?.tier ?? null
 }
 
-function buildPerformanceMetrics(totalPoints: number, gamesPlayed: number, baseWins: number, leagueAvgPerGame: number) {
+function buildPerformanceMetrics(
+  totalPoints: number,
+  gamesPlayed: number,
+  baseWins: number,
+  leagueAvgPerGame: number,
+  usePerformanceModifier: boolean,
+) {
   const avgPerGame = gamesPlayed > 0 ? r3(totalPoints / gamesPlayed) : 0
   const winRate = gamesPlayed > 0 ? Math.round((baseWins / gamesPlayed) * 100) : 0
   const winRateFraction = gamesPlayed > 0 ? baseWins / gamesPlayed : EXPECTED_WIN_RATE
@@ -517,7 +596,7 @@ function buildPerformanceMetrics(totalPoints: number, gamesPlayed: number, baseW
   const winRateTerm = r3(PERF_WIN_RATE_WEIGHT * (winRateFraction / EXPECTED_WIN_RATE))
   const avgTerm = r3(PERF_AVG_WEIGHT * avgFraction)
   const perfMultRaw = r3(PERF_BASE_WEIGHT + winRateTerm + avgTerm)
-  const perfMult = gamesPlayed > 0
+  const perfMult = usePerformanceModifier && gamesPlayed > 0
     ? r3(Math.min(PERF_MULT_MAX, Math.max(PERF_MULT_MIN, perfMultRaw)))
     : 1
 
@@ -538,6 +617,7 @@ function buildPerformanceMetrics(totalPoints: number, gamesPlayed: number, baseW
 
 const table = computed(() => {
   const allPlayers = standings.value
+  const usePerformanceModifier = settings.value.standings.usePerformanceModifier
 
   // League average points per game (used to normalise avgPerGame in the multiplier)
   const totalGames  = allPlayers.reduce((s, p) => s + p.gamesPlayed, 0)
@@ -550,6 +630,7 @@ const table = computed(() => {
       p.gamesPlayed,
       p.baseWins,
       leagueAvgPerGame,
+      usePerformanceModifier,
     )
     const projection = calculateProjectedPoints(
       { totalPoints: p.totalPoints, gamesPlayed: p.gamesPlayed },
@@ -562,6 +643,7 @@ const table = computed(() => {
       name: p.name,
       totalScore: p.totalScore,
       projectedPoints: p.projectedPoints,
+      compensatedTotalPoints: p.compensatedTotalPoints,
       projectionMissingGames: projection.missingGames,
       projectionCappedMissingGames: projection.cappedMissingGames,
       projectionMaxGamesPlayed: projection.maxGamesPlayed,
@@ -800,6 +882,11 @@ function onCommanderEnter(playerName: string, commanderName: string, e: MouseEve
 }
 
 function onMouseMove(e: MouseEvent) {
+  if (catchupHover.visible) {
+    const pos = calcCatchupPosition(e)
+    catchupHover.x = pos.x
+    catchupHover.y = pos.y
+  }
   if (hover.visible) {
     const pos = calcPosition(e)
     hover.x = pos.x
@@ -930,6 +1017,15 @@ type CompensationHoverData = {
   sampleSmoothingGames: number
 }
 
+type CatchupRow = {
+  name: string
+  totalPoints: number
+  projectedPoints: number
+  compensatedTotalPoints: number
+  gamesPlayed: number
+  avgPerGame: number
+}
+
 const compHover = reactive<CompensationHoverData>({
   visible: false,
   x: 0,
@@ -948,6 +1044,32 @@ const compHover = reactive<CompensationHoverData>({
   sampleSmoothingGames: 0,
 })
 
+type CatchupHoverData = {
+  visible: boolean
+  x: number
+  y: number
+  targetName: string
+  gap: number
+  avgPerGame: number
+  nextCompDelta: number
+  nextNetGain: number
+  gamesNeededLabel: string
+  message: string
+}
+
+const catchupHover = reactive<CatchupHoverData>({
+  visible: false,
+  x: 0,
+  y: 0,
+  targetName: '',
+  gap: 0,
+  avgPerGame: 0,
+  nextCompDelta: 0,
+  nextNetGain: 0,
+  gamesNeededLabel: '',
+  message: '',
+})
+
 function calcMultPosition(e: MouseEvent) {
   let x = e.clientX + OFFSET_X
   let y = e.clientY + OFFSET_Y
@@ -961,6 +1083,14 @@ function calcCompPosition(e: MouseEvent) {
   let y = e.clientY + OFFSET_Y
   if (x + 320 > window.innerWidth) x = e.clientX - 320 - OFFSET_X
   if (y + 320 > window.innerHeight) y = e.clientY - 320 - OFFSET_Y
+  return { x: x + window.scrollX, y: y + window.scrollY }
+}
+
+function calcCatchupPosition(e: MouseEvent) {
+  let x = e.clientX + OFFSET_X
+  let y = e.clientY + OFFSET_Y
+  if (x + 320 > window.innerWidth) x = e.clientX - 320 - OFFSET_X
+  if (y + 240 > window.innerHeight) y = e.clientY - 240 - OFFSET_Y
   return { x: x + window.scrollX, y: y + window.scrollY }
 }
 
@@ -982,6 +1112,87 @@ function onMultEnter(row: MultRow, e: MouseEvent) {
 
 function onMultLeave() {
   multHover.visible = false
+}
+
+function estimateCatchup(target: CatchupRow) {
+  const viewerName = loggedInPlayerName.value
+  if (!viewerName || target.name === viewerName) return null
+
+  const viewer = table.value.find((row) => row.name === viewerName)
+  if (!viewer) return null
+
+  const gap = r3(target.compensatedTotalPoints - viewer.compensatedTotalPoints)
+  const avgPerGame = viewer.avgPerGame
+  const currentProjectedPoints = viewer.projectedPoints
+
+  if (gap <= 0) {
+    return {
+      gap,
+      avgPerGame,
+      nextCompDelta: 0,
+      nextNetGain: 0,
+      gamesNeededLabel: '0',
+      message: 'already ahead',
+    }
+  }
+
+  let nextCompDelta = 0
+  let nextNetGain = 0
+  let gamesNeeded: number | null = null
+
+  for (let games = 1; games <= 250; games++) {
+    const totalPoints = r3(viewer.totalPoints + (avgPerGame * games))
+    const gamesPlayed = viewer.gamesPlayed + games
+    const simulatedPlayerMap = {
+      ...players.value,
+      [viewerName]: {
+        totalPoints,
+        gamesPlayed,
+      },
+    }
+    const projection = calculateProjectedPoints({ totalPoints, gamesPlayed }, simulatedPlayerMap)
+    const compensatedTotalPoints = r3(totalPoints + projection.projectedPoints)
+
+    if (games === 1) {
+      nextCompDelta = r3(projection.projectedPoints - currentProjectedPoints)
+      nextNetGain = r3(compensatedTotalPoints - viewer.compensatedTotalPoints)
+    }
+
+    if (compensatedTotalPoints >= target.compensatedTotalPoints) {
+      gamesNeeded = games
+      break
+    }
+  }
+
+  return {
+    gap,
+    avgPerGame,
+    nextCompDelta,
+    nextNetGain,
+    gamesNeededLabel: gamesNeeded === null ? '—' : String(gamesNeeded),
+    message: gamesNeeded === null ? 'not reachable at current pace' : 'games at your current pace',
+  }
+}
+
+function onPlayerEnter(row: CatchupRow, e: MouseEvent) {
+  const estimate = estimateCatchup(row)
+  if (!estimate) return
+
+  catchupHover.visible = true
+  catchupHover.targetName = row.name
+  catchupHover.gap = estimate.gap
+  catchupHover.avgPerGame = estimate.avgPerGame
+  catchupHover.nextCompDelta = estimate.nextCompDelta
+  catchupHover.nextNetGain = estimate.nextNetGain
+  catchupHover.gamesNeededLabel = estimate.gamesNeededLabel
+  catchupHover.message = estimate.message
+  const pos = calcCatchupPosition(e)
+  catchupHover.x = pos.x
+  catchupHover.y = pos.y
+}
+
+function onPlayerLeave() {
+  catchupHover.visible = false
 }
 
 function onCompEnter(row: CompensationRow, e: MouseEvent) {
