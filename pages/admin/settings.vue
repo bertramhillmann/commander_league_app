@@ -71,7 +71,7 @@
             <div class="xp-settings__row">
               <label v-for="playerCount in playerCounts" :key="`xp-${playerCount}`" class="form-field">
                 <span class="form-label">{{ playerCount }} Players</span>
-                <input v-model.number="form.level.xpPerGame[playerCount]" type="number" step="1" class="form-input" />
+                <input v-model.number="form.level.xpPerGame[playerCount]" type="number" step="0.001" class="form-input" />
               </label>
             </div>
           </div>
@@ -81,7 +81,7 @@
             <div class="xp-settings__row">
               <label v-for="playerCount in playerCounts" :key="`bonus-${playerCount}`" class="form-field">
                 <span class="form-label">{{ playerCount }} Players</span>
-                <input v-model.number="form.level.winBonusXp[playerCount]" type="number" step="1" class="form-input" />
+                <input v-model.number="form.level.winBonusXp[playerCount]" type="number" step="0.001" class="form-input" />
               </label>
             </div>
           </div>
@@ -337,10 +337,10 @@ function toDocument(source: EditableSettingsState): LeagueSettingsDocument {
     ),
     level: {
       xpPerGame: Object.fromEntries(
-        playerCounts.map((playerCount) => [playerCount, sanitizeInteger(source.level.xpPerGame[playerCount])]),
+        playerCounts.map((playerCount) => [playerCount, sanitizePositiveNumber(source.level.xpPerGame[playerCount])]),
       ),
       winBonusXp: Object.fromEntries(
-        playerCounts.map((playerCount) => [playerCount, sanitizeInteger(source.level.winBonusXp[playerCount])]),
+        playerCounts.map((playerCount) => [playerCount, sanitizePositiveNumber(source.level.winBonusXp[playerCount])]),
       ),
       thresholds: source.level.thresholds.map((value, index) =>
         index === 0 ? 0 : sanitizeInteger(value),
@@ -365,6 +365,10 @@ function sanitizeNumber(value: number) {
 
 function sanitizeInteger(value: number) {
   return Math.max(0, Math.round(Number.isFinite(value) ? value : 0))
+}
+
+function sanitizePositiveNumber(value: number) {
+  return Math.max(0, sanitizeNumber(value))
 }
 
 function ordinal(value: number) {

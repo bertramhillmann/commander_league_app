@@ -217,8 +217,8 @@ export function getLeagueAveragePerGame(playerMap: Record<string, PlayerState>) 
 
 const PROJECTED_GAMES_DECAY_FACTOR = 6
 const PROJECTED_GAMES_MAX = 30
-const PROJECTED_GAME_VALUE_FACTOR = 0.7
-const PROJECTED_SAMPLE_SMOOTHING = 8
+// const PROJECTED_GAME_VALUE_FACTOR = 0.7
+// const PROJECTED_SAMPLE_SMOOTHING = 8
 
 export interface ProjectedPointsResult {
   projectedPoints: number
@@ -247,8 +247,9 @@ export function calculateProjectedPoints(
 ): ProjectedPointsResult {
   const decayFactor = Math.max(options?.decayFactor ?? PROJECTED_GAMES_DECAY_FACTOR, 0.001)
   const baseMaxProjectedGames = Math.max(0, Math.floor(options?.maxProjectedGames ?? PROJECTED_GAMES_MAX))
-  const projectedGameValueFactor = Math.min(Math.max(options?.projectedGameValueFactor ?? PROJECTED_GAME_VALUE_FACTOR, 0), 1)
-  const sampleSmoothingGames = Math.max(options?.sampleSmoothingGames ?? PROJECTED_SAMPLE_SMOOTHING, 0)
+  // Temporary raw projection mode: missed games count at full value.
+  const projectedGameValueFactor = 1
+  const sampleSmoothingGames = 0
 
   const allPlayers = Object.values(playerMap)
   const maxGamesPlayed = allPlayers.reduce((maxGames, candidate) => Math.max(maxGames, candidate.gamesPlayed), 0)
@@ -261,9 +262,7 @@ export function calculateProjectedPoints(
   const maxProjectedGames = Math.max(baseMaxProjectedGames, player.gamesPlayed)
   const cappedMissingGames = Math.min(missingGames, maxProjectedGames)
   const averageScore = player.gamesPlayed > 0 ? player.totalPoints / player.gamesPlayed : leagueFloorScore
-  const sampleFactor = player.gamesPlayed > 0
-    ? player.gamesPlayed / (player.gamesPlayed + sampleSmoothingGames)
-    : 0
+  const sampleFactor = 1
 
   let projectedPoints = 0
   for (let i = 1; i <= cappedMissingGames; i++) {
