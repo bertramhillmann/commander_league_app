@@ -23,6 +23,7 @@ export interface IGamePlayer {
 export interface IGame extends Document {
   gameId: string
   date: Date
+  hidden: boolean
   players: IGamePlayer[]
 }
 
@@ -59,6 +60,7 @@ const GameSchema = new Schema<IGame>(
   {
     gameId: { type: String, required: true, unique: true },
     date: { type: Date, required: true, default: Date.now },
+    hidden: { type: Boolean, required: true, default: false, index: true },
     players: { type: [GamePlayerSchema], required: true },
   },
   { timestamps: true }

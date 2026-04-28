@@ -94,7 +94,7 @@
               <span class="standings__sort-indicator">{{ sortIndicator('avgPerGame') }}</span>
             </button>
           </th>
-          <th class="standings__th standings__th--commander">Top Commander</th>
+          <th class="standings__th standings__th--commander">Most Played Commander</th>
           <th class="standings__th standings__th--num">
             <button
               type="button"
@@ -113,6 +113,7 @@
           :key="row.name"
           class="standings__row"
           :class="{
+            'standings__row--self': row.name === loggedInPlayerName,
             'standings__row--top1': row.rank === 1,
             'standings__row--top2': row.rank === 2,
             'standings__row--top3': row.rank === 3
@@ -1548,7 +1549,12 @@ function onCompLeave() {
 
     &--num  { text-align: right; }
     &--rank { width: 2.5rem; text-align: center; }
-    &--commander { width: 180px; }
+    &--commander {
+      width: 220px;
+      min-width: 220px;
+      white-space: normal;
+      line-height: 1.2;
+    }
     &--mult { color: $color-text-muted; font-size: $font-size-xs; }
   }
 
@@ -1603,6 +1609,11 @@ function onCompLeave() {
       background: rgba($color-primary, 0.15);
     }
 
+    &--self {
+      background:
+        linear-gradient(90deg, rgba(214, 170, 74, 0.16), rgba(214, 170, 74, 0.04)),
+        rgba(16, 16, 16, 0.22);
+    }
   }
 
   &__td {
@@ -1622,6 +1633,19 @@ function onCompLeave() {
     &--lp    { color: $color-danger; }
     &--mult  { color: $color-text-muted; font-size: $font-size-xs; }
     &--hoverable-mult { cursor: default; text-decoration: underline dotted $color-text-muted; }
+  }
+
+  &__row--self &__td {
+    border-top: 2px solid rgba(214, 170, 74, 0.95);
+    border-bottom: 2px solid rgba(214, 170, 74, 0.95);
+  }
+
+  &__row--self &__td:first-child {
+    border-left: 2px solid rgba(214, 170, 74, 0.95);
+  }
+
+  &__row--self &__td:last-child {
+    border-right: 2px solid rgba(214, 170, 74, 0.95);
   }
 
   &__rank {

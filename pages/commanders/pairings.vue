@@ -71,6 +71,7 @@
             :key="row.key"
             class="standings__row"
             :class="{
+              'standings__row--self': row.playerName === loggedInPlayerName,
               'standings__row--top1': row.rank === 1,
               'standings__row--top2': row.rank === 2,
               'standings__row--top3': row.rank === 3
@@ -212,7 +213,7 @@
 </template>
 
 <script setup lang="ts">
-import { computed, reactive, ref } from 'vue'
+import { computed, onMounted, reactive, ref } from 'vue'
 import { getPlayerCommanderMetrics } from '~/composables/useLeagueState'
 import {
   EXPECTED_WIN_RATE,
@@ -223,9 +224,16 @@ import {
   PERF_MULT_MIN,
 } from '~/utils/placements'
 import { computeGlobalCommanderBaseline, computePlayerCommanderTier, type Tier } from '~/utils/tiers'
+import { formatPlayerName } from '~/utils/playerNames'
 
 const { commanders, gameRecords, players } = useLeagueState()
 const { settings } = useLeagueSettings()
+const { user, ensureSession } = useAuth()
+const loggedInPlayerName = computed(() => (user.value ? formatPlayerName(user.value) : ''))
+
+onMounted(async () => {
+  await ensureSession()
+})
 
 type SortKey =
   | 'totalScore'
@@ -612,6 +620,11 @@ function onMouseMove(e: MouseEvent) {
     &--top3 { background: rgba($color-primary, 0.05); }
     &--top2 { background: rgba($color-primary, 0.1); }
     &--top1 { background: rgba($color-primary, 0.15); }
+    &--self {
+      background:
+        linear-gradient(90deg, rgba(214, 170, 74, 0.08), rgba(214, 170, 74, 0.02)),
+        rgba(16, 16, 16, 0.2);
+    }
   }
 
   &__td {
@@ -628,6 +641,19 @@ function onMouseMove(e: MouseEvent) {
     &--lp    { color: $color-danger; }
     &--mult  { color: $color-text-muted; font-size: $font-size-xs; }
     &--hoverable-mult { cursor: default; text-decoration: underline dotted $color-text-muted; }
+  }
+
+  &__row--self &__td {
+    border-top: 1px solid rgba(214, 170, 74, 0.72);
+    border-bottom: 1px solid rgba(214, 170, 74, 0.72);
+  }
+
+  &__row--self &__td:first-child {
+    border-left: 1px solid rgba(214, 170, 74, 0.72);
+  }
+
+  &__row--self &__td:last-child {
+    border-right: 1px solid rgba(214, 170, 74, 0.72);
   }
 
   &__rank {

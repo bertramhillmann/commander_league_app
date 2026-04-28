@@ -1,8 +1,6 @@
 <template>
-  <div class="game-card">
-    <!-- Commander art strip on the left -->
+  <div class="game-card" :class="{ 'game-card--hidden': game.hidden, 'game-card--editing': isEditing }">
     <div class="game-card__art">
-      <!-- Winner — larger, full color -->
       <div class="game-card__art-winner">
         <img
           v-if="artUrls.get(winnerCommander)"
@@ -13,7 +11,6 @@
         <div v-else class="game-card__art-placeholder" />
       </div>
 
-      <!-- Other commanders — grayscale row at bottom -->
       <div v-if="otherCommanders.length" class="game-card__art-others">
         <div
           v-for="cmd in otherCommanders"
@@ -31,15 +28,63 @@
       </div>
     </div>
 
-    <!-- Game body -->
     <div class="game-card__body">
       <div class="game-card__header">
-        <span class="game-card__id">{{ game.gameId }}</span>
-        <span class="game-card__date">{{ formattedDate }}</span>
-        <span class="game-card__week">W{{ game.week }}</span>
+        <div class="game-card__header-meta">
+          <span class="game-card__id">{{ game.gameId }}</span>
+          <span class="game-card__date">{{ formattedDate }}</span>
+          <span class="game-card__week">W{{ game.week }}</span>
+          <span v-if="game.hidden" class="game-card__hidden-pill">Hidden</span>
+        </div>
+
+        <div v-if="canManageGame" class="game-card__admin-actions">
+          <input
+            v-if="isEditing"
+            v-model="draftDate"
+            type="date"
+            class="game-card__date-input"
+          />
+          <button
+            type="button"
+            class="game-card__admin-btn"
+            :disabled="saving"
+            @click="toggleHidden"
+          >
+            {{ game.hidden ? 'Unhide' : 'Hide' }}
+          </button>
+          <button
+            v-if="!isEditing"
+            type="button"
+            class="game-card__admin-btn game-card__admin-btn--primary"
+            :disabled="saving"
+            @click="startEditing"
+          >
+            Edit
+          </button>
+          <button
+            v-else
+            type="button"
+            class="game-card__admin-btn game-card__admin-btn--primary"
+            :disabled="saving"
+            @click="saveChanges"
+          >
+            {{ saving ? 'Saving…' : 'Save' }}
+          </button>
+          <button
+            v-if="isEditing"
+            type="button"
+            class="game-card__admin-btn"
+            :disabled="saving"
+            @click="cancelEditing"
+          >
+            Cancel
+          </button>
+        </div>
       </div>
 
-      <div class="game-card__players">
+      <p v-if="editorError" class="game-card__error">{{ editorError }}</p>
+
+      <div v-if="!isEditing" class="game-card__players">
         <div
           v-for="player in sortedPlayers"
           :key="player.name"
@@ -85,13 +130,61 @@
           </span>
         </div>
       </div>
+
+      <div v-else class="game-card__editor">
+        <div class="game-card__editor-hint">Drag rows to reseed placements. Name, commander, and placement remain editable.</div>
+        <div
+          v-for="(player, index) in draftPlayers"
+          :key="`${game.gameId}-edit-${index}`"
+          class="game-card__editor-row"
+          @dragover.prevent
+          @drop="onDrop(index)"
+        >
+          <button
+            type="button"
+            class="game-card__drag-handle"
+            title="Drag to reorder"
+            draggable="true"
+            @dragstart="onDragStart(index)"
+          >
+            ⋮⋮
+          </button>
+          <input
+            v-model="player.name"
+            :list="playerOptionsId"
+            type="text"
+            class="game-card__editor-input"
+            placeholder="Player"
+          />
+          <input
+            v-model="player.commander"
+            :list="commanderOptionsId"
+            type="text"
+            class="game-card__editor-input game-card__editor-input--wide"
+            placeholder="Commander"
+          />
+          <input
+            v-model.number="player.placement"
+            type="number"
+            min="1"
+            :max="draftPlayers.length"
+            class="game-card__editor-input game-card__editor-input--placement"
+            @change="sortDraftByPlacement"
+          />
+        </div>
+        <datalist :id="playerOptionsId">
+          <option v-for="name in props.allPlayerOptions" :key="name" :value="name" />
+        </datalist>
+        <datalist :id="commanderOptionsId">
+          <option v-for="name in props.allCommanderOptions" :key="name" :value="name" />
+        </datalist>
+      </div>
     </div>
   </div>
 
-  <!-- Player info panel -->
   <Teleport to="body">
     <div
-      v-if="playerHover.visible"
+      v-if="playerHover.visible && !isEditing"
       class="floating-panel"
       :style="{ top: `${playerHover.y}px`, left: `${playerHover.x}px` }"
     >
@@ -102,10 +195,9 @@
     </div>
   </Teleport>
 
-  <!-- Commander tooltip -->
   <Teleport to="body">
     <div
-      v-if="commanderHover.visible"
+      v-if="commanderHover.visible && !isEditing"
       class="floating-panel"
       :style="{ top: `${commanderHover.y}px`, left: `${commanderHover.x}px` }"
     >
@@ -120,30 +212,66 @@
 <script setup lang="ts">
 import { computed, reactive, ref, watch } from 'vue'
 import type { ProcessedGame, ProcessedGamePlayer } from '~/composables/useLeagueState'
+import type { EditableGamePlayer, GameDocument } from '~/utils/gameTypes'
 import { TIER_META, type Tier } from '~/utils/tiers'
 import { getAchievementDefinition } from '~/utils/achievements'
 import { getHistoricalCommanderTierAtGame } from '~/utils/historicalCommanderTier'
 
-const props = defineProps<{ game: ProcessedGame; highlightPlayer?: string | null }>()
+const props = withDefaults(defineProps<{
+  game: ProcessedGame
+  highlightPlayer?: string | null
+  adminRawGame?: GameDocument | null
+  allPlayerOptions?: string[]
+  allCommanderOptions?: string[]
+}>(), {
+  highlightPlayer: null,
+  adminRawGame: null,
+  allPlayerOptions: () => [],
+  allCommanderOptions: () => [],
+})
+
+const emit = defineEmits<{
+  updated: []
+}>()
+
 const { preloadCommanderImages, getCachedCommanderImage } = useImageCache()
+const { games, gameRecords } = useLeagueState()
+const { isAdmin } = useAuth()
+
+const canManageGame = computed(() => isAdmin.value && Boolean(props.adminRawGame))
+const isEditing = ref(false)
+const saving = ref(false)
+const editorError = ref('')
+const draftDate = ref('')
+const draftPlayers = ref<EditableGamePlayer[]>([])
+const dragIndex = ref<number | null>(null)
+
+const playerOptionsId = computed(() => `game-player-options-${props.game.gameId}`)
+const commanderOptionsId = computed(() => `game-commander-options-${props.game.gameId}`)
+
+watch(
+  () => props.adminRawGame,
+  () => {
+    resetDraft()
+  },
+  { immediate: true },
+)
 
 const formattedDate = computed(() =>
   new Date(props.game.date).toLocaleDateString('de-DE', {
     day: '2-digit',
     month: '2-digit',
     year: 'numeric',
-  })
+  }),
 )
 
 const sortedPlayers = computed(() =>
-  [...props.game.players].sort((a, b) => a.placement - b.placement)
+  [...props.game.players].sort((a, b) => a.placement - b.placement),
 )
 
 function placementLabel(p: number) {
   return ['🥇', '🥈', '🥉'][p - 1] ?? `${p}.`
 }
-
-const { games, gameRecords } = useLeagueState()
 
 function playerTier(playerName: string, commander: string): Tier | null {
   return getHistoricalCommanderTierAtGame(
@@ -162,25 +290,21 @@ function getTierMeta(playerName: string, commander: string) {
 
 function gameAchievements(playerName: string) {
   return (gameRecords.value[playerName]?.[props.game.gameId]?.achievements ?? [])
-    .map((a) => getAchievementDefinition(a.id))
+    .map((achievement) => getAchievementDefinition(achievement.id))
     .filter(Boolean)
 }
 
-// ── Commander art ──────────────────────────────────────────────────────────────
-
-// Winner is the player at placement 1 (first after sort)
 const winnerCommander = computed(
   () => (sortedPlayers.value[0] as ProcessedGamePlayer | undefined)?.commander ?? '',
 )
 
-// Unique commanders of non-winning players, preserving order, no duplicates
 const otherCommanders = computed(() => {
   const seen = new Set([winnerCommander.value])
   const result: string[] = []
-  for (const p of sortedPlayers.value.slice(1)) {
-    if (!seen.has(p.commander)) {
-      seen.add(p.commander)
-      result.push(p.commander)
+  for (const player of sortedPlayers.value.slice(1)) {
+    if (!seen.has(player.commander)) {
+      seen.add(player.commander)
+      result.push(player.commander)
     }
   }
   return result
@@ -202,8 +326,6 @@ watch(
   },
   { immediate: true },
 )
-
-// ── Shared mouse helpers ───────────────────────────────────────────────────────
 
 const OFFSET_X = 16
 const OFFSET_Y = 16
@@ -229,8 +351,6 @@ function onMouseMove(e: MouseEvent) {
   }
 }
 
-// ── Player info hover ──────────────────────────────────────────────────────────
-
 const playerHover = reactive({ visible: false, name: '', x: 0, y: 0 })
 
 function onPlayerEnter(name: string, e: MouseEvent) {
@@ -244,8 +364,6 @@ function onPlayerEnter(name: string, e: MouseEvent) {
 function onPlayerLeave() {
   playerHover.visible = false
 }
-
-// ── Commander card hover ───────────────────────────────────────────────────────
 
 const commanderHover = reactive({
   visible: false,
@@ -268,8 +386,6 @@ function onCommanderLeave() {
   commanderHover.visible = false
 }
 
-// ── Rank change helpers ────────────────────────────────────────────────────────
-
 function rankBefore(playerName: string): number {
   return gameRecords.value[playerName]?.[props.game.gameId]?.rankBefore ?? 0
 }
@@ -282,7 +398,110 @@ function rankDelta(playerName: string): number {
   const before = rankBefore(playerName)
   const after = rankAfter(playerName)
   if (!before || !after) return 0
-  return before - after // positive = rose (rank number got smaller)
+  return before - after
+}
+
+function resetDraft() {
+  draftDate.value = toDateInputValue(props.adminRawGame?.date ?? props.game.date)
+  draftPlayers.value = [...(props.adminRawGame?.players ?? props.game.players)]
+    .map((player) => ({
+      name: player.name,
+      commander: player.commander,
+      placement: player.placement,
+      eliminations: player.eliminations ?? null,
+      commanderCasts: player.commanderCasts ?? null,
+    }))
+    .sort((a, b) => a.placement - b.placement)
+  editorError.value = ''
+  dragIndex.value = null
+}
+
+function startEditing() {
+  resetDraft()
+  isEditing.value = true
+}
+
+function cancelEditing() {
+  isEditing.value = false
+  resetDraft()
+}
+
+function sortDraftByPlacement() {
+  draftPlayers.value = [...draftPlayers.value].sort((a, b) => a.placement - b.placement)
+}
+
+function onDragStart(index: number) {
+  dragIndex.value = index
+}
+
+function onDrop(index: number) {
+  if (dragIndex.value === null || dragIndex.value === index) return
+
+  const nextPlayers = [...draftPlayers.value]
+  const [moved] = nextPlayers.splice(dragIndex.value, 1)
+  if (!moved) return
+  nextPlayers.splice(index, 0, moved)
+  draftPlayers.value = nextPlayers.map((player, playerIndex) => ({
+    ...player,
+    placement: playerIndex + 1,
+  }))
+  dragIndex.value = null
+}
+
+async function toggleHidden() {
+  if (!props.adminRawGame || saving.value) return
+
+  saving.value = true
+  editorError.value = ''
+
+  try {
+    await $fetch(`/api/games/${encodeURIComponent(props.game.gameId)}`, {
+      method: 'PUT',
+      body: { hidden: !props.game.hidden },
+    })
+    emit('updated')
+  } catch (error: any) {
+    editorError.value = error?.data?.statusMessage ?? 'Failed to update game visibility.'
+  } finally {
+    saving.value = false
+  }
+}
+
+async function saveChanges() {
+  if (!props.adminRawGame || saving.value) return
+
+  saving.value = true
+  editorError.value = ''
+
+  try {
+    await $fetch(`/api/games/${encodeURIComponent(props.game.gameId)}`, {
+      method: 'PUT',
+      body: {
+        date: draftDate.value,
+        players: draftPlayers.value.map((player) => ({
+          name: player.name.trim(),
+          commander: player.commander.trim(),
+          placement: player.placement,
+          eliminations: player.eliminations,
+          commanderCasts: player.commanderCasts,
+        })),
+      },
+    })
+    isEditing.value = false
+    emit('updated')
+  } catch (error: any) {
+    editorError.value = error?.data?.statusMessage ?? 'Failed to save game.'
+  } finally {
+    saving.value = false
+  }
+}
+
+function toDateInputValue(value: string | Date) {
+  const date = new Date(value)
+  const year = date.getFullYear()
+  const month = String(date.getMonth() + 1).padStart(2, '0')
+  const day = String(date.getDate()).padStart(2, '0')
+  return `${year}-${month}-${day}`
 }
 </script>
 
@@ -290,21 +509,26 @@ function rankDelta(playerName: string): number {
 .game-card {
   display: flex;
   background: rgba(16, 16, 16, 0.25);
-  backdrop-filter:blur(3px);
+  backdrop-filter: blur(3px);
   border: 1px solid $border-color;
   border-radius: $border-radius-lg;
   overflow: hidden;
-  transition: border-color $transition-fast;
-    transition:0.15s;
+  transition: border-color $transition-fast, transform $transition-fast;
 
   &:hover {
     border-color: $color-primary;
-    transform:scale(1.03);
+    transform: scale(1.03);
     @include dropshadow();
-    transition:0.3s;
   }
 
-  // ── Art panel ──────────────────────────────────────────────────────────────
+  &--hidden {
+    opacity: 0.72;
+    border-style: dashed;
+  }
+
+  &--editing {
+    border-color: rgba($color-primary-light, 0.55);
+  }
 
   &__art {
     flex-shrink: 0;
@@ -315,20 +539,20 @@ function rankDelta(playerName: string): number {
 
   &__art-winner {
     flex: 1;
-    padding:10px;
+    padding: 10px;
     overflow: hidden;
   }
 
   &__art-others {
     display: flex;
-    padding:5px;
+    padding: 5px;
     height: 58px;
     border-top: 1px solid $border-color;
   }
 
   &__art-other {
     flex: 1;
-    margin:3px;
+    margin: 3px;
     overflow: hidden;
 
     & + & {
@@ -339,7 +563,7 @@ function rankDelta(playerName: string): number {
   &__art-img {
     width: 100%;
     height: 100%;
-    border-radius:3px;
+    border-radius: 3px;
     object-fit: cover;
     object-position: center top;
     display: block;
@@ -355,8 +579,6 @@ function rankDelta(playerName: string): number {
     background: $color-bg-elevated;
   }
 
-  // ── Body ───────────────────────────────────────────────────────────────────
-
   &__body {
     flex: 1;
     padding: $spacing-4 $spacing-6;
@@ -366,10 +588,26 @@ function rankDelta(playerName: string): number {
   &__header {
     display: flex;
     justify-content: space-between;
-    align-items: center;
+    align-items: flex-start;
+    gap: $spacing-3;
     margin-bottom: $spacing-2;
-    padding:$spacing-2 $spacing-4;
-    background:rgba(0,0,0,0.25);
+    padding: $spacing-2 $spacing-4;
+    background: rgba(0, 0, 0, 0.25);
+  }
+
+  &__header-meta {
+    display: flex;
+    align-items: center;
+    gap: $spacing-2;
+    flex-wrap: wrap;
+  }
+
+  &__admin-actions {
+    display: flex;
+    align-items: center;
+    gap: $spacing-2;
+    flex-wrap: wrap;
+    justify-content: flex-end;
   }
 
   &__id {
@@ -383,13 +621,71 @@ function rankDelta(playerName: string): number {
     color: $color-text-muted;
   }
 
-  &__week {
+  &__week,
+  &__hidden-pill {
     font-size: $font-size-xs;
     color: $color-text-muted;
     background: $color-bg-elevated;
     border: 1px solid $border-color;
     border-radius: $border-radius-sm;
     padding: 1px 5px;
+  }
+
+  &__hidden-pill {
+    color: $color-danger;
+    border-color: rgba($color-danger, 0.35);
+  }
+
+  &__date-input,
+  &__editor-input {
+    appearance: none;
+    background: rgba($color-bg-elevated, 0.7);
+    border: 1px solid rgba($border-color, 0.75);
+    border-radius: $border-radius-md;
+    color: $color-text;
+    font: inherit;
+    font-size: $font-size-sm;
+    padding: 7px 9px;
+  }
+
+  &__date-input {
+    width: 142px;
+  }
+
+  &__admin-btn {
+    appearance: none;
+    border: 1px solid rgba($border-color, 0.8);
+    background: rgba($color-bg-elevated, 0.75);
+    color: $color-text-muted;
+    border-radius: $border-radius-md;
+    padding: 7px 10px;
+    font: inherit;
+    font-size: $font-size-xs;
+    font-weight: $font-weight-semibold;
+    cursor: pointer;
+
+    &:hover:not(:disabled) {
+      color: $color-text;
+      border-color: rgba($color-primary-light, 0.4);
+    }
+
+    &:disabled {
+      opacity: 0.55;
+      cursor: not-allowed;
+    }
+
+    &--primary {
+      color: $color-text;
+      border-color: rgba($color-primary-light, 0.35);
+      background: rgba($color-primary, 0.18);
+    }
+  }
+
+  &__error {
+    margin: 0 0 $spacing-3;
+    color: $color-danger;
+    font-size: $font-size-xs;
+    font-weight: $font-weight-semibold;
   }
 
   &__players {
@@ -406,7 +702,7 @@ function rankDelta(playerName: string): number {
     font-size: $font-size-sm;
 
     &:nth-child(even) {
-      background:rgba(0,0,0,0.15);
+      background: rgba(0, 0, 0, 0.15);
     }
 
     &--place-1 .game-card__name {
@@ -473,7 +769,7 @@ function rankDelta(playerName: string): number {
     line-height: 1;
     flex-shrink: 0;
 
-    &--up   { color: $color-success; }
+    &--up { color: $color-success; }
     &--down { color: $color-danger; }
   }
 
@@ -483,12 +779,53 @@ function rankDelta(playerName: string): number {
     flex-shrink: 0;
     cursor: default;
   }
+
+  &__editor {
+    display: flex;
+    flex-direction: column;
+    gap: $spacing-2;
+  }
+
+  &__editor-hint {
+    font-size: $font-size-xs;
+    color: $color-text-muted;
+  }
+
+  &__editor-row {
+    display: grid;
+    grid-template-columns: 38px minmax(120px, 1fr) minmax(180px, 1.4fr) 76px;
+    gap: $spacing-2;
+    align-items: center;
+    padding: $spacing-2;
+    border: 1px solid rgba($border-color, 0.55);
+    background: rgba(0, 0, 0, 0.18);
+  }
+
+  &__drag-handle {
+    appearance: none;
+    border: 1px dashed rgba($border-color, 0.75);
+    background: rgba($color-bg-elevated, 0.55);
+    color: $color-text-muted;
+    border-radius: $border-radius-md;
+    height: 34px;
+    cursor: grab;
+    font-size: 16px;
+    line-height: 1;
+  }
+
+  &__editor-input--wide {
+    min-width: 0;
+  }
+
+  &__editor-input--placement {
+    text-align: center;
+  }
 }
 
 @media (max-width: $breakpoint-sm) {
   .game-card {
     &:hover {
-      transform: none; // avoid scale on mobile (causes layout issues)
+      transform: none;
     }
 
     &__art {
@@ -510,6 +847,21 @@ function rankDelta(playerName: string): number {
 
     &__header {
       padding: $spacing-1 $spacing-2;
+      flex-direction: column;
+    }
+
+    &__admin-actions {
+      width: 100%;
+      justify-content: flex-start;
+    }
+
+    &__editor-row {
+      grid-template-columns: 32px 1fr;
+    }
+
+    &__editor-input--wide,
+    &__editor-input--placement {
+      grid-column: 2;
     }
   }
 }
@@ -540,24 +892,13 @@ function rankDelta(playerName: string): number {
     &__art-other {
       flex: 1;
       margin: 2px;
-      & + & { border-left: 0; border-top: 1px solid $border-color; }
+
+      & + & {
+        border-left: 0;
+        border-top: 1px solid $border-color;
+      }
     }
   }
-}
-
-.tier-badge {
-  flex-shrink: 0;
-  font-size: 9px;
-  line-height: 1;
-
-  &.tier--god      { color: $tier-god-color; }
-  &.tier--legend   { color: $tier-legend-color; }
-  &.tier--diamond  { color: $tier-diamond-color; }
-  &.tier--platinum { color: $tier-platinum-color; }
-  &.tier--gold     { color: $tier-gold-color; }
-  &.tier--silver   { color: $tier-silver-color; }
-  &.tier--bronze   { color: $tier-bronze-color; }
-  &.tier--trash    { color: $tier-trash-color; }
 }
 </style>
 

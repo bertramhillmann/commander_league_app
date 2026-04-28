@@ -45,6 +45,7 @@ export interface ProcessedGame {
   gameId: string
   date: string | Date
   week: number
+  hidden?: boolean
   players: ProcessedGamePlayer[]
 }
 
