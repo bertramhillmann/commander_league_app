@@ -2,6 +2,7 @@
 import { computeGamePoints } from '~/utils/placements'
 import type { GameDocument } from '~/utils/gameTypes'
 import { compareGamesForDisplay, type ProcessedGame, type ProcessedGamePlayer } from '~/composables/useLeagueState'
+import { formatPlayerName } from '~/utils/playerNames'
 
 const { ensureSession, isAdmin } = useAuth()
 await ensureSession()
@@ -49,7 +50,7 @@ const displayGames = computed(() => {
 const playerNames = computed(() =>
   Array.from(
     new Set(
-      displayGames.value.flatMap((game) => game.players.map((player) => player.name)),
+      displayGames.value.flatMap((game) => game.players.map((player) => formatPlayerName(player.name))),
     ),
   ).sort((a, b) => a.localeCompare(b)),
 )
@@ -57,7 +58,7 @@ const playerNames = computed(() =>
 const filteredGames = computed(() => {
   if (!selectedPlayer.value) return displayGames.value
   return displayGames.value.filter((game) =>
-    game.players.some((player) => player.name === selectedPlayer.value),
+    game.players.some((player) => formatPlayerName(player.name) === selectedPlayer.value),
   )
 })
 
@@ -77,7 +78,11 @@ async function onGameUpdated() {
 }
 
 function toProcessedGame(game: GameDocument): ProcessedGame {
-  const computedPlayers = computeGamePoints(game.players) as ProcessedGamePlayer[]
+  const normalizedPlayers = game.players.map((player) => ({
+    ...player,
+    name: formatPlayerName(player.name),
+  }))
+  const computedPlayers = computeGamePoints(normalizedPlayers) as ProcessedGamePlayer[]
   return {
     gameId: game.gameId,
     date: game.date,

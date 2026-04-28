@@ -614,37 +614,80 @@ function buildPerformanceMetrics(
   }
 }
 
+function xpToLevelFromThresholds(xp: number, thresholds: number[]) {
+  let level = 1
+  for (let index = 1; index < thresholds.length; index++) {
+    if (xp >= thresholds[index]) level = index + 1
+    else break
+  }
+  return Math.min(level, 20)
+}
+
 // ── Table rows ────────────────────────────────────────────────────────────────
 
 const table = computed(() => {
-  const allPlayers = standings.value
+  const xpThresholds = settings.value.level.thresholds
+  const playerSummaries = Object.values(players.value).map((player) => {
+    const records = Object.values(gameRecords.value[player.name] ?? {})
+    const totalPoints = r3(records.reduce((sum, record) => sum + record.finalPoints, 0))
+    const gamesPlayed = records.length
+    const baseWins = records.filter((record) => record.placement === 1).length
+    const totalLPoints = r3(records.reduce((sum, record) => sum + record.lPoints, 0))
+    const xpPoints = r3(
+      Object.values(player.commanderXP).reduce(
+        (sum, xp) => sum + xpToLevelFromThresholds(xp, xpThresholds),
+        0,
+      ),
+    )
+
+    return {
+      name: player.name,
+      achievementPoints: player.achievementPoints,
+      xpPoints,
+      totalPoints,
+      gamesPlayed,
+      baseWins,
+      totalLPoints,
+    }
+  })
+
+  const playerTotalsMap = Object.fromEntries(
+    playerSummaries.map((player) => [
+      player.name,
+      { totalPoints: player.totalPoints, gamesPlayed: player.gamesPlayed },
+    ]),
+  )
   const usePerformanceModifier = settings.value.standings.usePerformanceModifier
 
   // League average points per game (used to normalise avgPerGame in the multiplier)
-  const totalGames  = allPlayers.reduce((s, p) => s + p.gamesPlayed, 0)
-  const totalPoints = allPlayers.reduce((s, p) => s + p.totalPoints, 0)
+  const totalGames  = playerSummaries.reduce((sum, player) => sum + player.gamesPlayed, 0)
+  const totalPoints = playerSummaries.reduce((sum, player) => sum + player.totalPoints, 0)
   const leagueAvgPerGame = totalGames > 0 ? totalPoints / totalGames : 1
 
-  const rows = allPlayers.map((p) => {
+  const rows = playerSummaries.map((player) => {
     const performance = buildPerformanceMetrics(
-      p.totalPoints,
-      p.gamesPlayed,
-      p.baseWins,
+      player.totalPoints,
+      player.gamesPlayed,
+      player.baseWins,
       leagueAvgPerGame,
       usePerformanceModifier,
     )
     const projection = calculateProjectedPoints(
-      { totalPoints: p.totalPoints, gamesPlayed: p.gamesPlayed },
-      players.value,
+      { totalPoints: player.totalPoints, gamesPlayed: player.gamesPlayed },
+      playerTotalsMap,
+    )
+    const totalScore = r3(
+      ((player.totalPoints + player.achievementPoints + player.xpPoints) * performance.perfMult) +
+      projection.projectedPoints,
     )
 
-    const tc = topCommander(p.name)
+    const tc = topCommander(player.name)
     return {
-      rank: p.rank,
-      name: p.name,
-      totalScore: p.totalScore,
-      projectedPoints: p.projectedPoints,
-      compensatedTotalPoints: p.compensatedTotalPoints,
+      rank: 0,
+      name: player.name,
+      totalScore,
+      projectedPoints: projection.projectedPoints,
+      compensatedTotalPoints: projection.compensatedTotalPoints,
       projectionMissingGames: projection.missingGames,
       projectionCappedMissingGames: projection.cappedMissingGames,
       projectionMaxGamesPlayed: projection.maxGamesPlayed,
@@ -655,10 +698,10 @@ const table = computed(() => {
       projectionGameValueFactor: projection.projectedGameValueFactor,
       projectionMaxProjectedGames: projection.maxProjectedGames,
       projectionSampleSmoothingGames: projection.sampleSmoothingGames,
-      totalPoints: p.totalPoints,
-      achievementPoints: p.achievementPoints,
-      xpPoints: p.xpPoints,
-      gamesPlayed: p.gamesPlayed,
+      totalPoints: player.totalPoints,
+      achievementPoints: player.achievementPoints,
+      xpPoints: player.xpPoints,
+      gamesPlayed: player.gamesPlayed,
       winRate: performance.winRate,
       avgPerGame: performance.avgPerGame,
       leagueAvgPerGame: performance.leagueAvgPerGame,
@@ -669,12 +712,19 @@ const table = computed(() => {
       avgFraction: performance.avgFraction,
       avgTerm: performance.avgTerm,
       topCommander: tc,
-      topCommanderTier: tc ? playerCommanderTier(p.name, tc) : null,
-      totalLPoints: p.totalLPoints,
+      topCommanderTier: tc ? playerCommanderTier(player.name, tc) : null,
+      totalLPoints: player.totalLPoints,
     }
   })
 
-  return rows.sort((a, b) => {
+  const rankedRows = [...rows]
+    .sort((a, b) => {
+      if (b.totalScore !== a.totalScore) return b.totalScore - a.totalScore
+      return a.name.localeCompare(b.name)
+    })
+    .map((row, index) => ({ ...row, rank: index + 1 }))
+
+  return rankedRows.sort((a, b) => {
     const direction = sortDirection.value === 'desc' ? -1 : 1
     const delta = a[sortKey.value] - b[sortKey.value]
 

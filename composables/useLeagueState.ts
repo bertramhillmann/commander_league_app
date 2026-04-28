@@ -16,6 +16,7 @@ import { formatPlayerName } from '~/utils/playerNames'
 import { getArchEnemySummary } from '~/utils/archEnemy'
 import { getFeaturedPlayerName } from '~/utils/featuredPlayer'
 import { normalizeDeckIdentityKey } from '~/utils/deckLinks'
+import type { LeagueSettingsDocument } from '~/utils/leagueSettings'
 import type { CommanderTitleId } from '~/utils/titles'
 
 // ─── Types ────────────────────────────────────────────────────────────────────
@@ -206,7 +207,20 @@ export function compareGamesForDisplay(
 }
 
 export function getXpPoints(player: PlayerState) {
-  return Object.values(player.commanderXP).reduce((sum, xp) => sum + xpToLevel(xp), 0)
+  return getXpPointsWithThresholds(player, getResolvedLeagueSettings().level.thresholds)
+}
+
+function getXpPointsWithThresholds(player: Pick<PlayerState, 'commanderXP'>, thresholds: number[]) {
+  return Object.values(player.commanderXP).reduce((sum, xp) => sum + xpToLevelWithThresholds(xp, thresholds), 0)
+}
+
+function xpToLevelWithThresholds(xp: number, thresholds: number[]) {
+  let level = 1
+  for (let index = 1; index < thresholds.length; index++) {
+    if (xp >= thresholds[index]) level = index + 1
+    else break
+  }
+  return Math.min(level, 20)
 }
 
 export function getLeagueAveragePerGame(playerMap: Record<string, PlayerState>) {
@@ -295,8 +309,10 @@ export function calculateProjectedPoints(
 export function getLeagueStandingMetrics(
   player: PlayerState,
   playerMap: Record<string, PlayerState>,
+  settings?: LeagueSettingsDocument | null,
 ): LeagueStandingMetrics {
-  const xpPoints = getXpPoints(player)
+  const resolvedSettings = getResolvedLeagueSettings(settings)
+  const xpPoints = getXpPointsWithThresholds(player, resolvedSettings.level.thresholds)
   const avgPerGame = player.gamesPlayed > 0 ? round3(player.totalPoints / player.gamesPlayed) : 0
   const leagueAvgPerGame = getLeagueAveragePerGame(playerMap)
   const projection = calculateProjectedPoints(player, playerMap)
@@ -308,7 +324,7 @@ export function getLeagueStandingMetrics(
   const winRateTerm = round3(PERF_WIN_RATE_WEIGHT * (winRateFraction / EXPECTED_WIN_RATE))
   const avgTerm = round3(PERF_AVG_WEIGHT * avgFraction)
   const perfMultRaw = round3(PERF_BASE_WEIGHT + winRateTerm + avgTerm)
-  const usePerformanceModifier = getResolvedLeagueSettings().standings.usePerformanceModifier
+  const usePerformanceModifier = resolvedSettings.standings.usePerformanceModifier
   const perfMult = usePerformanceModifier && player.gamesPlayed > 0
     ? Math.min(PERF_MULT_MAX, Math.max(PERF_MULT_MIN, perfMultRaw))
     : 1
@@ -387,7 +403,10 @@ export function getPlayerCommanderMetrics(
   const winRate = plays > 0 ? Math.round((first / plays) * 100) : 0
   const player = players[playerName]
   const achievementPoints = getPlayerCommanderAchievementPoints(player, records, commanderName)
-  const xpPoints = xpToLevel(player?.commanderXP?.[commanderName] ?? 0)
+  const xpPoints = xpToLevelWithThresholds(
+    player?.commanderXP?.[commanderName] ?? 0,
+    getResolvedLeagueSettings().level.thresholds,
+  )
 
   return {
     plays,
@@ -559,6 +578,7 @@ export function useLeagueState() {
   const loaded = useLoadedState()
   const loading = useLoadingState()
   const error = useErrorState()
+  const { rawSettings } = useLeagueSettings()
 
   async function init(force = false) {
     if (loaded.value && !force) return
@@ -697,7 +717,7 @@ export function useLeagueState() {
         const allOthers2nd = computed.every((p) => p.placement === 1 || p.placement === 2)
 
         // Snapshot league ranks before this game using the shared dashboard metric.
-        const rankBeforeList = buildLeagueStandings(playerMap)
+        const rankBeforeList = buildLeagueStandings(playerMap, rawSettings.value)
         const rankBeforeMap: Record<string, number> = {}
         const scoreBeforeMap: Record<string, number> = {}
         for (const p of game.players) {
@@ -1064,7 +1084,7 @@ export function useLeagueState() {
         }
 
         // Compute league ranks after this game with the centralized dashboard metric.
-        const rankAfterList = buildLeagueStandings(playerMap)
+        const rankAfterList = buildLeagueStandings(playerMap, rawSettings.value)
         snapshotMap[game.gameId] = Object.fromEntries(
           rankAfterList.map((entry) => [
             entry.name,
@@ -1151,11 +1171,15 @@ export function useLeagueState() {
           playerMap[playerName].commanderTiers[cmdName] = tier
 
           const cumulativeRecords: PlayerGameRecord[] = []
+          let cumulativeLasts = 0
+          let cumulativeWins = 0
+          let cumulativeBasePoints = 0
           for (const record of data.records) {
             cumulativeRecords.push(record)
             const cumulativeGames = cumulativeRecords.length
-            const cumulativeBasePoints = cumulativeRecords.reduce((sum, entry) => sum + entry.basePoints, 0)
-            const cumulativeWins = cumulativeRecords.filter((entry) => entry.placement === 1).length
+            cumulativeBasePoints += record.basePoints
+            if (record.placement === 1) cumulativeWins++
+            if (record.placement === record.playerCount) cumulativeLasts++
             const cumulativeScore = blendScore(
               cumulativeBasePoints / cumulativeGames,
               cumulativeWins / cumulativeGames,
@@ -1172,70 +1196,53 @@ export function useLeagueState() {
             recordsMap[playerName][record.gameId].achievements.push(entry)
             ps.earnedAchievements.push(entry)
             ps.achievementPoints = round3(ps.achievementPoints + (getAchievementDefinition(achId)?.points ?? 0))
-          }
 
-          // Hit rock bottom: 0% win rate after 5+ games
-          if (data.games >= 5 && data.totalPoints === 0) {
-            const key = `${playerName}:${cmdName}:hit_rock_bottom`
-            if (!cmdOneTime.has(key)) {
-              cmdOneTime.add(key)
-              const entry: EarnedAchievement = { id: 'hit_rock_bottom', gameId: 'post', commander: cmdName }
-              ps.earnedAchievements.push(entry)
-              ps.achievementPoints = round3(ps.achievementPoints + (getAchievementDefinition('hit_rock_bottom')?.points ?? 0))
+            // Hit rock bottom: reaches 5 games with 0 total base points.
+            if (cumulativeGames >= 5 && cumulativeBasePoints === 0) {
+              const rockBottomKey = `${playerName}:${cmdName}:hit_rock_bottom`
+              if (!cmdOneTime.has(rockBottomKey)) {
+                cmdOneTime.add(rockBottomKey)
+                const entry: EarnedAchievement = { id: 'hit_rock_bottom', gameId: record.gameId, commander: cmdName }
+                recordsMap[playerName][record.gameId].achievements.push(entry)
+                ps.earnedAchievements.push(entry)
+                ps.achievementPoints = round3(ps.achievementPoints + (getAchievementDefinition('hit_rock_bottom')?.points ?? 0))
+              }
             }
-          }
 
-          if (data.lasts >= 10) {
-            const key = `${playerName}:${cmdName}:cursed_commander`
-            if (!cmdOneTime.has(key)) {
-              cmdOneTime.add(key)
-              const entry: EarnedAchievement = { id: 'cursed_commander', gameId: 'post', commander: cmdName }
-              ps.earnedAchievements.push(entry)
-              ps.achievementPoints = round3(ps.achievementPoints + (getAchievementDefinition('cursed_commander')?.points ?? 0))
+            // Cursed commander: reaches 10 last-place finishes with this commander.
+            if (cumulativeLasts >= 10) {
+              const cursedKey = `${playerName}:${cmdName}:cursed_commander`
+              if (!cmdOneTime.has(cursedKey)) {
+                cmdOneTime.add(cursedKey)
+                const entry: EarnedAchievement = { id: 'cursed_commander', gameId: record.gameId, commander: cmdName }
+                recordsMap[playerName][record.gameId].achievements.push(entry)
+                ps.earnedAchievements.push(entry)
+                ps.achievementPoints = round3(ps.achievementPoints + (getAchievementDefinition('cursed_commander')?.points ?? 0))
+              }
             }
-          }
 
-          if (data.firstGameWon && data.games >= 5 && data.wins === 1) {
-            const key = `${playerName}:${cmdName}:false_promise`
-            if (!cmdOneTime.has(key)) {
-              cmdOneTime.add(key)
-              const entry: EarnedAchievement = { id: 'false_promise', gameId: 'post', commander: cmdName }
-              ps.earnedAchievements.push(entry)
-              ps.achievementPoints = round3(ps.achievementPoints + (getAchievementDefinition('false_promise')?.points ?? 0))
+            // False promise: reaches 5 games while still only having the first-game win.
+            if (data.firstGameWon && cumulativeGames >= 5 && cumulativeWins === 1) {
+              const falsePromiseKey = `${playerName}:${cmdName}:false_promise`
+              if (!cmdOneTime.has(falsePromiseKey)) {
+                cmdOneTime.add(falsePromiseKey)
+                const entry: EarnedAchievement = { id: 'false_promise', gameId: record.gameId, commander: cmdName }
+                recordsMap[playerName][record.gameId].achievements.push(entry)
+                ps.earnedAchievements.push(entry)
+                ps.achievementPoints = round3(ps.achievementPoints + (getAchievementDefinition('false_promise')?.points ?? 0))
+              }
             }
-          }
 
-          if (data.games >= 50) {
-            const key = `${playerName}:${cmdName}:lapdog`
-            if (!cmdOneTime.has(key)) {
-              cmdOneTime.add(key)
-              const entry: EarnedAchievement = { id: 'lapdog', gameId: 'post', commander: cmdName }
-              ps.earnedAchievements.push(entry)
-              ps.achievementPoints = round3(ps.achievementPoints + (getAchievementDefinition('lapdog')?.points ?? 0))
-            }
-          }
-        }
-      }
-
-      if (processedGames.length > 0) {
-        const finalStandings = buildLeagueStandings(playerMap)
-        const latestGameId = processedGames[processedGames.length - 1]?.gameId
-
-        if (latestGameId) {
-          snapshotMap[latestGameId] = Object.fromEntries(
-            finalStandings.map((entry) => [
-              entry.name,
-              { rank: entry.rank, totalScore: entry.totalScore },
-            ]),
-          )
-
-          for (const participant of processedGames[processedGames.length - 1]?.players ?? []) {
-            const finalEntry = snapshotMap[latestGameId][participant.name]
-            if (!finalEntry) continue
-
-            if (recordsMap[participant.name]?.[latestGameId]) {
-              recordsMap[participant.name][latestGameId].ratingAfter = finalEntry.totalScore
-              recordsMap[participant.name][latestGameId].rankAfter = finalEntry.rank
+            // Lapdog: reaches 50 games with this commander.
+            if (cumulativeGames >= 50) {
+              const lapdogKey = `${playerName}:${cmdName}:lapdog`
+              if (!cmdOneTime.has(lapdogKey)) {
+                cmdOneTime.add(lapdogKey)
+                const entry: EarnedAchievement = { id: 'lapdog', gameId: record.gameId, commander: cmdName }
+                recordsMap[playerName][record.gameId].achievements.push(entry)
+                ps.earnedAchievements.push(entry)
+                ps.achievementPoints = round3(ps.achievementPoints + (getAchievementDefinition('lapdog')?.points ?? 0))
+              }
             }
           }
         }
@@ -1265,7 +1272,7 @@ export function useLeagueState() {
     await pendingLeagueInit
   }
 
-  const standings = computed(() => buildLeagueStandings(players.value))
+  const standings = computed(() => buildLeagueStandings(players.value, rawSettings.value))
 
   async function refresh() {
     await init(true)
@@ -1302,12 +1309,15 @@ function absWeek(date: Date): number {
   return date.getUTCFullYear() * 53 + isoWeek(date)
 }
 
-function buildLeagueStandings(playerMap: Record<string, PlayerState>): LeagueStanding[] {
+function buildLeagueStandings(
+  playerMap: Record<string, PlayerState>,
+  settings?: LeagueSettingsDocument | null,
+): LeagueStanding[] {
   const allPlayers = Object.values(playerMap)
 
   return allPlayers
     .map((player) => {
-      const metrics = getLeagueStandingMetrics(player, playerMap)
+      const metrics = getLeagueStandingMetrics(player, playerMap, settings)
 
       return {
         name: player.name,

@@ -216,6 +216,7 @@ import type { EditableGamePlayer, GameDocument } from '~/utils/gameTypes'
 import { TIER_META, type Tier } from '~/utils/tiers'
 import { getAchievementDefinition } from '~/utils/achievements'
 import { getHistoricalCommanderTierAtGame } from '~/utils/historicalCommanderTier'
+import { formatPlayerName } from '~/utils/playerNames'
 
 const props = withDefaults(defineProps<{
   game: ProcessedGame
@@ -266,7 +267,12 @@ const formattedDate = computed(() =>
 )
 
 const sortedPlayers = computed(() =>
-  [...props.game.players].sort((a, b) => a.placement - b.placement),
+  [...props.game.players]
+    .map((player) => ({
+      ...player,
+      name: formatPlayerName(player.name),
+    }))
+    .sort((a, b) => a.placement - b.placement),
 )
 
 function placementLabel(p: number) {
@@ -405,7 +411,7 @@ function resetDraft() {
   draftDate.value = toDateInputValue(props.adminRawGame?.date ?? props.game.date)
   draftPlayers.value = [...(props.adminRawGame?.players ?? props.game.players)]
     .map((player) => ({
-      name: player.name,
+      name: formatPlayerName(player.name),
       commander: player.commander,
       placement: player.placement,
       eliminations: player.eliminations ?? null,
