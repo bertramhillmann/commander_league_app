@@ -8,6 +8,7 @@ export interface ISettings extends Document {
     xpPerGame?: Record<string, number>
     winBonusXp?: Record<string, number>
     thresholds?: number[]
+    pointsPerLevel?: number
   }
   standings?: {
     usePerformanceModifier?: boolean

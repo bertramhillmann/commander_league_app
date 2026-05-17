@@ -164,6 +164,7 @@ function buildPlayerState(playerName: string, records: PlayerGameRecord[]): Play
     gamesPlayed: records.length,
     wins: baseWins,
     commanderXP: {},
+    commanderRested: {},
     commanderTiers: {},
     earnedAchievements: [],
     achievementPoints: 0,

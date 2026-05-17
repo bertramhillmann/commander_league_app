@@ -7,8 +7,8 @@ import { formatPlayerName } from '~/utils/playerNames'
 const { ensureSession, isAdmin } = useAuth()
 await ensureSession()
 
-const { games, loading, error, init, refresh: refreshLeagueState } = useLeagueState()
-await init()
+const { games, loading, loaded, error, init, refresh: refreshLeagueState, progress } = useLeagueState()
+const hasMounted = ref(false)
 
 const selectedPlayer = ref<string | null>(null)
 
@@ -17,24 +17,27 @@ const {
   pending: adminGamesLoading,
   error: adminGamesError,
   refresh: refreshAdminGames,
-} = await useFetch<GameDocument[]>('/api/games', {
+} = useFetch<GameDocument[]>('/api/games', {
   query: { includeHidden: '1' },
   default: () => [],
   immediate: isAdmin.value,
+  lazy: true,
 })
 
 const {
   data: allPlayers,
-} = await useFetch<string[]>('/api/players', {
+} = useFetch<string[]>('/api/players', {
   default: () => [],
   immediate: isAdmin.value,
+  lazy: true,
 })
 
 const {
   data: allCommanders,
-} = await useFetch<string[]>('/api/commanders', {
+} = useFetch<string[]>('/api/commanders', {
   default: () => [],
   immediate: isAdmin.value,
+  lazy: true,
 })
 
 const displayGames = computed(() => {
@@ -62,13 +65,30 @@ const filteredGames = computed(() => {
   )
 })
 
-const pageLoading = computed(() =>
-  loading.value || (isAdmin.value && adminGamesLoading.value),
-)
-
 const pageError = computed(() =>
   error.value || (isAdmin.value ? adminGamesError.value?.message ?? null : null),
 )
+
+const pageLoading = computed(() =>
+  !pageError.value && (!hasMounted.value || loading.value || !loaded.value || (isAdmin.value && adminGamesLoading.value)),
+)
+
+const progressPercent = computed(() => {
+  if (progress.value.total <= 0) return 8
+  return Math.max(8, Math.min(100, Math.round((progress.value.current / progress.value.total) * 100)))
+})
+
+const progressLabel = computed(() => {
+  if (progress.value.total <= 0) return 'Preparing league data...'
+  return `${progress.value.current}/${progress.value.total} games computed`
+})
+
+onMounted(() => {
+  hasMounted.value = true
+  if (!loaded.value) {
+    void init()
+  }
+})
 
 async function onGameUpdated() {
   await Promise.all([
@@ -103,11 +123,17 @@ function isoWeek(date: Date) {
 <template>
   <div class="page">
     <header class="game-list__header">
-      <NuxtLink to="/" class="back-link">← Home</NuxtLink>
+      <NuxtLink to="/" class="back-link">&larr; Home</NuxtLink>
       <h1>Games</h1>
     </header>
 
-    <div v-if="pageLoading" class="state-msg">Loading…</div>
+    <div v-if="pageLoading" class="page-loader" aria-live="polite" aria-busy="true">
+      <div class="page-loader__dots"><span /><span /><span /></div>
+      <p class="page-loader__label">{{ progressLabel }}</p>
+      <div class="page-loader__track">
+        <div class="page-loader__fill" :style="{ width: `${progressPercent}%` }" />
+      </div>
+    </div>
     <div v-else-if="pageError" class="state-msg state-msg--error">Failed to load games.</div>
 
     <template v-else>

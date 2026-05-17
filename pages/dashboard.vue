@@ -2,6 +2,13 @@
   <div class="page page--dashboard">
     <h1 class="dashboard__title">Standings</h1>
 
+    <div v-if="pageLoading" class="dash-loader" aria-live="polite" aria-busy="true">
+      <span class="dash-loader__dot" />
+      <span class="dash-loader__dot" />
+      <span class="dash-loader__dot" />
+    </div>
+
+    <template v-else>
     <div class="standings-wrap">
     <table class="standings">
       <thead>
@@ -254,6 +261,35 @@
           <PlayersArchEnemyCard :summary="loggedInArchEnemy" />
         </div>
       </div>
+
+    </section>
+
+    <section v-if="spotlightStatTiles.length" class="dashboard__spotlight-stats-section">
+      <div class="dashboard__spotlight-stats">
+        <NuxtLink
+          v-for="tile in spotlightStatTiles"
+          :key="tile.key"
+          class="dashboard__spotlight-stat"
+          :to="`/players/${encodeURIComponent(tile.name)}`"
+        >
+          <div class="dashboard__spotlight-stat-label">{{ tile.label }}</div>
+          <div class="dashboard__spotlight-stat-player">
+            <img
+              v-if="tile.imageUrl"
+              :src="tile.imageUrl"
+              :alt="tile.name"
+              class="dashboard__spotlight-stat-avatar"
+            />
+            <span
+              v-else
+              class="dashboard__spotlight-stat-avatar dashboard__spotlight-stat-avatar--fallback"
+            >{{ tile.initials }}</span>
+            <span class="dashboard__spotlight-stat-name">{{ tile.name }}</span>
+          </div>
+          <div class="dashboard__spotlight-stat-value">{{ tile.value }}</div>
+          <div class="dashboard__spotlight-stat-detail">{{ tile.detail }}</div>
+        </NuxtLink>
+      </div>
     </section>
 
     <section v-if="performanceChartData.series.length > 0" class="dashboard__perf-section">
@@ -281,9 +317,32 @@
         :labels="totalPointsChartData.labels"
         :series="totalPointsChartData.series"
       />
+      <div v-if="currentChartStandings.length" class="dashboard__perf-ranking">
+        <NuxtLink
+          v-for="player in currentChartStandings"
+          :key="`${activeChart}-${player.name}`"
+          class="dashboard__perf-player"
+          :to="`/players/${encodeURIComponent(player.name)}`"
+        >
+          <span class="dashboard__perf-player-rank">{{ rankLabel(player.rank) }}</span>
+          <img
+            v-if="player.imageUrl"
+            :src="player.imageUrl"
+            :alt="player.name"
+            class="dashboard__perf-player-icon"
+          />
+          <span
+            v-else
+            class="dashboard__perf-player-icon dashboard__perf-player-icon--fallback"
+          >{{ player.initials }}</span>
+          <span class="dashboard__perf-player-name">{{ player.name }}</span>
+          <span class="dashboard__perf-player-points">{{ fmt(player.points) }}</span>
+        </NuxtLink>
+      </div>
     </section>
 
     <CommandersTopCommander />
+    </template>
 
     <Teleport to="body">
       <div
@@ -293,6 +352,7 @@
       >
         <div class="mult-tooltip__title">Catch-Up</div>
         <table class="mult-tooltip__table">
+          <tbody>
           <tr>
             <td class="mult-tooltip__label">Target</td>
             <td class="mult-tooltip__op"></td>
@@ -329,6 +389,7 @@
             <td class="mult-tooltip__detail">{{ catchupHover.message }}</td>
             <td class="mult-tooltip__value">{{ catchupHover.gamesNeededLabel }}</td>
           </tr>
+          </tbody>
         </table>
       </div>
     </Teleport>
@@ -377,6 +438,7 @@
       >
         <div class="mult-tooltip__title">Performance ×Mult</div>
         <table class="mult-tooltip__table">
+          <tbody>
           <tr>
             <td class="mult-tooltip__label">Base</td>
             <td class="mult-tooltip__op"></td>
@@ -407,6 +469,7 @@
             <td class="mult-tooltip__detail mult-tooltip__label--clamped">range [0.5 – 1.5]</td>
             <td class="mult-tooltip__value mult-tooltip__label--clamped">{{ fmt(multHover.perfMult) }}</td>
           </tr>
+          </tbody>
         </table>
       </div>
     </Teleport>
@@ -419,6 +482,7 @@
       >
         <div class="mult-tooltip__title">Compensation</div>
         <table class="mult-tooltip__table">
+          <tbody>
           <tr>
             <td class="mult-tooltip__label">Games</td>
             <td class="mult-tooltip__op"></td>
@@ -467,6 +531,7 @@
             <td class="mult-tooltip__detail">added after ×Mult</td>
             <td class="mult-tooltip__value">{{ fmt(compHover.projectedPoints) }}</td>
           </tr>
+          </tbody>
         </table>
       </div>
     </Teleport>
@@ -490,7 +555,7 @@ import {
 } from '~/utils/placements'
 import { computeGlobalCommanderBaseline, computePlayerCommanderTier, type Tier } from '~/utils/tiers'
 
-const { commanders, gameRecords, games, leagueSnapshots, players, standings } = useLeagueState()
+const { commanders, gameRecords, games, leagueSnapshots, players, standings, loading, loaded } = useLeagueState()
 const { settings } = useLeagueSettings()
 const { user, ensureSession } = useAuth()
 
@@ -506,8 +571,28 @@ type SortKey =
   | 'avgPerGame'
   | 'totalLPoints'
 
+type ChartStandingRow = {
+  rank: number
+  name: string
+  points: number
+  imageUrl: string
+  initials: string
+}
+
+type SpotlightStatTile = {
+  key: string
+  label: string
+  name: string
+  value: string
+  detail: string
+  imageUrl: string
+  initials: string
+}
+
 const sortKey = ref<SortKey>('totalScore')
 const sortDirection = ref<'desc' | 'asc'>('desc')
+const hasMounted = ref(false)
+const pageLoading = computed(() => !hasMounted.value || loading.value || !loaded.value)
 const chronologicalGames = computed(() => [...games.value].sort(compareGamesChronological))
 const playerPortraitModules = import.meta.glob('../assets/img/*.png', { eager: true, import: 'default' })
 const playerPortraits = Object.fromEntries(
@@ -529,6 +614,7 @@ const loggedInArchEnemy = computed(() => {
 const loggedInPlayerName = computed(() => (user.value ? formatPlayerName(user.value) : ''))
 
 onMounted(async () => {
+  hasMounted.value = true
   await ensureSession()
 })
 
@@ -627,6 +713,7 @@ function xpToLevelFromThresholds(xp: number, thresholds: number[]) {
 
 const table = computed(() => {
   const xpThresholds = settings.value.level.thresholds
+  const xpPointsPerLevel = settings.value.level.pointsPerLevel
   const playerSummaries = Object.values(players.value).map((player) => {
     const records = Object.values(gameRecords.value[player.name] ?? {})
     const totalPoints = r3(records.reduce((sum, record) => sum + record.finalPoints, 0))
@@ -635,7 +722,7 @@ const table = computed(() => {
     const totalLPoints = r3(records.reduce((sum, record) => sum + record.lPoints, 0))
     const xpPoints = r3(
       Object.values(player.commanderXP).reduce(
-        (sum, xp) => sum + xpToLevelFromThresholds(xp, xpThresholds),
+        (sum, xp) => sum + (xpToLevelFromThresholds(xp, xpThresholds) * xpPointsPerLevel),
         0,
       ),
     )
@@ -784,6 +871,97 @@ const honorableMentions = computed(() =>
     }),
 )
 
+const spotlightStatTiles = computed<SpotlightStatTile[]>(() => {
+  const playerNames = standings.value.map((player) => player.name)
+
+  const buildPodWinTile = (playerCount: 3 | 4 | 5): SpotlightStatTile | null => {
+    const entries = playerNames
+      .map((playerName) => {
+        const records = Object.values(gameRecords.value[playerName] ?? {})
+          .filter((record) => record.playerCount === playerCount)
+        const wins = records.filter((record) => record.placement === 1).length
+        const gamesPlayed = records.length
+        const winRate = gamesPlayed > 0 ? wins / gamesPlayed : 0
+
+        return {
+          name: playerName,
+          wins,
+          gamesPlayed,
+          winRate,
+        }
+      })
+      .filter((entry) => entry.wins > 0)
+      .sort((a, b) => {
+        if (b.wins !== a.wins) return b.wins - a.wins
+        if (b.winRate !== a.winRate) return b.winRate - a.winRate
+        if (a.gamesPlayed !== b.gamesPlayed) return a.gamesPlayed - b.gamesPlayed
+        return a.name.localeCompare(b.name)
+      })
+
+    const leader = entries[0]
+    if (!leader) return null
+
+    return {
+      key: `wins-${playerCount}`,
+      label: `${playerCount}-Player Winner`,
+      name: leader.name,
+      value: pct(leader.winRate),
+      detail: `${leader.wins} win${leader.wins === 1 ? '' : 's'} in ${leader.gamesPlayed} pod${leader.gamesPlayed === 1 ? '' : 's'}`,
+      imageUrl: getPlayerPortrait(leader.name),
+      initials: leader.name.slice(0, 2).toUpperCase(),
+    }
+  }
+
+  const buildPlacementRateTile = (
+    key: string,
+    label: string,
+    predicate: (placement: number, playerCount: number) => boolean,
+  ): SpotlightStatTile | null => {
+    const entries = playerNames
+      .map((playerName) => {
+        const records = Object.values(gameRecords.value[playerName] ?? {})
+        const matches = records.filter((record) => predicate(record.placement, record.playerCount)).length
+        const gamesPlayed = records.length
+        const rate = gamesPlayed > 0 ? matches / gamesPlayed : 0
+
+        return {
+          name: playerName,
+          matches,
+          gamesPlayed,
+          rate,
+        }
+      })
+      .filter((entry) => entry.matches > 0)
+      .sort((a, b) => {
+        if (b.rate !== a.rate) return b.rate - a.rate
+        if (b.matches !== a.matches) return b.matches - a.matches
+        if (a.gamesPlayed !== b.gamesPlayed) return a.gamesPlayed - b.gamesPlayed
+        return a.name.localeCompare(b.name)
+      })
+
+    const leader = entries[0]
+    if (!leader) return null
+
+    return {
+      key,
+      label,
+      name: leader.name,
+      value: pct(leader.rate),
+      detail: `${leader.matches} of ${leader.gamesPlayed} game${leader.gamesPlayed === 1 ? '' : 's'}`,
+      imageUrl: getPlayerPortrait(leader.name),
+      initials: leader.name.slice(0, 2).toUpperCase(),
+    }
+  }
+
+  return [
+    buildPodWinTile(4),
+    buildPodWinTile(5),
+    buildPodWinTile(3),
+    buildPlacementRateTile('second-place', 'Most 2nd Place', (placement) => placement === 2),
+    buildPlacementRateTile('last-place', 'Most Last Place', (placement, playerCount) => placement === playerCount),
+  ].filter((tile): tile is SpotlightStatTile => tile !== null)
+})
+
 function r3(n: number): number { return Math.round(n * 1000) / 1000 }
 
 // ── Performance timeline chart ────────────────────────────────────────────────
@@ -878,6 +1056,41 @@ const totalPointsChartData = computed<{ labels: string[], series: PerformancePla
   return { labels, series }
 })
 
+const currentChartStandings = computed<ChartStandingRow[]>(() => {
+  const chartData = activeChart.value === 'performance'
+    ? performanceChartData.value
+    : totalPointsChartData.value
+
+  const standingOrder = new Map(
+    standings.value.map((player, index) => [player.name, index]),
+  )
+
+  return chartData.series
+    .map((series) => {
+      const latestValue = [...series.data].reverse().find((value): value is number => typeof value === 'number')
+      return latestValue === undefined
+        ? null
+        : {
+            name: series.name,
+            points: latestValue,
+            imageUrl: getPlayerPortrait(series.name),
+            initials: series.name.slice(0, 2).toUpperCase(),
+          }
+    })
+    .filter((player): player is Omit<ChartStandingRow, 'rank'> => player !== null)
+    .sort((a, b) => {
+      if (b.points !== a.points) return b.points - a.points
+      const aStanding = standingOrder.get(a.name) ?? Number.MAX_SAFE_INTEGER
+      const bStanding = standingOrder.get(b.name) ?? Number.MAX_SAFE_INTEGER
+      if (aStanding !== bStanding) return aStanding - bStanding
+      return a.name.localeCompare(b.name)
+    })
+    .map((player, index) => ({
+      rank: index + 1,
+      ...player,
+    }))
+})
+
 function getPlayerPortrait(playerName: string) {
   return playerPortraits[playerName.toLowerCase()] ?? ''
 }
@@ -906,6 +1119,10 @@ function fmt(n: number | null | undefined): string {
   if (typeof n !== 'number' || Number.isNaN(n)) return '0'
   if (n === 0) return '0'
   return n % 1 === 0 ? String(n) : n.toFixed(3).replace(/\.?0+$/, '')
+}
+
+function pct(n: number): string {
+  return `${(n * 100).toFixed(1).replace(/\.0$/, '')}%`
 }
 
 // ── Commander tooltip ─────────────────────────────────────────────────────────
@@ -1271,6 +1488,29 @@ function onCompLeave() {
 </script>
 
 <style lang="scss" scoped>
+.dash-loader {
+  display: flex;
+  justify-content: center;
+  gap: 6px;
+  padding: $spacing-12 0;
+
+  &__dot {
+    width: 5px;
+    height: 5px;
+    border-radius: 50%;
+    background: rgba($color-primary-light, 0.5);
+    animation: dash-dot 1.6s ease-in-out infinite;
+
+    &:nth-child(2) { animation-delay: 0.18s; }
+    &:nth-child(3) { animation-delay: 0.36s; }
+  }
+}
+
+@keyframes dash-dot {
+  0%, 70%, 100% { opacity: 0.2; }
+  35% { opacity: 0.75; }
+}
+
 .dashboard__title {
   font-size: $font-size-xl;
   font-weight: $font-weight-bold;
@@ -1538,6 +1778,101 @@ function onCompLeave() {
     background: rgba(0, 0, 0, 0.25);
     align-items: flex-end;
   }
+
+  &-stats {
+    display: grid;
+    grid-template-columns: repeat(5, minmax(0, 1fr));
+    gap: $spacing-3;
+  }
+
+  &-stat {
+    aspect-ratio: 1 / 1;
+    min-height: 0;
+    display: flex;
+    flex-direction: column;
+    justify-content: space-between;
+    gap: $spacing-2;
+    padding: $spacing-3;
+    border-radius: $border-radius-lg;
+    border: 1px solid rgba($color-primary-light, 0.18);
+    background:
+      linear-gradient(180deg, rgba($color-primary, 0.08), rgba(255, 255, 255, 0.02)),
+      rgba(7, 10, 16, 0.72);
+    box-shadow:
+      inset 0 0 0 1px rgba(255, 255, 255, 0.02),
+      0 10px 24px rgba(0, 0, 0, 0.16);
+    color: inherit;
+    text-decoration: none;
+    transition: transform $transition-fast, border-color $transition-fast, background $transition-fast;
+
+    &:hover {
+      transform: translateY(-2px);
+      border-color: rgba($color-primary-light, 0.34);
+      background:
+        linear-gradient(180deg, rgba($color-primary, 0.14), rgba(255, 255, 255, 0.03)),
+        rgba(7, 10, 16, 0.8);
+    }
+  }
+
+  &-stat-label {
+    font-size: 10px;
+    text-transform: uppercase;
+    letter-spacing: 0.1em;
+    font-weight: $font-weight-semibold;
+    color: rgba($color-primary-light, 0.82);
+    line-height: 1.35;
+  }
+
+  &-stat-player {
+    display: flex;
+    align-items: center;
+    gap: $spacing-2;
+    min-width: 0;
+  }
+
+  &-stat-avatar {
+    width: 42px;
+    height: 42px;
+    border-radius: $border-radius-md;
+    object-fit: cover;
+    object-position: center top;
+    border: 1px solid rgba($color-primary-light, 0.26);
+    flex-shrink: 0;
+
+    &--fallback {
+      display: inline-grid;
+      place-items: center;
+      background:
+        radial-gradient(circle at top, rgba($color-primary-light, 0.18), transparent 60%),
+        rgba(18, 22, 30, 0.95);
+      color: $color-text;
+      font-size: 11px;
+      font-weight: $font-weight-bold;
+      letter-spacing: 0.08em;
+      text-transform: uppercase;
+    }
+  }
+
+  &-stat-name {
+    min-width: 0;
+    font-size: $font-size-sm;
+    font-weight: $font-weight-semibold;
+    line-height: 1.2;
+    color: $color-text;
+  }
+
+  &-stat-value {
+    font-size: clamp(1.4rem, 2vw, 1.8rem);
+    font-weight: $font-weight-bold;
+    line-height: 1;
+    color: $color-secondary;
+  }
+
+  &-stat-detail {
+    font-size: 10px;
+    line-height: 1.4;
+    color: rgba($color-text-muted, 0.95);
+  }
 }
 
 .dashboard__perf-section {
@@ -1545,6 +1880,10 @@ function onCompLeave() {
   display: flex;
   flex-direction: column;
   gap: $spacing-3;
+}
+
+.dashboard__spotlight-stats-section {
+  margin: 0 0 $spacing-8;
 }
 
 .dashboard__perf-switcher {
@@ -1572,6 +1911,76 @@ function onCompLeave() {
     color: $color-text;
     border-color: rgba($color-primary-light, 0.5);
     background: rgba($color-primary, 0.12);
+  }
+}
+
+.dashboard__perf-ranking {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(180px, 1fr));
+  gap: $spacing-2;
+}
+
+.dashboard__perf-player {
+  display: grid;
+  grid-template-columns: auto auto minmax(0, 1fr) auto;
+  align-items: center;
+  gap: $spacing-2;
+  padding: $spacing-2 $spacing-3;
+  border-radius: $border-radius-lg;
+  border: 1px solid rgba($border-color, 0.7);
+  background: rgba(0, 0, 0, 0.22);
+  color: $color-text;
+  text-decoration: none;
+  transition: border-color $transition-fast, background $transition-fast, transform $transition-fast;
+
+  &:hover {
+    border-color: rgba($color-primary-light, 0.38);
+    background: rgba($color-primary, 0.08);
+    transform: translateY(-1px);
+  }
+
+  &-rank {
+    min-width: 1.8rem;
+    color: $color-primary-light;
+    font-size: $font-size-sm;
+    text-align: center;
+  }
+
+  &-icon {
+    width: 32px;
+    height: 32px;
+    border-radius: 50%;
+    object-fit: cover;
+    object-position: center top;
+    border: 1px solid rgba($color-primary-light, 0.28);
+    flex-shrink: 0;
+
+    &--fallback {
+      display: inline-grid;
+      place-items: center;
+      background:
+        radial-gradient(circle at top, rgba($color-primary-light, 0.18), transparent 60%),
+        rgba(18, 22, 30, 0.95);
+      color: $color-text;
+      font-size: 10px;
+      font-weight: $font-weight-bold;
+      letter-spacing: 0.08em;
+      text-transform: uppercase;
+    }
+  }
+
+  &-name {
+    min-width: 0;
+    overflow: hidden;
+    text-overflow: ellipsis;
+    white-space: nowrap;
+    font-weight: $font-weight-medium;
+  }
+
+  &-points {
+    font-variant-numeric: tabular-nums;
+    color: $color-secondary;
+    font-weight: $font-weight-semibold;
   }
 }
 
@@ -1771,6 +2180,10 @@ function onCompLeave() {
     &-aside {
       align-items: flex-start;
     }
+
+    &-stats {
+      grid-template-columns: repeat(2, minmax(0, 1fr));
+    }
   }
 }
 
@@ -1804,6 +2217,14 @@ function onCompLeave() {
       font-size: $font-size-lg;
     }
 
+    &-stats {
+      grid-template-columns: 1fr;
+    }
+
+    &-stat {
+      aspect-ratio: auto;
+      min-height: 150px;
+    }
   }
 }
 </style>

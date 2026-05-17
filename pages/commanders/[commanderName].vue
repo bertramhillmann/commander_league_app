@@ -332,7 +332,7 @@ const playerRows = computed((): PlayerRow[] => {
       progressPct,
       xpToNext,
     } = getCommanderLevelProgress(xp)
-    const xpScorePts = level
+    const xpScorePts = level * settings.value.level.pointsPerLevel
     const timeline = buildCommanderPlacementTimeline(
       chronologicalGames.value,
       gameRecords.value,

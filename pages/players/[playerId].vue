@@ -138,8 +138,8 @@
           <span class="player__stat-lbl">Clutch</span>
         </div>
         <div class="player__stat">
-          <span class="player__stat-val player__stat-val--muted">{{ fmt(avgPlacementOverall) }}</span>
-          <span class="player__stat-lbl">Avg Place</span>
+          <span class="player__stat-val player__stat-val--muted">{{ participationRate }}%</span>
+          <span class="player__stat-lbl">Participation</span>
         </div>
         <div class="player__stat">
           <span class="player__stat-val player__stat-val--lp">{{ fmt(player.totalLPoints) }}</span>
@@ -271,6 +271,9 @@
                   <span class="cmd-row__xp-current">{{ cmd.currentLevelXP }} / {{ cmd.levelSpanXP }} XP</span>
                   <span v-if="!cmd.isMaxLevel" class="cmd-row__xp-remaining">· {{ cmd.xpToNext }} to next</span>
                   <span class="cmd-row__xp-pts" title="Score points contributed by XP levels">+{{ cmd.xpScorePts }} pts</span>
+                </div>
+                <div class="cmd-row__rested-detail">
+                  Rested XP x{{ formatRestedMultiplier(cmd.restedMultiplier) }} · {{ cmd.rested }} rest
                 </div>
               </div>
             </div>
@@ -737,7 +740,7 @@
 import { compareGamesChronological, getLeagueStandingMetrics, getPlayerCommanderPerformanceEdgeMetrics, getPlayerCommanderMetrics } from '~/composables/useLeagueState'
 import { useAuth } from '~/composables/useAuth'
 import { fetchCardsByName, getCardImageUrl, type ScryfallCard } from '~/services/scryfallService'
-import { xpToLevel, getCommanderLevelProgress } from '~/utils/commanderExperience'
+import { xpToLevel, getCommanderLevelProgress, getRestedXpMultiplier } from '~/utils/commanderExperience'
 import { getArchEnemySummary } from '~/utils/archEnemy'
 import { extractArchidektDeckId } from '~/utils/archidekt'
 import { buildCommanderPlacementTimeline, type PlacementTimelinePoint } from '~/utils/commanderTimeline'
@@ -746,6 +749,7 @@ import { buildPlayerMatchTimeline } from '~/utils/playerMatchTimeline'
 import { buildPlacementPrognosis } from '~/utils/placementPrognosis'
 import { formatPlayerName } from '~/utils/playerNames'
 import { normalizeDeckIdentityKey } from '~/utils/deckLinks'
+import { getResolvedLeagueSettings } from '~/utils/leagueSettings'
 import { buildPlayerSuggestion, type PlayerCommanderPickSuggestion } from '~/utils/playerSuggestions'
 import { computeGlobalCommanderBaseline, computePlayerCommanderTier, smoothedTierScore, getTierDetail, type TierDetail, type TierContext } from '~/utils/tiers'
 import { getAchievementDefinition } from '~/utils/achievements'
@@ -755,6 +759,7 @@ const RARITY_ORDER: Record<string, number> = { common: 0, uncommon: 1, rare: 2, 
 import { getCommanderTitleSummary, type CommanderTitleResult } from '~/utils/titles'
 
 const route = useRoute()
+const leagueSettings = computed(() => getResolvedLeagueSettings())
 const playerId = computed(() => route.params.playerId as string)
 const displayPlayerName = computed(() => formatPlayerName(playerId.value))
 const { user, ensureSession } = useAuth()
@@ -862,11 +867,11 @@ const clutchRating = computed(() => {
   return Math.round((firstPlaces / (top2Places + 1)) * 100)
 })
 
-const avgPlacementOverall = computed(() => {
-  const recs = allRecords.value
-  if (recs.length === 0) return 0
-  const sum = recs.reduce((s, r) => s + r.placement, 0)
-  return Math.round((sum / recs.length) * 100) / 100
+const participationRate = computed(() => {
+  if (!player.value) return 0
+  const totalLeagueGames = games.value.length
+  if (totalLeagueGames === 0) return 0
+  return Math.round((player.value.gamesPlayed / totalLeagueGames) * 100)
 })
 
 const consistencyFactor = computed(() => {
@@ -902,6 +907,8 @@ interface CommanderRow {
   xpToNext: number
   isMaxLevel: boolean
   xpScorePts: number
+  rested: number
+  restedMultiplier: number
   edgeScore: number
   edgeWithGames: number
   edgeWithoutGames: number
@@ -1085,6 +1092,7 @@ const commanderRows = computed((): CommanderRow[] => {
       : 0
     const projectedTierDetail = metrics.plays > 0 ? getTierDetail(projectedScore, globalAvgScore, metrics.plays) : null
     const xp = player.value?.commanderXP?.[name] ?? 0
+    const rested = player.value?.commanderRested?.[name] ?? 0
     const {
       level,
       isMaxLevel,
@@ -1094,8 +1102,8 @@ const commanderRows = computed((): CommanderRow[] => {
       xpToNext,
     } = getCommanderLevelProgress(xp)
 
-    // XP score contribution: 1 point per level
-    const xpScorePts = level
+    const xpScorePts = level * leagueSettings.value.level.pointsPerLevel
+    const restedMultiplier = getRestedXpMultiplier(rested)
     const timeline = buildCommanderPlacementTimeline(
       chronologicalGames.value,
       gameRecords.value,
@@ -1140,6 +1148,8 @@ const commanderRows = computed((): CommanderRow[] => {
       xpToNext,
       isMaxLevel,
       xpScorePts,
+      rested,
+      restedMultiplier,
       edgeScore: edgeMetrics?.weightedEdge ?? 0,
       edgeWithGames: edgeMetrics?.withGames ?? 0,
       edgeWithoutGames: edgeMetrics?.withoutGames ?? 0,
@@ -1160,6 +1170,10 @@ const commanderRows = computed((): CommanderRow[] => {
     }
   }).filter((row): row is CommanderRow => !!row)
 })
+
+function formatRestedMultiplier(multiplier: number) {
+  return Number.isInteger(multiplier) ? multiplier.toFixed(0) : multiplier.toFixed(1)
+}
 
 // ── Card art images ───────────────────────────────────────────────────────────
 
@@ -2958,6 +2972,12 @@ function getEdgeTooltipText(cmd: CommanderRow) {
     font-size: 10px;
     font-weight: $font-weight-semibold;
     color: $color-primary-light;
+  }
+
+  &__rested-detail {
+    padding: 0 $spacing-3 $spacing-2;
+    font-size: 10px;
+    color: rgba($color-text-muted, 0.92);
   }
 
   // ── Achievements ──────────────────────────────────────────────────────────

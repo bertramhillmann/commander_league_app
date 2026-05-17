@@ -67,6 +67,16 @@
 
         <div class="xp-settings">
           <div class="xp-settings__group">
+            <h3 class="xp-settings__title">XP Score Value</h3>
+            <div class="xp-settings__row xp-settings__row--single">
+              <label class="form-field">
+                <span class="form-label">Points Per Commander Level</span>
+                <input v-model.number="form.level.pointsPerLevel" type="number" step="0.001" min="0" class="form-input" />
+              </label>
+            </div>
+          </div>
+
+          <div class="xp-settings__group">
             <h3 class="xp-settings__title">XP Per Game</h3>
             <div class="xp-settings__row">
               <label v-for="playerCount in playerCounts" :key="`xp-${playerCount}`" class="form-field">
@@ -192,6 +202,7 @@ type EditableSettingsState = {
     xpPerGame: Record<number, number>
     winBonusXp: Record<number, number>
     thresholds: number[]
+    pointsPerLevel: number
   }
   standings: {
     usePerformanceModifier: boolean
@@ -295,6 +306,7 @@ function createEditableSettings(source: ReturnType<typeof getResolvedLeagueSetti
       xpPerGame: { ...source.level.xpPerGame },
       winBonusXp: { ...source.level.winBonusXp },
       thresholds: [...source.level.thresholds],
+      pointsPerLevel: source.level.pointsPerLevel,
     },
     standings: {
       usePerformanceModifier: source.standings.usePerformanceModifier,
@@ -316,6 +328,7 @@ function applyEditableSettings(target: EditableSettingsState, source: ReturnType
   target.level.xpPerGame = { ...source.level.xpPerGame }
   target.level.winBonusXp = { ...source.level.winBonusXp }
   target.level.thresholds = [...source.level.thresholds]
+  target.level.pointsPerLevel = source.level.pointsPerLevel
   target.standings.usePerformanceModifier = source.standings.usePerformanceModifier
 }
 
@@ -345,6 +358,7 @@ function toDocument(source: EditableSettingsState): LeagueSettingsDocument {
       thresholds: source.level.thresholds.map((value, index) =>
         index === 0 ? 0 : sanitizeInteger(value),
       ),
+      pointsPerLevel: sanitizePositiveNumber(source.level.pointsPerLevel),
     },
     standings: {
       usePerformanceModifier: source.standings.usePerformanceModifier,
@@ -505,6 +519,10 @@ function getRarityRank(rarity: AchievementDef['rarity']) {
   display: grid;
   grid-template-columns: repeat(3, minmax(0, 1fr));
   gap: $spacing-3;
+}
+
+.xp-settings__row--single {
+  grid-template-columns: minmax(0, 280px);
 }
 
 .threshold-grid {

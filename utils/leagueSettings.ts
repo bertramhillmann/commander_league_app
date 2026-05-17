@@ -16,6 +16,7 @@ export interface LeagueSettingsDocument {
     xpPerGame?: Partial<Record<number, number>>
     winBonusXp?: Partial<Record<number, number>>
     thresholds?: number[]
+    pointsPerLevel?: number
   }
   standings?: {
     usePerformanceModifier?: boolean
@@ -30,6 +31,7 @@ export interface ResolvedLeagueSettings {
     winBonusXp: Record<number, number>
     thresholds: number[]
     maxLevel: number
+    pointsPerLevel: number
   }
   standings: {
     usePerformanceModifier: boolean
@@ -60,6 +62,7 @@ export function getResolvedLeagueSettings(settings?: LeagueSettingsDocument | nu
       winBonusXp: resolveNumericMap(DEFAULT_WIN_BONUS_XP, source?.level?.winBonusXp),
       thresholds,
       maxLevel: DEFAULT_MAX_LEVEL,
+      pointsPerLevel: toNumberOr(source?.level?.pointsPerLevel, 1),
     },
     standings: {
       usePerformanceModifier: source?.standings?.usePerformanceModifier ?? true,

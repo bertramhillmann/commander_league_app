@@ -54,5 +54,6 @@ function isEmptySettings(settings: LeagueSettingsDocument) {
     && Object.keys(settings.level?.xpPerGame ?? {}).length === 0
     && Object.keys(settings.level?.winBonusXp ?? {}).length === 0
     && (settings.level?.thresholds?.length ?? 0) === 0
+    && settings.level?.pointsPerLevel === undefined
     && settings.standings?.usePerformanceModifier === undefined
 }

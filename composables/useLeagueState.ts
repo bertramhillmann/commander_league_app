@@ -8,7 +8,7 @@ import {
   PERF_MULT_MAX,
 } from '~/utils/placements'
 import { applyModifiers, type ModifierResult } from '~/utils/modifiers'
-import { calculateXPGained, xpToLevel } from '~/utils/commanderExperience'
+import { calculateXPGained, consumeCommanderRest, xpToLevel } from '~/utils/commanderExperience'
 import { getTier, blendScore, type Tier } from '~/utils/tiers'
 import { getAchievementDefinition, type EarnedAchievement } from '~/utils/achievements'
 import { getMissedGameLoosterPoints } from '~/utils/loosterPoints'
@@ -81,6 +81,7 @@ export interface PlayerState {
   gamesPlayed: number
   wins: number
   commanderXP: Record<string, number>
+  commanderRested: Record<string, number>
   commanderTiers: Record<string, Tier>
   earnedAchievements: EarnedAchievement[]
   achievementPoints: number
@@ -175,6 +176,7 @@ function createEmptyPlayerState(name: string): PlayerState {
     gamesPlayed: 0,
     wins: 0,
     commanderXP: {},
+    commanderRested: {},
     commanderTiers: {},
     earnedAchievements: [],
     achievementPoints: 0,
@@ -207,11 +209,19 @@ export function compareGamesForDisplay(
 }
 
 export function getXpPoints(player: PlayerState) {
-  return getXpPointsWithThresholds(player, getResolvedLeagueSettings().level.thresholds)
+  const { level } = getResolvedLeagueSettings()
+  return getXpPointsWithThresholds(player, level.thresholds, level.pointsPerLevel)
 }
 
-function getXpPointsWithThresholds(player: Pick<PlayerState, 'commanderXP'>, thresholds: number[]) {
-  return Object.values(player.commanderXP).reduce((sum, xp) => sum + xpToLevelWithThresholds(xp, thresholds), 0)
+function getXpPointsWithThresholds(
+  player: Pick<PlayerState, 'commanderXP'>,
+  thresholds: number[],
+  pointsPerLevel: number,
+) {
+  return Object.values(player.commanderXP).reduce(
+    (sum, xp) => sum + (xpToLevelWithThresholds(xp, thresholds) * pointsPerLevel),
+    0,
+  )
 }
 
 function xpToLevelWithThresholds(xp: number, thresholds: number[]) {
@@ -312,7 +322,11 @@ export function getLeagueStandingMetrics(
   settings?: LeagueSettingsDocument | null,
 ): LeagueStandingMetrics {
   const resolvedSettings = getResolvedLeagueSettings(settings)
-  const xpPoints = getXpPointsWithThresholds(player, resolvedSettings.level.thresholds)
+  const xpPoints = getXpPointsWithThresholds(
+    player,
+    resolvedSettings.level.thresholds,
+    resolvedSettings.level.pointsPerLevel,
+  )
   const avgPerGame = player.gamesPlayed > 0 ? round3(player.totalPoints / player.gamesPlayed) : 0
   const leagueAvgPerGame = getLeagueAveragePerGame(playerMap)
   const projection = calculateProjectedPoints(player, playerMap)
@@ -560,6 +574,8 @@ const useLeagueSnapshotsState = () =>
   useState<Record<string, Record<string, LeagueSnapshotEntry>>>('league:leagueSnapshots', () => ({}))
 const useCommanderTitleSelectionsState = () =>
   useState<CommanderTitleSelectionMap>('league:commanderTitleSelections', () => ({}))
+const useProgressState = () =>
+  useState<{ current: number; total: number }>('league:progress', () => ({ current: 0, total: 0 }))
 const useLoadedState = () => useState<boolean>('league:loaded', () => false)
 const useLoadingState = () => useState<boolean>('league:loading', () => false)
 const useErrorState = () => useState<string | null>('league:error', () => null)
@@ -575,6 +591,7 @@ export function useLeagueState() {
   const gameRecords = useGameRecordsState()
   const leagueSnapshots = useLeagueSnapshotsState()
   const commanderTitleSelections = useCommanderTitleSelectionsState()
+  const progress = useProgressState()
   const loaded = useLoadedState()
   const loading = useLoadingState()
   const error = useErrorState()
@@ -587,6 +604,7 @@ export function useLeagueState() {
     pendingLeagueInit = (async () => {
       loading.value = true
       error.value = null
+      progress.value = { current: 0, total: 0 }
 
       try {
         const { init: initLeagueSettings } = useLeagueSettings()
@@ -628,6 +646,7 @@ export function useLeagueState() {
       }))
 
       const sorted = [...normalizedRaw].sort(compareGamesChronological)
+      progress.value = { current: 0, total: sorted.length }
 
       const processedGames: ProcessedGame[] = []
       const playerMap: Record<string, PlayerState> = {}
@@ -687,7 +706,7 @@ export function useLeagueState() {
 
       // ── Game loop ───────────────────────────────────────────────────────────
 
-      for (const game of sorted) {
+      for (const [gameIndex, game] of sorted.entries()) {
         const playerCount = game.players.length
         const gameDate = new Date(game.date)
         const gameWeek = isoWeek(gameDate)
@@ -730,7 +749,8 @@ export function useLeagueState() {
           const isWinner = p.placement === 1
 
           const commanderXpBefore = playerMap[p.name]?.commanderXP?.[p.commander] ?? 0
-          const commanderXpGained = calculateXPGained(playerCount, isWinner)
+          const commanderRestedBefore = playerMap[p.name]?.commanderRested?.[p.commander] ?? 0
+          const commanderXpGained = calculateXPGained(playerCount, isWinner, commanderRestedBefore)
           const commanderLevelBefore = xpToLevel(commanderXpBefore)
           const commanderLevelAfter = xpToLevel(commanderXpBefore + commanderXpGained)
 
@@ -1025,6 +1045,7 @@ export function useLeagueState() {
           ps.gamesPlayed++
           if (isWinner) ps.wins++
           ps.commanderXP[p.commander] = commanderXpBefore + commanderXpGained
+          if (!(p.commander in ps.commanderRested)) ps.commanderRested[p.commander] = 0
 
           const cs = commanderMap[p.commander]
           cs.totalPoints = round3(cs.totalPoints + finalPoints)
@@ -1060,6 +1081,17 @@ export function useLeagueState() {
             if (participants.has(playerName)) continue
             if (!playerMap[playerName]) playerMap[playerName] = createEmptyPlayerState(playerName)
             playerMap[playerName].totalLPoints = round3(playerMap[playerName].totalLPoints + missedGameLPoints)
+          }
+        }
+
+        const playedCommanderKeys = new Set(computed.map((player) => `${player.name}::${player.commander}`))
+        for (const [playerName, playerState] of Object.entries(playerMap)) {
+          for (const commanderName of Object.keys(playerState.commanderXP)) {
+            const key = `${playerName}::${commanderName}`
+            const currentRest = playerState.commanderRested[commanderName] ?? 0
+            playerState.commanderRested[commanderName] = playedCommanderKeys.has(key)
+              ? consumeCommanderRest(currentRest)
+              : currentRest + 1
           }
         }
 
@@ -1106,6 +1138,11 @@ export function useLeagueState() {
           week: gameWeek,
           players: computed,
         })
+
+        progress.value = { current: gameIndex + 1, total: sorted.length }
+        if ((gameIndex + 1) % 5 === 0) {
+          await pauseForUi()
+        }
       }
 
       // ── Post-processing: tiers + tier/rock-bottom achievements ─────────────
@@ -1264,6 +1301,7 @@ export function useLeagueState() {
       } catch (e: any) {
         error.value = e.message ?? 'Failed to load league data'
       } finally {
+        progress.value = { current: 0, total: 0 }
         loading.value = false
         pendingLeagueInit = null
       }
@@ -1286,6 +1324,7 @@ export function useLeagueState() {
     leagueSnapshots,
     commanderTitleSelections,
     standings,
+    progress,
     loaded,
     loading,
     error,
@@ -1296,6 +1335,12 @@ export function useLeagueState() {
 
 function round3(n: number): number {
   return Math.round(n * 1000) / 1000
+}
+
+function pauseForUi() {
+  return new Promise<void>((resolve) => {
+    setTimeout(resolve, 0)
+  })
 }
 
 function isoWeek(date: Date): number {

@@ -24,11 +24,26 @@ export const LEVEL_THRESHOLDS: number[] = DEFAULT_LEVEL_THRESHOLDS
  * XP earned by a player in a single game.
  * Base = player count. Winner gets an additional WIN_BONUS_XP.
  */
-export function calculateXPGained(playerCount: number, isWinner: boolean): number {
+export function calculateXPGained(playerCount: number, isWinner: boolean, rested = 0): number {
   const { level } = getResolvedLeagueSettings()
   const base = level.xpPerGame[playerCount] ?? playerCount
   const bonus = isWinner ? (level.winBonusXp[playerCount] ?? 0) : 0
-  return base + bonus
+  return roundCommanderXp((base + bonus) * getRestedXpMultiplier(rested))
+}
+
+export function getRestedXpMultiplier(rested: number): number {
+  if (rested >= 60) return 3
+  if (rested >= 40) return 2.5
+  if (rested >= 20) return 2
+  if (rested > 0) return 1.5
+  return 1
+}
+
+export function consumeCommanderRest(rested: number): number {
+  if (rested >= 60) return 40
+  if (rested >= 40) return 20
+  if (rested >= 20) return 0
+  return 0
 }
 
 /**
@@ -80,4 +95,8 @@ export function getCommanderLevelProgress(xp: number) {
     progressPct,
     xpToNext,
   }
+}
+
+function roundCommanderXp(xp: number) {
+  return Math.round(xp * 10) / 10
 }
