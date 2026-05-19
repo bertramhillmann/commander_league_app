@@ -296,6 +296,7 @@ export interface StandingAdjustmentResult {
   baselineAvgPoints: number
   consecutiveMissPenalty: number
   minimumAvgPoints: number
+  graceMisses: number
   lowestGamesPlayed: number
   gameGap: number
   penaltyFactor: number
@@ -306,6 +307,15 @@ export interface FreeGameAwardEntry {
   awardedPoints: number
   averagePointsAtTime: number
   consecutiveMissesBefore: number
+  penaltyPoints: number
+  inGracePeriod: boolean
+  isPreParticipation: boolean
+}
+
+interface FreeGameProgress {
+  playedGames: number
+  playedPoints: number
+  consecutiveMisses: number
 }
 
 export function calculateProjectedPoints(
@@ -393,6 +403,7 @@ export function calculateStandingsAdjustment(
       baselineAvgPoints: resolvedSettings.standings.freeGamesBaselineAvg,
       consecutiveMissPenalty: resolvedSettings.standings.freeGamesConsecutivePenalty,
       minimumAvgPoints: resolvedSettings.standings.freeGamesMinimumAvg,
+      graceMisses: resolvedSettings.standings.freeGamesGraceMisses,
       lowestGamesPlayed: 0,
       gameGap: 0,
       penaltyFactor: 0,
@@ -419,6 +430,7 @@ export function calculateStandingsAdjustment(
       baselineAvgPoints: 0,
       consecutiveMissPenalty: 0,
       minimumAvgPoints: 0,
+      graceMisses: 0,
       lowestGamesPlayed: getPenaltyBaselineGames(playerMap),
       gameGap: Math.max(0, player.gamesPlayed - getPenaltyBaselineGames(playerMap)),
       penaltyFactor: resolvedSettings.standings.penaltyFactor,
@@ -444,6 +456,7 @@ export function calculateStandingsAdjustment(
     baselineAvgPoints: 0,
     consecutiveMissPenalty: 0,
     minimumAvgPoints: 0,
+    graceMisses: 0,
     lowestGamesPlayed: 0,
     gameGap: 0,
     penaltyFactor: 0,
@@ -475,21 +488,46 @@ function calculateFreeGamesPoints(
       continue
     }
 
-    const currentAvg = playedGames > 0
-      ? playedPoints / playedGames
-      : settings.standings.freeGamesBaselineAvg
-    const awardedPoints = playedGames > 0
-      ? Math.max(
-        settings.standings.freeGamesMinimumAvg,
-        currentAvg - (consecutiveMisses * settings.standings.freeGamesConsecutivePenalty),
-      )
-      : settings.standings.freeGamesBaselineAvg
-
-    freeGamesPoints = round3(freeGamesPoints + awardedPoints)
+    const award = calculateFreeGameAward(
+      { playedGames, playedPoints, consecutiveMisses },
+      settings,
+    )
+    freeGamesPoints = round3(freeGamesPoints + award.awardedPoints)
     consecutiveMisses += 1
   }
 
   return round3(freeGamesPoints)
+}
+
+function calculateFreeGameAward(
+  stats: FreeGameProgress,
+  settings: ReturnType<typeof getResolvedLeagueSettings>,
+) {
+  const isPreParticipation = stats.playedGames === 0
+  const averagePointsAtTime = isPreParticipation
+    ? settings.standings.freeGamesBaselineAvg
+    : (stats.playedPoints / stats.playedGames)
+  const inGracePeriod = !isPreParticipation && stats.consecutiveMisses < settings.standings.freeGamesGraceMisses
+  const penaltyPoints = isPreParticipation || inGracePeriod
+    ? 0
+    : (stats.consecutiveMisses * settings.standings.freeGamesConsecutivePenalty)
+  const awardedPoints = isPreParticipation
+    ? settings.standings.freeGamesBaselineAvg
+    : inGracePeriod
+      ? 0
+      : Math.max(
+        settings.standings.freeGamesMinimumAvg,
+        averagePointsAtTime - penaltyPoints,
+      )
+
+  return {
+    awardedPoints: round3(awardedPoints),
+    averagePointsAtTime: round3(averagePointsAtTime),
+    consecutiveMissesBefore: stats.consecutiveMisses,
+    penaltyPoints: round3(penaltyPoints),
+    inGracePeriod,
+    isPreParticipation,
+  }
 }
 
 export function getFreeGameAwardsForGame(
@@ -519,21 +557,16 @@ export function getFreeGameAwardsForGame(
         .filter((playerName) => !gamePlayerNames.has(playerName))
         .map((playerName) => {
           const stats = playerStats[playerName] ?? { playedGames: 0, playedPoints: 0, consecutiveMisses: 0 }
-          const averagePointsAtTime = stats.playedGames > 0
-            ? stats.playedPoints / stats.playedGames
-            : resolvedSettings.standings.freeGamesBaselineAvg
-          const awardedPoints = stats.playedGames > 0
-            ? Math.max(
-              resolvedSettings.standings.freeGamesMinimumAvg,
-              averagePointsAtTime - (stats.consecutiveMisses * resolvedSettings.standings.freeGamesConsecutivePenalty),
-            )
-            : resolvedSettings.standings.freeGamesBaselineAvg
+          const award = calculateFreeGameAward(stats, resolvedSettings)
 
           return {
             playerName,
-            awardedPoints: round3(awardedPoints),
-            averagePointsAtTime: round3(averagePointsAtTime),
-            consecutiveMissesBefore: stats.consecutiveMisses,
+            awardedPoints: award.awardedPoints,
+            averagePointsAtTime: award.averagePointsAtTime,
+            consecutiveMissesBefore: award.consecutiveMissesBefore,
+            penaltyPoints: award.penaltyPoints,
+            inGracePeriod: award.inGracePeriod,
+            isPreParticipation: award.isPreParticipation,
           }
         })
         .sort((a, b) => b.awardedPoints - a.awardedPoints || a.playerName.localeCompare(b.playerName))
@@ -1011,7 +1044,11 @@ export function useLeagueState() {
         const allOthers2nd = computed.every((p) => p.placement === 1 || p.placement === 2)
 
         // Snapshot league ranks before this game using the shared dashboard metric.
-        const rankBeforeList = buildLeagueStandings(playerMap, rawSettings.value)
+        const rankBeforeList = buildLeagueStandings(
+          playerMap,
+          rawSettings.value,
+          { games: processedGames, gameRecords: recordsMap },
+        )
         const rankBeforeMap: Record<string, number> = {}
         const scoreBeforeMap: Record<string, number> = {}
         for (const p of game.players) {
@@ -1391,7 +1428,22 @@ export function useLeagueState() {
         }
 
         // Compute league ranks after this game with the centralized dashboard metric.
-        const rankAfterList = buildLeagueStandings(playerMap, rawSettings.value)
+        const rankAfterList = buildLeagueStandings(
+          playerMap,
+          rawSettings.value,
+          {
+            games: [
+              ...processedGames,
+              {
+                gameId: game.gameId,
+                date: game.date,
+                week: gameWeek,
+                players: computed,
+              },
+            ],
+            gameRecords: recordsMap,
+          },
+        )
         snapshotMap[game.gameId] = Object.fromEntries(
           rankAfterList.map((entry) => [
             entry.name,

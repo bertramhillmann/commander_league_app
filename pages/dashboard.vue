@@ -809,7 +809,7 @@ const table = computed(() => {
     const totalPoints = r3(records.reduce((sum, record) => sum + record.finalPoints, 0))
     const gamesPlayed = records.length
     const baseWins = records.filter((record) => record.placement === 1).length
-    const totalLPoints = r3(records.reduce((sum, record) => sum + record.lPoints, 0))
+    const totalLPoints = player.totalLPoints
     const xpPoints = includeCommanderXp
       ? r3(
         Object.values(player.commanderXP).reduce(

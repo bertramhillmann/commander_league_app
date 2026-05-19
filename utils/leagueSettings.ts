@@ -14,6 +14,7 @@ export type StandingsAdjustmentMode = 'compensation' | 'freeGames' | 'penaltyGam
 export const DEFAULT_FREE_GAMES_BASELINE_AVG = 0.5
 export const DEFAULT_FREE_GAMES_CONSECUTIVE_PENALTY = 0.01
 export const DEFAULT_FREE_GAMES_MIN_AVG = 0.3
+export const DEFAULT_FREE_GAMES_GRACE_MISSES = 3
 export const DEFAULT_PENALTY_FACTOR = 0.88
 export const MIN_GAMES_FOR_PENALTY_MODE = 30
 
@@ -34,6 +35,7 @@ export interface LeagueSettingsDocument {
     freeGamesBaselineAvg?: number
     freeGamesConsecutivePenalty?: number
     freeGamesMinimumAvg?: number
+    freeGamesGraceMisses?: number
     penaltyFactor?: number
   }
 }
@@ -56,6 +58,7 @@ export interface ResolvedLeagueSettings {
     freeGamesBaselineAvg: number
     freeGamesConsecutivePenalty: number
     freeGamesMinimumAvg: number
+    freeGamesGraceMisses: number
     penaltyFactor: number
   }
 }
@@ -94,6 +97,7 @@ export function getResolvedLeagueSettings(settings?: LeagueSettingsDocument | nu
       freeGamesBaselineAvg: toNumberOr(source?.standings?.freeGamesBaselineAvg, DEFAULT_FREE_GAMES_BASELINE_AVG),
       freeGamesConsecutivePenalty: toNumberOr(source?.standings?.freeGamesConsecutivePenalty, DEFAULT_FREE_GAMES_CONSECUTIVE_PENALTY),
       freeGamesMinimumAvg: toNumberOr(source?.standings?.freeGamesMinimumAvg, DEFAULT_FREE_GAMES_MIN_AVG),
+      freeGamesGraceMisses: Math.max(0, Math.round(toNumberOr(source?.standings?.freeGamesGraceMisses, DEFAULT_FREE_GAMES_GRACE_MISSES))),
       penaltyFactor: toNumberOr(source?.standings?.penaltyFactor, DEFAULT_PENALTY_FACTOR),
     },
   }

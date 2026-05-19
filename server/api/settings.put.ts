@@ -62,5 +62,6 @@ function isEmptySettings(settings: LeagueSettingsDocument) {
     && settings.standings?.freeGamesBaselineAvg === undefined
     && settings.standings?.freeGamesConsecutivePenalty === undefined
     && settings.standings?.freeGamesMinimumAvg === undefined
+    && settings.standings?.freeGamesGraceMisses === undefined
     && settings.standings?.penaltyFactor === undefined
 }

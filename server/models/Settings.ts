@@ -18,6 +18,7 @@ export interface ISettings extends Document {
     freeGamesBaselineAvg?: number
     freeGamesConsecutivePenalty?: number
     freeGamesMinimumAvg?: number
+    freeGamesGraceMisses?: number
     penaltyFactor?: number
   }
   createdAt: Date

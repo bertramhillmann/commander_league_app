@@ -24,6 +24,74 @@
       <p v-if="successMessage" class="form-msg form-msg--success">{{ successMessage }}</p>
       <p v-if="errorMessage" class="form-msg form-msg--error">{{ errorMessage }}</p>
 
+
+      <section class="settings-card">
+        <div class="settings-card__header">
+          <div>
+            <h2 class="settings-card__title">Standings</h2>
+            <p class="settings-card__subtitle">Control which bonuses count toward standings totals and which standings columns stay visible.</p>
+          </div>
+        </div>
+
+        <label class="form-field settings-mode-field">
+          <span class="form-label">Calculation System</span>
+          <select v-model="form.standings.adjustmentMode" class="form-input">
+            <option value="compensation">Current compensation system</option>
+            <option value="freeGames">Free games on missed participation</option>
+            <option value="penaltyGames">Penalty for excess games played</option>
+          </select>
+        </label>
+
+        <label class="toggle-field">
+          <input v-model="form.standings.usePerformanceModifier" type="checkbox" class="toggle-field__input" />
+          <span class="toggle-field__copy">
+            <span class="toggle-field__label">Use performance modifier</span>
+            <span class="toggle-field__hint">When off, standings use a fixed multiplier of 1.0.</span>
+          </span>
+        </label>
+
+        <label class="toggle-field">
+          <input v-model="form.standings.includeCommanderXp" type="checkbox" class="toggle-field__input" />
+          <span class="toggle-field__copy">
+            <span class="toggle-field__label">Include Commander XP</span>
+            <span class="toggle-field__hint">When off, Commander XP adds 0 points to standings and the XP column is hidden on the dashboard.</span>
+          </span>
+        </label>
+
+        <label class="toggle-field">
+          <input v-model="form.standings.includeAchievementPoints" type="checkbox" class="toggle-field__input" />
+          <span class="toggle-field__copy">
+            <span class="toggle-field__label">Include achievement points</span>
+            <span class="toggle-field__hint">When off, achievement points add 0 points to standings and the achievement column is hidden on the dashboard.</span>
+          </span>
+        </label>
+
+        <div v-if="form.standings.adjustmentMode === 'freeGames'" class="settings-subgrid">
+          <label class="form-field">
+            <span class="form-label">Starting Avg For Pre-Participation Misses</span>
+            <input v-model.number="form.standings.freeGamesBaselineAvg" type="number" step="0.001" min="0" class="form-input" />
+          </label>
+          <label class="form-field">
+            <span class="form-label">Misses Before Free Games Start</span>
+            <input v-model.number="form.standings.freeGamesGraceMisses" type="number" step="1" min="0" class="form-input" />
+          </label>
+          <label class="form-field">
+            <span class="form-label">Consecutive Miss Reduction</span>
+            <input v-model.number="form.standings.freeGamesConsecutivePenalty" type="number" step="0.001" min="0" class="form-input" />
+          </label>
+          <label class="form-field">
+            <span class="form-label">Minimum Avg Floor</span>
+            <input v-model.number="form.standings.freeGamesMinimumAvg" type="number" step="0.001" min="0" class="form-input" />
+          </label>
+        </div>
+
+        <div v-if="form.standings.adjustmentMode === 'penaltyGames'" class="settings-subgrid settings-subgrid--single">
+          <label class="form-field">
+            <span class="form-label">Penalty Factor</span>
+            <input v-model.number="form.standings.penaltyFactor" type="number" step="0.001" min="0" class="form-input" />
+          </label>
+        </div>
+      </section>
       <section class="settings-card">
         <div class="settings-card__header">
           <div>
@@ -121,70 +189,6 @@
       <section class="settings-card">
         <div class="settings-card__header">
           <div>
-            <h2 class="settings-card__title">Standings</h2>
-            <p class="settings-card__subtitle">Control which bonuses count toward standings totals and which standings columns stay visible.</p>
-          </div>
-        </div>
-
-        <label class="form-field settings-mode-field">
-          <span class="form-label">Calculation System</span>
-          <select v-model="form.standings.adjustmentMode" class="form-input">
-            <option value="compensation">Current compensation system</option>
-            <option value="freeGames">Free games on missed participation</option>
-            <option value="penaltyGames">Penalty for excess games played</option>
-          </select>
-        </label>
-
-        <label class="toggle-field">
-          <input v-model="form.standings.usePerformanceModifier" type="checkbox" class="toggle-field__input" />
-          <span class="toggle-field__copy">
-            <span class="toggle-field__label">Use performance modifier</span>
-            <span class="toggle-field__hint">When off, standings use a fixed multiplier of 1.0.</span>
-          </span>
-        </label>
-
-        <label class="toggle-field">
-          <input v-model="form.standings.includeCommanderXp" type="checkbox" class="toggle-field__input" />
-          <span class="toggle-field__copy">
-            <span class="toggle-field__label">Include Commander XP</span>
-            <span class="toggle-field__hint">When off, Commander XP adds 0 points to standings and the XP column is hidden on the dashboard.</span>
-          </span>
-        </label>
-
-        <label class="toggle-field">
-          <input v-model="form.standings.includeAchievementPoints" type="checkbox" class="toggle-field__input" />
-          <span class="toggle-field__copy">
-            <span class="toggle-field__label">Include achievement points</span>
-            <span class="toggle-field__hint">When off, achievement points add 0 points to standings and the achievement column is hidden on the dashboard.</span>
-          </span>
-        </label>
-
-        <div v-if="form.standings.adjustmentMode === 'freeGames'" class="settings-subgrid">
-          <label class="form-field">
-            <span class="form-label">Starting Avg For Pre-Participation Misses</span>
-            <input v-model.number="form.standings.freeGamesBaselineAvg" type="number" step="0.001" min="0" class="form-input" />
-          </label>
-          <label class="form-field">
-            <span class="form-label">Consecutive Miss Reduction</span>
-            <input v-model.number="form.standings.freeGamesConsecutivePenalty" type="number" step="0.001" min="0" class="form-input" />
-          </label>
-          <label class="form-field">
-            <span class="form-label">Minimum Avg Floor</span>
-            <input v-model.number="form.standings.freeGamesMinimumAvg" type="number" step="0.001" min="0" class="form-input" />
-          </label>
-        </div>
-
-        <div v-if="form.standings.adjustmentMode === 'penaltyGames'" class="settings-subgrid settings-subgrid--single">
-          <label class="form-field">
-            <span class="form-label">Penalty Factor</span>
-            <input v-model.number="form.standings.penaltyFactor" type="number" step="0.001" min="0" class="form-input" />
-          </label>
-        </div>
-      </section>
-
-      <section class="settings-card">
-        <div class="settings-card__header">
-          <div>
             <h2 class="settings-card__title">Achievement Points</h2>
             <p class="settings-card__subtitle">Every achievement stays listed here, but only the points are adjustable.</p>
           </div>
@@ -263,6 +267,7 @@ type EditableSettingsState = {
     freeGamesBaselineAvg: number
     freeGamesConsecutivePenalty: number
     freeGamesMinimumAvg: number
+    freeGamesGraceMisses: number
     penaltyFactor: number
   }
 }
@@ -374,6 +379,7 @@ function createEditableSettings(source: ReturnType<typeof getResolvedLeagueSetti
       freeGamesBaselineAvg: source.standings.freeGamesBaselineAvg,
       freeGamesConsecutivePenalty: source.standings.freeGamesConsecutivePenalty,
       freeGamesMinimumAvg: source.standings.freeGamesMinimumAvg,
+      freeGamesGraceMisses: source.standings.freeGamesGraceMisses,
       penaltyFactor: source.standings.penaltyFactor,
     },
   }
@@ -401,6 +407,7 @@ function applyEditableSettings(target: EditableSettingsState, source: ReturnType
   target.standings.freeGamesBaselineAvg = source.standings.freeGamesBaselineAvg
   target.standings.freeGamesConsecutivePenalty = source.standings.freeGamesConsecutivePenalty
   target.standings.freeGamesMinimumAvg = source.standings.freeGamesMinimumAvg
+  target.standings.freeGamesGraceMisses = source.standings.freeGamesGraceMisses
   target.standings.penaltyFactor = source.standings.penaltyFactor
 }
 
@@ -440,6 +447,7 @@ function toDocument(source: EditableSettingsState): LeagueSettingsDocument {
       freeGamesBaselineAvg: sanitizePositiveNumber(source.standings.freeGamesBaselineAvg),
       freeGamesConsecutivePenalty: sanitizePositiveNumber(source.standings.freeGamesConsecutivePenalty),
       freeGamesMinimumAvg: sanitizePositiveNumber(source.standings.freeGamesMinimumAvg),
+      freeGamesGraceMisses: sanitizeInteger(source.standings.freeGamesGraceMisses),
       penaltyFactor: sanitizePositiveNumber(source.standings.penaltyFactor),
     },
   }

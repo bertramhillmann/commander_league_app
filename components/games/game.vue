@@ -141,10 +141,14 @@
           >
             <span class="game-card__free-games-player">{{ entry.playerName }}</span>
             <span class="game-card__free-games-meta">
-              avg {{ fmt(entry.averagePointsAtTime) }}
-              <span v-if="entry.consecutiveMissesBefore > 0">- {{ fmt(entry.consecutiveMissesBefore * freeGamesPenalty) }}</span>
+              <span v-if="entry.isPreParticipation">pre-first-game baseline {{ fmt(entry.averagePointsAtTime) }}</span>
+              <span v-else-if="entry.inGracePeriod">grace period miss {{ entry.consecutiveMissesBefore + 1 }}/{{ freeGamesGraceMisses }}</span>
+              <span v-else>
+                avg {{ fmt(entry.averagePointsAtTime) }}
+                <span v-if="entry.penaltyPoints > 0">- {{ fmt(entry.penaltyPoints) }}</span>
+              </span>
             </span>
-            <span class="game-card__free-games-points">+{{ fmt(entry.awardedPoints) }}</span>
+            <span class="game-card__free-games-points">{{ entry.awardedPoints > 0 ? '+' : '' }}{{ fmt(entry.awardedPoints) }}</span>
           </div>
         </div>
       </div>
@@ -357,7 +361,7 @@ const showFreeGameAwards = computed(() =>
   && freeGameAwards.value.length > 0,
 )
 
-const freeGamesPenalty = computed(() => settings.value.standings.freeGamesConsecutivePenalty)
+const freeGamesGraceMisses = computed(() => settings.value.standings.freeGamesGraceMisses)
 
 watch(
   () => [winnerCommander.value, ...otherCommanders.value],
@@ -592,6 +596,7 @@ function fmt(n: number): string {
   &__art-winner {
     flex: 1;
     padding: 10px;
+    max-height:200px;
     overflow: hidden;
   }
 
