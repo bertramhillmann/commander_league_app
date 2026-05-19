@@ -56,4 +56,11 @@ function isEmptySettings(settings: LeagueSettingsDocument) {
     && (settings.level?.thresholds?.length ?? 0) === 0
     && settings.level?.pointsPerLevel === undefined
     && settings.standings?.usePerformanceModifier === undefined
+    && settings.standings?.includeCommanderXp === undefined
+    && settings.standings?.includeAchievementPoints === undefined
+    && settings.standings?.adjustmentMode === undefined
+    && settings.standings?.freeGamesBaselineAvg === undefined
+    && settings.standings?.freeGamesConsecutivePenalty === undefined
+    && settings.standings?.freeGamesMinimumAvg === undefined
+    && settings.standings?.penaltyFactor === undefined
 }

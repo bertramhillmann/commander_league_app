@@ -21,13 +21,13 @@
                 <span class="standings__sort-indicator">{{ sortIndicator('totalPoints') }}</span>
               </button>
             </th>
-            <th class="standings__th standings__th--num">
+            <th v-if="settings.standings.includeAchievementPoints" class="standings__th standings__th--num">
               <button type="button" class="standings__sort-button standings__sort-button--num" @click="toggleSort('achievementPoints')">
                 <span>Achv. Pts</span>
                 <span class="standings__sort-indicator">{{ sortIndicator('achievementPoints') }}</span>
               </button>
             </th>
-            <th class="standings__th standings__th--num">
+            <th v-if="settings.standings.includeCommanderXp" class="standings__th standings__th--num">
               <button type="button" class="standings__sort-button standings__sort-button--num" @click="toggleSort('xpPoints')">
                 <span>XP Pts</span>
                 <span class="standings__sort-indicator">{{ sortIndicator('xpPoints') }}</span>
@@ -108,12 +108,13 @@
             >{{ fmt(row.perfMult) }}</td>
             <td class="standings__td standings__td--num">{{ fmt(row.totalPoints) }}</td>
             <td
+              v-if="settings.standings.includeAchievementPoints"
               class="standings__td standings__td--num standings__td--achv standings__td--hoverable"
               @mouseenter="onAchvEnter(row.playerName, $event, row.commanderName)"
               @mousemove="onMouseMove($event)"
               @mouseleave="onAchvLeave"
             >{{ fmt(row.achievementPoints) }}</td>
-            <td class="standings__td standings__td--num standings__td--xp">{{ fmt(row.xpPoints) }}</td>
+            <td v-if="settings.standings.includeCommanderXp" class="standings__td standings__td--num standings__td--xp">{{ fmt(row.xpPoints) }}</td>
             <td class="standings__td standings__td--num">{{ row.gamesPlayed }}</td>
             <td class="standings__td standings__td--num">{{ row.totalLosses }}</td>
             <td class="standings__td standings__td--num">{{ row.winRate }}%</td>
@@ -294,6 +295,8 @@ function buildPerformanceMetrics(
 
 const pairingTable = computed(() => {
   const usePerformanceModifier = settings.value.standings.usePerformanceModifier
+  const includeCommanderXp = settings.value.standings.includeCommanderXp
+  const includeAchievementPoints = settings.value.standings.includeAchievementPoints
   const rows = Object.entries(gameRecords.value).flatMap(([playerName, recordsMap]) => {
     const byCommander = new Set(Object.values(recordsMap).map((record) => record.commander))
 
@@ -307,8 +310,8 @@ const pairingTable = computed(() => {
         commanderName,
         commanderTier: playerCommanderTier(playerName, commanderName),
         totalPoints: metrics.totalFinalPoints,
-        achievementPoints: metrics.achievementPoints,
-        xpPoints: metrics.xpPoints,
+        achievementPoints: includeAchievementPoints ? metrics.achievementPoints : 0,
+        xpPoints: includeCommanderXp ? metrics.xpPoints : 0,
         gamesPlayed: metrics.plays,
         totalLosses: metrics.totalLosses,
         baseWins: metrics.first,

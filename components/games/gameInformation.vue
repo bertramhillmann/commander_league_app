@@ -127,7 +127,14 @@ const gameAchievements = computed(() =>
 )
 const playerState = computed(() => players.value[props.playerName])
 const playerStanding = computed(() =>
-  playerState.value ? getLeagueStandingMetrics(playerState.value, players.value) : null,
+  playerState.value
+    ? getLeagueStandingMetrics(
+      playerState.value,
+      players.value,
+      undefined,
+      { games: games.value, gameRecords: gameRecords.value },
+    )
+    : null,
 )
 
 const currentRating = computed(() => playerStanding.value?.totalScore ?? 0)

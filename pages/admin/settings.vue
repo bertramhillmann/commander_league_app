@@ -122,9 +122,18 @@
         <div class="settings-card__header">
           <div>
             <h2 class="settings-card__title">Standings</h2>
-            <p class="settings-card__subtitle">Control whether the performance multiplier affects standings totals.</p>
+            <p class="settings-card__subtitle">Control which bonuses count toward standings totals and which standings columns stay visible.</p>
           </div>
         </div>
+
+        <label class="form-field settings-mode-field">
+          <span class="form-label">Calculation System</span>
+          <select v-model="form.standings.adjustmentMode" class="form-input">
+            <option value="compensation">Current compensation system</option>
+            <option value="freeGames">Free games on missed participation</option>
+            <option value="penaltyGames">Penalty for excess games played</option>
+          </select>
+        </label>
 
         <label class="toggle-field">
           <input v-model="form.standings.usePerformanceModifier" type="checkbox" class="toggle-field__input" />
@@ -133,6 +142,44 @@
             <span class="toggle-field__hint">When off, standings use a fixed multiplier of 1.0.</span>
           </span>
         </label>
+
+        <label class="toggle-field">
+          <input v-model="form.standings.includeCommanderXp" type="checkbox" class="toggle-field__input" />
+          <span class="toggle-field__copy">
+            <span class="toggle-field__label">Include Commander XP</span>
+            <span class="toggle-field__hint">When off, Commander XP adds 0 points to standings and the XP column is hidden on the dashboard.</span>
+          </span>
+        </label>
+
+        <label class="toggle-field">
+          <input v-model="form.standings.includeAchievementPoints" type="checkbox" class="toggle-field__input" />
+          <span class="toggle-field__copy">
+            <span class="toggle-field__label">Include achievement points</span>
+            <span class="toggle-field__hint">When off, achievement points add 0 points to standings and the achievement column is hidden on the dashboard.</span>
+          </span>
+        </label>
+
+        <div v-if="form.standings.adjustmentMode === 'freeGames'" class="settings-subgrid">
+          <label class="form-field">
+            <span class="form-label">Starting Avg For Pre-Participation Misses</span>
+            <input v-model.number="form.standings.freeGamesBaselineAvg" type="number" step="0.001" min="0" class="form-input" />
+          </label>
+          <label class="form-field">
+            <span class="form-label">Consecutive Miss Reduction</span>
+            <input v-model.number="form.standings.freeGamesConsecutivePenalty" type="number" step="0.001" min="0" class="form-input" />
+          </label>
+          <label class="form-field">
+            <span class="form-label">Minimum Avg Floor</span>
+            <input v-model.number="form.standings.freeGamesMinimumAvg" type="number" step="0.001" min="0" class="form-input" />
+          </label>
+        </div>
+
+        <div v-if="form.standings.adjustmentMode === 'penaltyGames'" class="settings-subgrid settings-subgrid--single">
+          <label class="form-field">
+            <span class="form-label">Penalty Factor</span>
+            <input v-model.number="form.standings.penaltyFactor" type="number" step="0.001" min="0" class="form-input" />
+          </label>
+        </div>
       </section>
 
       <section class="settings-card">
@@ -176,7 +223,11 @@
 
 <script setup lang="ts">
 import { computed, reactive, ref, watch } from 'vue'
-import { getResolvedLeagueSettings, type LeagueSettingsDocument } from '~/utils/leagueSettings'
+import {
+  getResolvedLeagueSettings,
+  type LeagueSettingsDocument,
+  type StandingsAdjustmentMode,
+} from '~/utils/leagueSettings'
 import { DEFAULT_MAX_LEVEL, type AchievementDef } from '~/utils/scoringDefaults'
 
 definePageMeta({ middleware: [] })
@@ -206,6 +257,13 @@ type EditableSettingsState = {
   }
   standings: {
     usePerformanceModifier: boolean
+    includeCommanderXp: boolean
+    includeAchievementPoints: boolean
+    adjustmentMode: StandingsAdjustmentMode
+    freeGamesBaselineAvg: number
+    freeGamesConsecutivePenalty: number
+    freeGamesMinimumAvg: number
+    penaltyFactor: number
   }
 }
 
@@ -310,6 +368,13 @@ function createEditableSettings(source: ReturnType<typeof getResolvedLeagueSetti
     },
     standings: {
       usePerformanceModifier: source.standings.usePerformanceModifier,
+      includeCommanderXp: source.standings.includeCommanderXp,
+      includeAchievementPoints: source.standings.includeAchievementPoints,
+      adjustmentMode: source.standings.adjustmentMode,
+      freeGamesBaselineAvg: source.standings.freeGamesBaselineAvg,
+      freeGamesConsecutivePenalty: source.standings.freeGamesConsecutivePenalty,
+      freeGamesMinimumAvg: source.standings.freeGamesMinimumAvg,
+      penaltyFactor: source.standings.penaltyFactor,
     },
   }
 }
@@ -330,6 +395,13 @@ function applyEditableSettings(target: EditableSettingsState, source: ReturnType
   target.level.thresholds = [...source.level.thresholds]
   target.level.pointsPerLevel = source.level.pointsPerLevel
   target.standings.usePerformanceModifier = source.standings.usePerformanceModifier
+  target.standings.includeCommanderXp = source.standings.includeCommanderXp
+  target.standings.includeAchievementPoints = source.standings.includeAchievementPoints
+  target.standings.adjustmentMode = source.standings.adjustmentMode
+  target.standings.freeGamesBaselineAvg = source.standings.freeGamesBaselineAvg
+  target.standings.freeGamesConsecutivePenalty = source.standings.freeGamesConsecutivePenalty
+  target.standings.freeGamesMinimumAvg = source.standings.freeGamesMinimumAvg
+  target.standings.penaltyFactor = source.standings.penaltyFactor
 }
 
 function toDocument(source: EditableSettingsState): LeagueSettingsDocument {
@@ -362,6 +434,13 @@ function toDocument(source: EditableSettingsState): LeagueSettingsDocument {
     },
     standings: {
       usePerformanceModifier: source.standings.usePerformanceModifier,
+      includeCommanderXp: source.standings.includeCommanderXp,
+      includeAchievementPoints: source.standings.includeAchievementPoints,
+      adjustmentMode: source.standings.adjustmentMode,
+      freeGamesBaselineAvg: sanitizePositiveNumber(source.standings.freeGamesBaselineAvg),
+      freeGamesConsecutivePenalty: sanitizePositiveNumber(source.standings.freeGamesConsecutivePenalty),
+      freeGamesMinimumAvg: sanitizePositiveNumber(source.standings.freeGamesMinimumAvg),
+      penaltyFactor: sanitizePositiveNumber(source.standings.penaltyFactor),
     },
   }
 }
@@ -467,6 +546,11 @@ function getRarityRank(rarity: AchievementDef['rarity']) {
 .settings-card__subtitle {
   margin: $spacing-1 0 0;
   color: $color-text-muted;
+}
+
+.settings-mode-field {
+  margin-bottom: $spacing-4;
+  max-width: 420px;
 }
 
 .placement-grid {
@@ -598,6 +682,17 @@ function getRarityRank(rarity: AchievementDef['rarity']) {
   gap: $spacing-1;
 }
 
+.settings-subgrid {
+  display: grid;
+  grid-template-columns: repeat(3, minmax(0, 1fr));
+  gap: $spacing-3;
+  margin-top: $spacing-2;
+}
+
+.settings-subgrid--single {
+  grid-template-columns: minmax(0, 280px);
+}
+
 .toggle-field {
   display: flex;
   align-items: flex-start;
@@ -710,7 +805,8 @@ function getRarityRank(rarity: AchievementDef['rarity']) {
 @media (max-width: 1100px) {
   .placement-grid,
   .xp-settings__row,
-  .threshold-grid {
+  .threshold-grid,
+  .settings-subgrid {
     grid-template-columns: repeat(2, minmax(0, 1fr));
   }
 
@@ -730,7 +826,8 @@ function getRarityRank(rarity: AchievementDef['rarity']) {
 
   .placement-grid,
   .xp-settings__row,
-  .threshold-grid {
+  .threshold-grid,
+  .settings-subgrid {
     grid-template-columns: 1fr;
   }
 

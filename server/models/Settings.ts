@@ -12,6 +12,13 @@ export interface ISettings extends Document {
   }
   standings?: {
     usePerformanceModifier?: boolean
+    includeCommanderXp?: boolean
+    includeAchievementPoints?: boolean
+    adjustmentMode?: 'compensation' | 'freeGames' | 'penaltyGames'
+    freeGamesBaselineAvg?: number
+    freeGamesConsecutivePenalty?: number
+    freeGamesMinimumAvg?: number
+    penaltyFactor?: number
   }
   createdAt: Date
   updatedAt: Date

@@ -16,7 +16,12 @@ import { formatPlayerName } from '~/utils/playerNames'
 import { getArchEnemySummary } from '~/utils/archEnemy'
 import { getFeaturedPlayerName } from '~/utils/featuredPlayer'
 import { normalizeDeckIdentityKey } from '~/utils/deckLinks'
-import type { LeagueSettingsDocument } from '~/utils/leagueSettings'
+import {
+  getResolvedLeagueSettings,
+  MIN_GAMES_FOR_PENALTY_MODE,
+  type LeagueSettingsDocument,
+  type StandingsAdjustmentMode,
+} from '~/utils/leagueSettings'
 import type { CommanderTitleId } from '~/utils/titles'
 
 // ─── Types ────────────────────────────────────────────────────────────────────
@@ -104,6 +109,10 @@ export interface LeagueStanding {
   totalScore: number
   rank: number
   totalPoints: number
+  adjustmentMode: StandingsAdjustmentMode
+  adjustmentPoints: number
+  adjustmentDisplayPoints: number
+  adjustedTotalPoints: number
   projectedPoints: number
   compensatedTotalPoints: number
   achievementPoints: number
@@ -123,6 +132,10 @@ export interface LeagueSnapshotEntry {
 export interface LeagueStandingMetrics {
   totalScore: number
   totalPoints: number
+  adjustmentMode: StandingsAdjustmentMode
+  adjustmentPoints: number
+  adjustmentDisplayPoints: number
+  adjustedTotalPoints: number
   projectedPoints: number
   compensatedTotalPoints: number
   achievementPoints: number
@@ -260,6 +273,41 @@ export interface ProjectedPointsResult {
   sampleSmoothingGames: number
 }
 
+export interface StandingAdjustmentContext {
+  games?: ProcessedGame[]
+  gameRecords?: Record<string, Record<string, PlayerGameRecord>>
+}
+
+export interface StandingAdjustmentResult {
+  adjustmentMode: StandingsAdjustmentMode
+  adjustmentPoints: number
+  adjustmentDisplayPoints: number
+  adjustedTotalPoints: number
+  missingGames: number
+  cappedMissingGames: number
+  maxGamesPlayed: number
+  leagueFloorScore: number
+  averageScore: number
+  sampleFactor: number
+  decayFactor: number
+  projectedGameValueFactor: number
+  maxProjectedGames: number
+  sampleSmoothingGames: number
+  baselineAvgPoints: number
+  consecutiveMissPenalty: number
+  minimumAvgPoints: number
+  lowestGamesPlayed: number
+  gameGap: number
+  penaltyFactor: number
+}
+
+export interface FreeGameAwardEntry {
+  playerName: string
+  awardedPoints: number
+  averagePointsAtTime: number
+  consecutiveMissesBefore: number
+}
+
 export function calculateProjectedPoints(
   player: Pick<PlayerState, 'totalPoints' | 'gamesPlayed'>,
   playerMap: Record<string, Pick<PlayerState, 'totalPoints' | 'gamesPlayed'>>,
@@ -316,21 +364,244 @@ export function calculateProjectedPoints(
   }
 }
 
+export function calculateStandingsAdjustment(
+  player: Pick<PlayerState, 'name' | 'totalPoints' | 'gamesPlayed'>,
+  playerMap: Record<string, Pick<PlayerState, 'name' | 'totalPoints' | 'gamesPlayed'>>,
+  settings?: LeagueSettingsDocument | null,
+  context?: StandingAdjustmentContext,
+): StandingAdjustmentResult {
+  const resolvedSettings = getResolvedLeagueSettings(settings)
+  const mode = resolvedSettings.standings.adjustmentMode
+
+  if (mode === 'freeGames') {
+    const freeGamesPoints = calculateFreeGamesPoints(player.name, resolvedSettings, context)
+    return {
+      adjustmentMode: mode,
+      adjustmentPoints: freeGamesPoints,
+      adjustmentDisplayPoints: freeGamesPoints,
+      adjustedTotalPoints: round3(player.totalPoints + freeGamesPoints),
+      missingGames: 0,
+      cappedMissingGames: 0,
+      maxGamesPlayed: 0,
+      leagueFloorScore: 0,
+      averageScore: player.gamesPlayed > 0 ? round3(player.totalPoints / player.gamesPlayed) : 0,
+      sampleFactor: 0,
+      decayFactor: 0,
+      projectedGameValueFactor: 0,
+      maxProjectedGames: 0,
+      sampleSmoothingGames: 0,
+      baselineAvgPoints: resolvedSettings.standings.freeGamesBaselineAvg,
+      consecutiveMissPenalty: resolvedSettings.standings.freeGamesConsecutivePenalty,
+      minimumAvgPoints: resolvedSettings.standings.freeGamesMinimumAvg,
+      lowestGamesPlayed: 0,
+      gameGap: 0,
+      penaltyFactor: 0,
+    }
+  }
+
+  if (mode === 'penaltyGames') {
+    const penaltyPoints = calculatePenaltyPoints(player, playerMap, resolvedSettings.standings.penaltyFactor)
+    return {
+      adjustmentMode: mode,
+      adjustmentPoints: -penaltyPoints,
+      adjustmentDisplayPoints: penaltyPoints,
+      adjustedTotalPoints: round3(player.totalPoints - penaltyPoints),
+      missingGames: 0,
+      cappedMissingGames: 0,
+      maxGamesPlayed: 0,
+      leagueFloorScore: 0,
+      averageScore: player.gamesPlayed > 0 ? round3(player.totalPoints / player.gamesPlayed) : 0,
+      sampleFactor: 0,
+      decayFactor: 0,
+      projectedGameValueFactor: 0,
+      maxProjectedGames: 0,
+      sampleSmoothingGames: 0,
+      baselineAvgPoints: 0,
+      consecutiveMissPenalty: 0,
+      minimumAvgPoints: 0,
+      lowestGamesPlayed: getPenaltyBaselineGames(playerMap),
+      gameGap: Math.max(0, player.gamesPlayed - getPenaltyBaselineGames(playerMap)),
+      penaltyFactor: resolvedSettings.standings.penaltyFactor,
+    }
+  }
+
+  const projection = calculateProjectedPoints(player, playerMap)
+  return {
+    adjustmentMode: mode,
+    adjustmentPoints: projection.projectedPoints,
+    adjustmentDisplayPoints: projection.projectedPoints,
+    adjustedTotalPoints: projection.compensatedTotalPoints,
+    missingGames: projection.missingGames,
+    cappedMissingGames: projection.cappedMissingGames,
+    maxGamesPlayed: projection.maxGamesPlayed,
+    leagueFloorScore: projection.leagueFloorScore,
+    averageScore: projection.averageScore,
+    sampleFactor: projection.sampleFactor,
+    decayFactor: projection.decayFactor,
+    projectedGameValueFactor: projection.projectedGameValueFactor,
+    maxProjectedGames: projection.maxProjectedGames,
+    sampleSmoothingGames: projection.sampleSmoothingGames,
+    baselineAvgPoints: 0,
+    consecutiveMissPenalty: 0,
+    minimumAvgPoints: 0,
+    lowestGamesPlayed: 0,
+    gameGap: 0,
+    penaltyFactor: 0,
+  }
+}
+
+function calculateFreeGamesPoints(
+  playerName: string,
+  settings: ReturnType<typeof getResolvedLeagueSettings>,
+  context?: StandingAdjustmentContext,
+) {
+  const orderedGames = [...(context?.games ?? [])].sort(compareGamesChronological)
+  const playerRecords = context?.gameRecords?.[playerName] ?? {}
+
+  if (orderedGames.length === 0) return 0
+
+  let playedGames = 0
+  let playedPoints = 0
+  let consecutiveMisses = 0
+  let freeGamesPoints = 0
+
+  for (const game of orderedGames) {
+    const record = playerRecords[game.gameId]
+
+    if (record) {
+      playedPoints = round3(playedPoints + record.finalPoints)
+      playedGames += 1
+      consecutiveMisses = 0
+      continue
+    }
+
+    const currentAvg = playedGames > 0
+      ? playedPoints / playedGames
+      : settings.standings.freeGamesBaselineAvg
+    const awardedPoints = playedGames > 0
+      ? Math.max(
+        settings.standings.freeGamesMinimumAvg,
+        currentAvg - (consecutiveMisses * settings.standings.freeGamesConsecutivePenalty),
+      )
+      : settings.standings.freeGamesBaselineAvg
+
+    freeGamesPoints = round3(freeGamesPoints + awardedPoints)
+    consecutiveMisses += 1
+  }
+
+  return round3(freeGamesPoints)
+}
+
+export function getFreeGameAwardsForGame(
+  gameId: string,
+  games: ProcessedGame[],
+  gameRecords: Record<string, Record<string, PlayerGameRecord>>,
+  playerNames: string[],
+  settings?: LeagueSettingsDocument | null,
+): FreeGameAwardEntry[] {
+  const resolvedSettings = getResolvedLeagueSettings(settings)
+  if (resolvedSettings.standings.adjustmentMode !== 'freeGames') return []
+
+  const orderedGames = [...games].sort(compareGamesChronological)
+  const playerStats = Object.fromEntries(
+    playerNames.map((playerName) => [playerName, {
+      playedGames: 0,
+      playedPoints: 0,
+      consecutiveMisses: 0,
+    }]),
+  ) as Record<string, { playedGames: number; playedPoints: number; consecutiveMisses: number }>
+
+  for (const game of orderedGames) {
+    const gamePlayerNames = new Set(game.players.map((player) => formatPlayerName(player.name)))
+
+    if (game.gameId === gameId) {
+      return playerNames
+        .filter((playerName) => !gamePlayerNames.has(playerName))
+        .map((playerName) => {
+          const stats = playerStats[playerName] ?? { playedGames: 0, playedPoints: 0, consecutiveMisses: 0 }
+          const averagePointsAtTime = stats.playedGames > 0
+            ? stats.playedPoints / stats.playedGames
+            : resolvedSettings.standings.freeGamesBaselineAvg
+          const awardedPoints = stats.playedGames > 0
+            ? Math.max(
+              resolvedSettings.standings.freeGamesMinimumAvg,
+              averagePointsAtTime - (stats.consecutiveMisses * resolvedSettings.standings.freeGamesConsecutivePenalty),
+            )
+            : resolvedSettings.standings.freeGamesBaselineAvg
+
+          return {
+            playerName,
+            awardedPoints: round3(awardedPoints),
+            averagePointsAtTime: round3(averagePointsAtTime),
+            consecutiveMissesBefore: stats.consecutiveMisses,
+          }
+        })
+        .sort((a, b) => b.awardedPoints - a.awardedPoints || a.playerName.localeCompare(b.playerName))
+    }
+
+    for (const playerName of playerNames) {
+      const record = gameRecords[playerName]?.[game.gameId]
+      if (record) {
+        const stats = playerStats[playerName] ?? { playedGames: 0, playedPoints: 0, consecutiveMisses: 0 }
+        stats.playedGames += 1
+        stats.playedPoints = round3(stats.playedPoints + record.finalPoints)
+        stats.consecutiveMisses = 0
+        playerStats[playerName] = stats
+      } else {
+        const stats = playerStats[playerName] ?? { playedGames: 0, playedPoints: 0, consecutiveMisses: 0 }
+        stats.consecutiveMisses += 1
+        playerStats[playerName] = stats
+      }
+    }
+  }
+
+  return []
+}
+
+function getPenaltyBaselineGames(
+  playerMap: Record<string, Pick<PlayerState, 'gamesPlayed'>>,
+) {
+  const eligibleGamesPlayed = Object.values(playerMap)
+    .map((candidate) => candidate.gamesPlayed)
+    .filter((gamesPlayed) => gamesPlayed >= MIN_GAMES_FOR_PENALTY_MODE)
+
+  return eligibleGamesPlayed.length > 0 ? Math.min(...eligibleGamesPlayed) : 0
+}
+
+function calculatePenaltyPoints(
+  player: Pick<PlayerState, 'totalPoints' | 'gamesPlayed'>,
+  playerMap: Record<string, Pick<PlayerState, 'gamesPlayed'>>,
+  penaltyFactor: number,
+) {
+  const lowestGamesPlayed = getPenaltyBaselineGames(playerMap)
+  if (lowestGamesPlayed < MIN_GAMES_FOR_PENALTY_MODE || player.gamesPlayed <= lowestGamesPlayed) return 0
+
+  const gameGap = player.gamesPlayed - lowestGamesPlayed
+  const averageScore = player.gamesPlayed > 0 ? player.totalPoints / player.gamesPlayed : 0
+  return round3(gameGap * averageScore * penaltyFactor)
+}
+
 export function getLeagueStandingMetrics(
   player: PlayerState,
   playerMap: Record<string, PlayerState>,
   settings?: LeagueSettingsDocument | null,
+  context?: StandingAdjustmentContext,
 ): LeagueStandingMetrics {
   const resolvedSettings = getResolvedLeagueSettings(settings)
-  const xpPoints = getXpPointsWithThresholds(
-    player,
-    resolvedSettings.level.thresholds,
-    resolvedSettings.level.pointsPerLevel,
-  )
+  const xpPoints = resolvedSettings.standings.includeCommanderXp
+    ? getXpPointsWithThresholds(
+      player,
+      resolvedSettings.level.thresholds,
+      resolvedSettings.level.pointsPerLevel,
+    )
+    : 0
+  const achievementPoints = resolvedSettings.standings.includeAchievementPoints
+    ? player.achievementPoints
+    : 0
   const avgPerGame = player.gamesPlayed > 0 ? round3(player.totalPoints / player.gamesPlayed) : 0
   const leagueAvgPerGame = getLeagueAveragePerGame(playerMap)
-  const projection = calculateProjectedPoints(player, playerMap)
-  const compensatedTotalPoints = projection.compensatedTotalPoints
+  const adjustment = calculateStandingsAdjustment(player, playerMap, settings, context)
+  const compensatedTotalPoints = adjustment.adjustedTotalPoints
   const winRateFraction = player.gamesPlayed > 0
     ? player.baseWins / player.gamesPlayed
     : EXPECTED_WIN_RATE
@@ -342,15 +613,19 @@ export function getLeagueStandingMetrics(
   const perfMult = usePerformanceModifier && player.gamesPlayed > 0
     ? Math.min(PERF_MULT_MAX, Math.max(PERF_MULT_MIN, perfMultRaw))
     : 1
-  const multipliedScore = (player.totalPoints + player.achievementPoints + xpPoints) * perfMult
-  const totalScore = round3(multipliedScore + projection.projectedPoints)
+  const multipliedScore = (player.totalPoints + achievementPoints + xpPoints) * perfMult
+  const totalScore = round3(multipliedScore + adjustment.adjustmentPoints)
 
   return {
     totalScore,
     totalPoints: player.totalPoints,
-    projectedPoints: projection.projectedPoints,
+    adjustmentMode: adjustment.adjustmentMode,
+    adjustmentPoints: adjustment.adjustmentPoints,
+    adjustmentDisplayPoints: adjustment.adjustmentDisplayPoints,
+    adjustedTotalPoints: adjustment.adjustedTotalPoints,
+    projectedPoints: adjustment.adjustmentPoints,
     compensatedTotalPoints,
-    achievementPoints: player.achievementPoints,
+    achievementPoints,
     xpPoints,
     perfMult: round3(perfMult),
     gamesPlayed: player.gamesPlayed,
@@ -1310,7 +1585,11 @@ export function useLeagueState() {
     await pendingLeagueInit
   }
 
-  const standings = computed(() => buildLeagueStandings(players.value, rawSettings.value))
+  const standings = computed(() => buildLeagueStandings(
+    players.value,
+    rawSettings.value,
+    { games: games.value, gameRecords: gameRecords.value },
+  ))
 
   async function refresh() {
     await init(true)
@@ -1357,18 +1636,23 @@ function absWeek(date: Date): number {
 function buildLeagueStandings(
   playerMap: Record<string, PlayerState>,
   settings?: LeagueSettingsDocument | null,
+  context?: StandingAdjustmentContext,
 ): LeagueStanding[] {
   const allPlayers = Object.values(playerMap)
 
   return allPlayers
     .map((player) => {
-      const metrics = getLeagueStandingMetrics(player, playerMap, settings)
+      const metrics = getLeagueStandingMetrics(player, playerMap, settings, context)
 
       return {
         name: player.name,
         totalScore: metrics.totalScore,
         rank: 0,
         totalPoints: metrics.totalPoints,
+        adjustmentMode: metrics.adjustmentMode,
+        adjustmentPoints: metrics.adjustmentPoints,
+        adjustmentDisplayPoints: metrics.adjustmentDisplayPoints,
+        adjustedTotalPoints: metrics.adjustedTotalPoints,
         projectedPoints: metrics.projectedPoints,
         compensatedTotalPoints: metrics.compensatedTotalPoints,
         achievementPoints: metrics.achievementPoints,

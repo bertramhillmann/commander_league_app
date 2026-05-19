@@ -784,7 +784,14 @@ const isOwnProfile = computed(() =>
 
 const player = computed(() => players.value[playerId.value] ?? null)
 const playerStanding = computed(() =>
-  player.value ? getLeagueStandingMetrics(player.value, players.value) : null,
+  player.value
+    ? getLeagueStandingMetrics(
+      player.value,
+      players.value,
+      undefined,
+      { games: chronologicalGames.value, gameRecords: gameRecords.value },
+    )
+    : null,
 )
 const chronologicalGames = computed(() => [...games.value].sort(compareGamesChronological))
 const leagueTimeline = computed(() =>

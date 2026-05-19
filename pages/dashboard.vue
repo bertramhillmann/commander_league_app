@@ -15,7 +15,7 @@
         <tr>
           <th class="standings__th standings__th--rank">#</th>
           <th class="standings__th standings__th--name">Player</th>
-          <th class="standings__th standings__th--num" title="((Points + Missed-Game Compensation) + Achievement Points + Commander XP Points) × Performance Multiplier&#10;Compensation decays toward the league floor and is always discounted versus real games&#10;Multiplier rewards win rate and avg points per game relative to the league">
+          <th class="standings__th standings__th--num" :title="totalScoreColumnTitle">
             <button
               type="button"
               class="standings__sort-button standings__sort-button--num"
@@ -30,15 +30,15 @@
             class="standings__th standings__th--num standings__th--mult"
             title="Performance multiplier applied to base score&#10;1.0 = league average · &gt;1.0 = above average · &lt;1.0 = below average"
           >×Mult</th>
-          <th class="standings__th standings__th--num" title="Projected compensation for missed games compared to the most active player&#10;Always discounted and not affected by the multiplier">Comp.</th>
-          <th class="standings__th standings__th--num" title="Base points plus missed-game compensation&#10;Does not include achievements or commander XP">
+          <th class="standings__th standings__th--num" :title="adjustmentColumnTitle">{{ adjustmentColumnLabel }}</th>
+          <th class="standings__th standings__th--num" :title="adjustedPointsColumnTitle">
             <button
               type="button"
               class="standings__sort-button standings__sort-button--num"
-              @click="toggleSort('compensatedTotalPoints')"
+              @click="toggleSort('adjustedTotalPoints')"
             >
-              <span>Pts + Comp</span>
-              <span class="standings__sort-indicator">{{ sortIndicator('compensatedTotalPoints') }}</span>
+              <span>{{ adjustedPointsColumnLabel }}</span>
+              <span class="standings__sort-indicator">{{ sortIndicator('adjustedTotalPoints') }}</span>
             </button>
           </th>
           <th class="standings__th standings__th--num">
@@ -51,7 +51,7 @@
               <span class="standings__sort-indicator">{{ sortIndicator('totalPoints') }}</span>
             </button>
           </th>
-          <th class="standings__th standings__th--num">
+          <th v-if="settings.standings.includeAchievementPoints" class="standings__th standings__th--num">
             <button
               type="button"
               class="standings__sort-button standings__sort-button--num"
@@ -61,7 +61,7 @@
               <span class="standings__sort-indicator">{{ sortIndicator('achievementPoints') }}</span>
             </button>
           </th>
-          <th class="standings__th standings__th--num">
+          <th v-if="settings.standings.includeCommanderXp" class="standings__th standings__th--num">
             <button
               type="button"
               class="standings__sort-button standings__sort-button--num"
@@ -153,16 +153,18 @@
             @mouseenter="onCompEnter(row, $event)"
             @mousemove="onMouseMove($event)"
             @mouseleave="onCompLeave"
-          >{{ fmt(row.projectedPoints) }}</td>
-          <td class="standings__td standings__td--num">{{ fmt(row.compensatedTotalPoints) }}</td>
+          >{{ fmt(row.adjustmentDisplayPoints) }}</td>
+          <td class="standings__td standings__td--num">{{ fmt(row.adjustedTotalPoints) }}</td>
           <td class="standings__td standings__td--num">{{ fmt(row.totalPoints) }}</td>
           <td
+            v-if="settings.standings.includeAchievementPoints"
             class="standings__td standings__td--num standings__td--achv standings__td--hoverable"
             @mouseenter="onAchvEnter(row.name, $event)"
             @mousemove="onMouseMove($event)"
             @mouseleave="onAchvLeave"
           >{{ fmt(row.achievementPoints) }}</td>
           <td
+            v-if="settings.standings.includeCommanderXp"
             class="standings__td standings__td--num standings__td--xp standings__td--hoverable-xp"
             @mouseenter="onXpEnter(row.name, $event)"
             @mousemove="onMouseMove($event)"
@@ -480,56 +482,92 @@
         class="floating-panel mult-tooltip"
         :style="{ top: `${compHover.y}px`, left: `${compHover.x}px` }"
       >
-        <div class="mult-tooltip__title">Compensation</div>
+        <div class="mult-tooltip__title">{{ compHover.title }}</div>
         <table class="mult-tooltip__table">
           <tbody>
-          <tr>
+          <tr v-if="compHover.mode === 'compensation'">
             <td class="mult-tooltip__label">Games</td>
             <td class="mult-tooltip__op"></td>
             <td class="mult-tooltip__detail">{{ compHover.gamesPlayed }} played / {{ compHover.maxGamesPlayed }} max</td>
             <td class="mult-tooltip__value">{{ compHover.missingGames }}</td>
           </tr>
-          <tr>
+          <tr v-if="compHover.mode === 'compensation'">
             <td class="mult-tooltip__label">Projected</td>
             <td class="mult-tooltip__op">=</td>
             <td class="mult-tooltip__detail">min(missing, max(30, {{ compHover.gamesPlayed }}))</td>
             <td class="mult-tooltip__value">{{ compHover.cappedMissingGames }}</td>
           </tr>
-          <tr>
+          <tr v-if="compHover.mode === 'compensation'">
             <td class="mult-tooltip__label">Optimistic</td>
             <td class="mult-tooltip__op"></td>
             <td class="mult-tooltip__detail">player avg / game</td>
             <td class="mult-tooltip__value">{{ fmt(compHover.averageScore) }}</td>
           </tr>
-          <tr>
+          <tr v-if="compHover.mode === 'compensation'">
             <td class="mult-tooltip__label">Floor</td>
             <td class="mult-tooltip__op"></td>
             <td class="mult-tooltip__detail">league worst avg / game</td>
             <td class="mult-tooltip__value">{{ fmt(compHover.leagueFloorScore) }}</td>
           </tr>
-          <tr>
+          <tr v-if="compHover.mode === 'compensation'">
             <td class="mult-tooltip__label">Decay</td>
             <td class="mult-tooltip__op"></td>
             <td class="mult-tooltip__detail">exp(-i / {{ fmt(compHover.decayFactor) }}) per game</td>
             <td class="mult-tooltip__value">decay</td>
           </tr>
-          <tr>
+          <tr v-if="compHover.mode === 'compensation'">
             <td class="mult-tooltip__label">Discounts</td>
             <td class="mult-tooltip__op">×</td>
             <td class="mult-tooltip__detail">{{ fmt(compHover.gameValueFactor) }} value × {{ fmt(compHover.sampleFactor) }} sample</td>
             <td class="mult-tooltip__value">{{ fmt(compHover.gameValueFactor * compHover.sampleFactor) }}</td>
           </tr>
-          <tr class="mult-tooltip__row--sep">
+          <tr v-if="compHover.mode === 'compensation'" class="mult-tooltip__row--sep">
             <td class="mult-tooltip__label">Sample</td>
             <td class="mult-tooltip__op"></td>
             <td class="mult-tooltip__detail">{{ compHover.gamesPlayed }} / ({{ compHover.gamesPlayed }} + {{ fmt(compHover.sampleSmoothingGames) }})</td>
             <td class="mult-tooltip__value">{{ fmt(compHover.sampleFactor) }}</td>
           </tr>
+          <tr v-if="compHover.mode === 'freeGames'">
+            <td class="mult-tooltip__label">Starting avg</td>
+            <td class="mult-tooltip__op"></td>
+            <td class="mult-tooltip__detail">before first played game</td>
+            <td class="mult-tooltip__value">{{ fmt(compHover.baselineAvgPoints) }}</td>
+          </tr>
+          <tr v-if="compHover.mode === 'freeGames'">
+            <td class="mult-tooltip__label">Miss reduction</td>
+            <td class="mult-tooltip__op">-</td>
+            <td class="mult-tooltip__detail">per consecutive missed game</td>
+            <td class="mult-tooltip__value">{{ fmt(compHover.consecutiveMissPenalty) }}</td>
+          </tr>
+          <tr v-if="compHover.mode === 'freeGames'">
+            <td class="mult-tooltip__label">Avg floor</td>
+            <td class="mult-tooltip__op"></td>
+            <td class="mult-tooltip__detail">minimum free-game value</td>
+            <td class="mult-tooltip__value">{{ fmt(compHover.minimumAvgPoints) }}</td>
+          </tr>
+          <tr v-if="compHover.mode === 'penaltyGames'">
+            <td class="mult-tooltip__label">Baseline games</td>
+            <td class="mult-tooltip__op"></td>
+            <td class="mult-tooltip__detail">lowest player sample with at least 30 games</td>
+            <td class="mult-tooltip__value">{{ compHover.lowestGamesPlayed }}</td>
+          </tr>
+          <tr v-if="compHover.mode === 'penaltyGames'">
+            <td class="mult-tooltip__label">Game gap</td>
+            <td class="mult-tooltip__op"></td>
+            <td class="mult-tooltip__detail">your games above the baseline</td>
+            <td class="mult-tooltip__value">{{ compHover.gameGap }}</td>
+          </tr>
+          <tr v-if="compHover.mode === 'penaltyGames'">
+            <td class="mult-tooltip__label">Factor</td>
+            <td class="mult-tooltip__op">×</td>
+            <td class="mult-tooltip__detail">penalty multiplier</td>
+            <td class="mult-tooltip__value">{{ fmt(compHover.penaltyFactor) }}</td>
+          </tr>
           <tr>
-            <td class="mult-tooltip__label">Total Comp.</td>
+            <td class="mult-tooltip__label">{{ compHover.totalLabel }}</td>
             <td class="mult-tooltip__op">=</td>
-            <td class="mult-tooltip__detail">added after ×Mult</td>
-            <td class="mult-tooltip__value">{{ fmt(compHover.projectedPoints) }}</td>
+            <td class="mult-tooltip__detail">{{ compHover.totalDetail }}</td>
+            <td class="mult-tooltip__value">{{ fmt(compHover.displayPoints) }}</td>
           </tr>
           </tbody>
         </table>
@@ -540,10 +578,16 @@
 
 <script setup lang="ts">
 import { computed, reactive, ref } from 'vue'
-import { calculateProjectedPoints, compareGamesChronological, type PlayerGameRecord } from '~/composables/useLeagueState'
+import {
+  calculateStandingsAdjustment,
+  compareGamesChronological,
+  type PlayerGameRecord,
+  type StandingsAdjustmentResult,
+} from '~/composables/useLeagueState'
 import type { PerformancePlayerSeries } from '~/components/charts/PerformanceTimeline.vue'
 import { getArchEnemySummary } from '~/utils/archEnemy'
 import { getFeaturedPlayers, type FeaturedPlayerCandidate } from '~/utils/featuredPlayer'
+import { MIN_GAMES_FOR_PENALTY_MODE, type StandingsAdjustmentMode } from '~/utils/leagueSettings'
 import { formatPlayerName } from '~/utils/playerNames'
 import {
   EXPECTED_WIN_RATE,
@@ -561,7 +605,8 @@ const { user, ensureSession } = useAuth()
 
 type SortKey =
   | 'totalScore'
-  | 'compensatedTotalPoints'
+  | 'adjustedTotalPoints'
+  | 'adjustmentDisplayPoints'
   | 'totalPoints'
   | 'achievementPoints'
   | 'xpPoints'
@@ -612,6 +657,40 @@ const loggedInArchEnemy = computed(() => {
   return getArchEnemySummary(playerName, chronologicalGames.value, gameRecords.value)
 })
 const loggedInPlayerName = computed(() => (user.value ? formatPlayerName(user.value) : ''))
+const adjustmentMode = computed(() => settings.value.standings.adjustmentMode)
+const adjustmentColumnLabel = computed(() => {
+  if (adjustmentMode.value === 'freeGames') return 'Free Games'
+  if (adjustmentMode.value === 'penaltyGames') return 'Penalty'
+  return 'Comp.'
+})
+const adjustedPointsColumnLabel = computed(() => {
+  if (adjustmentMode.value === 'freeGames') return 'Pts + Free Games'
+  if (adjustmentMode.value === 'penaltyGames') return 'Pts - Penalty'
+  return 'Pts + Comp'
+})
+const adjustmentColumnTitle = computed(() => {
+  if (adjustmentMode.value === 'freeGames') {
+    return 'Points earned for missed games based on the player average at that time, reduced by consecutive misses and never added to the player average'
+  }
+  if (adjustmentMode.value === 'penaltyGames') {
+    return `Penalty deducted from players above the lowest player sample once the baseline reaches at least ${MIN_GAMES_FOR_PENALTY_MODE} games`
+  }
+  return 'Projected compensation for missed games compared to the most active player. Always discounted and not affected by the multiplier.'
+})
+const adjustedPointsColumnTitle = computed(() => {
+  if (adjustmentMode.value === 'freeGames') return 'Base points plus earned free-game points. Does not include achievements or commander XP.'
+  if (adjustmentMode.value === 'penaltyGames') return 'Base points minus the excess-games penalty. Does not include achievements or commander XP.'
+  return 'Base points plus missed-game compensation. Does not include achievements or commander XP.'
+})
+const totalScoreColumnTitle = computed(() => {
+  if (adjustmentMode.value === 'freeGames') {
+    return '((Points + Free Games) + Achievement Points + Commander XP Points) × Performance Multiplier'
+  }
+  if (adjustmentMode.value === 'penaltyGames') {
+    return '((Points - Penalty) + Achievement Points + Commander XP Points) × Performance Multiplier'
+  }
+  return '((Points + Missed-Game Compensation) + Achievement Points + Commander XP Points) × Performance Multiplier'
+})
 
 onMounted(async () => {
   hasMounted.value = true
@@ -631,7 +710,10 @@ type MultRow = {
 }
 
 type CompensationRow = {
-  projectedPoints: number
+  adjustmentMode: StandingsAdjustmentMode
+  adjustmentPoints: number
+  adjustmentDisplayPoints: number
+  adjustedTotalPoints: number
   gamesPlayed: number
   projectionMissingGames: number
   projectionCappedMissingGames: number
@@ -643,6 +725,12 @@ type CompensationRow = {
   projectionGameValueFactor: number
   projectionMaxProjectedGames: number
   projectionSampleSmoothingGames: number
+  freeGamesBaselineAvg: number
+  freeGamesConsecutivePenalty: number
+  freeGamesMinimumAvg: number
+  penaltyLowestGamesPlayed: number
+  penaltyGameGap: number
+  penaltyFactor: number
 }
 
 // ── Commander XP points: 1 pt per level per commander ────────────────────────
@@ -714,22 +802,26 @@ function xpToLevelFromThresholds(xp: number, thresholds: number[]) {
 const table = computed(() => {
   const xpThresholds = settings.value.level.thresholds
   const xpPointsPerLevel = settings.value.level.pointsPerLevel
+  const includeCommanderXp = settings.value.standings.includeCommanderXp
+  const includeAchievementPoints = settings.value.standings.includeAchievementPoints
   const playerSummaries = Object.values(players.value).map((player) => {
     const records = Object.values(gameRecords.value[player.name] ?? {})
     const totalPoints = r3(records.reduce((sum, record) => sum + record.finalPoints, 0))
     const gamesPlayed = records.length
     const baseWins = records.filter((record) => record.placement === 1).length
     const totalLPoints = r3(records.reduce((sum, record) => sum + record.lPoints, 0))
-    const xpPoints = r3(
-      Object.values(player.commanderXP).reduce(
-        (sum, xp) => sum + (xpToLevelFromThresholds(xp, xpThresholds) * xpPointsPerLevel),
-        0,
-      ),
-    )
+    const xpPoints = includeCommanderXp
+      ? r3(
+        Object.values(player.commanderXP).reduce(
+          (sum, xp) => sum + (xpToLevelFromThresholds(xp, xpThresholds) * xpPointsPerLevel),
+          0,
+        ),
+      )
+      : 0
 
     return {
       name: player.name,
-      achievementPoints: player.achievementPoints,
+      achievementPoints: includeAchievementPoints ? player.achievementPoints : 0,
       xpPoints,
       totalPoints,
       gamesPlayed,
@@ -741,7 +833,7 @@ const table = computed(() => {
   const playerTotalsMap = Object.fromEntries(
     playerSummaries.map((player) => [
       player.name,
-      { totalPoints: player.totalPoints, gamesPlayed: player.gamesPlayed },
+      { name: player.name, totalPoints: player.totalPoints, gamesPlayed: player.gamesPlayed },
     ]),
   )
   const usePerformanceModifier = settings.value.standings.usePerformanceModifier
@@ -759,13 +851,15 @@ const table = computed(() => {
       leagueAvgPerGame,
       usePerformanceModifier,
     )
-    const projection = calculateProjectedPoints(
-      { totalPoints: player.totalPoints, gamesPlayed: player.gamesPlayed },
+    const adjustment = calculateStandingsAdjustment(
+      { name: player.name, totalPoints: player.totalPoints, gamesPlayed: player.gamesPlayed },
       playerTotalsMap,
+      settings.value,
+      { games: chronologicalGames.value, gameRecords: gameRecords.value },
     )
     const totalScore = r3(
       ((player.totalPoints + player.achievementPoints + player.xpPoints) * performance.perfMult) +
-      projection.projectedPoints,
+      adjustment.adjustmentPoints,
     )
 
     const tc = topCommander(player.name)
@@ -773,18 +867,28 @@ const table = computed(() => {
       rank: 0,
       name: player.name,
       totalScore,
-      projectedPoints: projection.projectedPoints,
-      compensatedTotalPoints: projection.compensatedTotalPoints,
-      projectionMissingGames: projection.missingGames,
-      projectionCappedMissingGames: projection.cappedMissingGames,
-      projectionMaxGamesPlayed: projection.maxGamesPlayed,
-      projectionLeagueFloorScore: projection.leagueFloorScore,
-      projectionAverageScore: projection.averageScore,
-      projectionSampleFactor: projection.sampleFactor,
-      projectionDecayFactor: projection.decayFactor,
-      projectionGameValueFactor: projection.projectedGameValueFactor,
-      projectionMaxProjectedGames: projection.maxProjectedGames,
-      projectionSampleSmoothingGames: projection.sampleSmoothingGames,
+      adjustmentMode: adjustment.adjustmentMode,
+      adjustmentPoints: adjustment.adjustmentPoints,
+      adjustmentDisplayPoints: adjustment.adjustmentDisplayPoints,
+      adjustedTotalPoints: adjustment.adjustedTotalPoints,
+      projectedPoints: adjustment.adjustmentPoints,
+      compensatedTotalPoints: adjustment.adjustedTotalPoints,
+      projectionMissingGames: adjustment.missingGames,
+      projectionCappedMissingGames: adjustment.cappedMissingGames,
+      projectionMaxGamesPlayed: adjustment.maxGamesPlayed,
+      projectionLeagueFloorScore: adjustment.leagueFloorScore,
+      projectionAverageScore: adjustment.averageScore,
+      projectionSampleFactor: adjustment.sampleFactor,
+      projectionDecayFactor: adjustment.decayFactor,
+      projectionGameValueFactor: adjustment.projectedGameValueFactor,
+      projectionMaxProjectedGames: adjustment.maxProjectedGames,
+      projectionSampleSmoothingGames: adjustment.sampleSmoothingGames,
+      freeGamesBaselineAvg: adjustment.baselineAvgPoints,
+      freeGamesConsecutivePenalty: adjustment.consecutiveMissPenalty,
+      freeGamesMinimumAvg: adjustment.minimumAvgPoints,
+      penaltyLowestGamesPlayed: adjustment.lowestGamesPlayed,
+      penaltyGameGap: adjustment.gameGap,
+      penaltyFactor: adjustment.penaltyFactor,
       totalPoints: player.totalPoints,
       achievementPoints: player.achievementPoints,
       xpPoints: player.xpPoints,
@@ -1271,7 +1375,11 @@ type CompensationHoverData = {
   visible: boolean
   x: number
   y: number
-  projectedPoints: number
+  mode: StandingsAdjustmentMode
+  title: string
+  totalLabel: string
+  totalDetail: string
+  displayPoints: number
   gamesPlayed: number
   missingGames: number
   cappedMissingGames: number
@@ -1283,13 +1391,19 @@ type CompensationHoverData = {
   gameValueFactor: number
   maxProjectedGames: number
   sampleSmoothingGames: number
+  baselineAvgPoints: number
+  consecutiveMissPenalty: number
+  minimumAvgPoints: number
+  lowestGamesPlayed: number
+  gameGap: number
+  penaltyFactor: number
 }
 
 type CatchupRow = {
   name: string
   totalPoints: number
-  projectedPoints: number
-  compensatedTotalPoints: number
+  adjustmentPoints: number
+  adjustedTotalPoints: number
   gamesPlayed: number
   avgPerGame: number
 }
@@ -1298,7 +1412,11 @@ const compHover = reactive<CompensationHoverData>({
   visible: false,
   x: 0,
   y: 0,
-  projectedPoints: 0,
+  mode: 'compensation',
+  title: 'Compensation',
+  totalLabel: 'Total Comp.',
+  totalDetail: 'added after ×Mult',
+  displayPoints: 0,
   gamesPlayed: 0,
   missingGames: 0,
   cappedMissingGames: 0,
@@ -1310,6 +1428,12 @@ const compHover = reactive<CompensationHoverData>({
   gameValueFactor: 0,
   maxProjectedGames: 0,
   sampleSmoothingGames: 0,
+  baselineAvgPoints: 0,
+  consecutiveMissPenalty: 0,
+  minimumAvgPoints: 0,
+  lowestGamesPlayed: 0,
+  gameGap: 0,
+  penaltyFactor: 0,
 })
 
 type CatchupHoverData = {
@@ -1389,9 +1513,9 @@ function estimateCatchup(target: CatchupRow) {
   const viewer = table.value.find((row) => row.name === viewerName)
   if (!viewer) return null
 
-  const gap = r3(target.compensatedTotalPoints - viewer.compensatedTotalPoints)
+  const gap = r3(target.adjustedTotalPoints - viewer.adjustedTotalPoints)
   const avgPerGame = viewer.avgPerGame
-  const currentProjectedPoints = viewer.projectedPoints
+  const currentAdjustmentPoints = viewer.adjustmentPoints
 
   if (gap <= 0) {
     return {
@@ -1414,19 +1538,25 @@ function estimateCatchup(target: CatchupRow) {
     const simulatedPlayerMap = {
       ...players.value,
       [viewerName]: {
+        name: viewerName,
         totalPoints,
         gamesPlayed,
       },
     }
-    const projection = calculateProjectedPoints({ totalPoints, gamesPlayed }, simulatedPlayerMap)
-    const compensatedTotalPoints = r3(totalPoints + projection.projectedPoints)
+    const adjustment = calculateStandingsAdjustment(
+      { name: viewerName, totalPoints, gamesPlayed },
+      simulatedPlayerMap,
+      settings.value,
+      { games: chronologicalGames.value, gameRecords: gameRecords.value },
+    )
+    const adjustedTotalPoints = r3(totalPoints + adjustment.adjustmentPoints)
 
     if (games === 1) {
-      nextCompDelta = r3(projection.projectedPoints - currentProjectedPoints)
-      nextNetGain = r3(compensatedTotalPoints - viewer.compensatedTotalPoints)
+      nextCompDelta = r3(adjustment.adjustmentPoints - currentAdjustmentPoints)
+      nextNetGain = r3(adjustedTotalPoints - viewer.adjustedTotalPoints)
     }
 
-    if (compensatedTotalPoints >= target.compensatedTotalPoints) {
+    if (adjustedTotalPoints >= target.adjustedTotalPoints) {
       gamesNeeded = games
       break
     }
@@ -1465,7 +1595,19 @@ function onPlayerLeave() {
 
 function onCompEnter(row: CompensationRow, e: MouseEvent) {
   compHover.visible = true
-  compHover.projectedPoints = row.projectedPoints
+  compHover.mode = row.adjustmentMode
+  compHover.title = row.adjustmentMode === 'freeGames'
+    ? 'Free Games'
+    : row.adjustmentMode === 'penaltyGames'
+      ? 'Penalty'
+      : 'Compensation'
+  compHover.totalLabel = row.adjustmentMode === 'penaltyGames' ? 'Total Penalty' : row.adjustmentMode === 'freeGames' ? 'Total Free Games' : 'Total Comp.'
+  compHover.totalDetail = row.adjustmentMode === 'penaltyGames'
+    ? 'subtracted after ×Mult'
+    : row.adjustmentMode === 'freeGames'
+      ? 'kept permanently outside avg / game'
+      : 'added after ×Mult'
+  compHover.displayPoints = row.adjustmentDisplayPoints
   compHover.gamesPlayed = row.gamesPlayed
   compHover.missingGames = row.projectionMissingGames
   compHover.cappedMissingGames = row.projectionCappedMissingGames
@@ -1477,6 +1619,12 @@ function onCompEnter(row: CompensationRow, e: MouseEvent) {
   compHover.gameValueFactor = row.projectionGameValueFactor
   compHover.maxProjectedGames = row.projectionMaxProjectedGames
   compHover.sampleSmoothingGames = row.projectionSampleSmoothingGames
+  compHover.baselineAvgPoints = row.freeGamesBaselineAvg
+  compHover.consecutiveMissPenalty = row.freeGamesConsecutivePenalty
+  compHover.minimumAvgPoints = row.freeGamesMinimumAvg
+  compHover.lowestGamesPlayed = row.penaltyLowestGamesPlayed
+  compHover.gameGap = row.penaltyGameGap
+  compHover.penaltyFactor = row.penaltyFactor
   const pos = calcCompPosition(e)
   compHover.x = pos.x
   compHover.y = pos.y

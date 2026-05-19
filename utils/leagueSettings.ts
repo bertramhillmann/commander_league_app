@@ -9,6 +9,14 @@ import {
   type PlacementRating,
 } from '~/utils/scoringDefaults'
 
+export type StandingsAdjustmentMode = 'compensation' | 'freeGames' | 'penaltyGames'
+
+export const DEFAULT_FREE_GAMES_BASELINE_AVG = 0.5
+export const DEFAULT_FREE_GAMES_CONSECUTIVE_PENALTY = 0.01
+export const DEFAULT_FREE_GAMES_MIN_AVG = 0.3
+export const DEFAULT_PENALTY_FACTOR = 0.88
+export const MIN_GAMES_FOR_PENALTY_MODE = 30
+
 export interface LeagueSettingsDocument {
   points?: Partial<Record<number, PlacementRating[]>>
   achievements?: Record<string, number>
@@ -20,6 +28,13 @@ export interface LeagueSettingsDocument {
   }
   standings?: {
     usePerformanceModifier?: boolean
+    includeCommanderXp?: boolean
+    includeAchievementPoints?: boolean
+    adjustmentMode?: StandingsAdjustmentMode
+    freeGamesBaselineAvg?: number
+    freeGamesConsecutivePenalty?: number
+    freeGamesMinimumAvg?: number
+    penaltyFactor?: number
   }
 }
 
@@ -35,6 +50,13 @@ export interface ResolvedLeagueSettings {
   }
   standings: {
     usePerformanceModifier: boolean
+    includeCommanderXp: boolean
+    includeAchievementPoints: boolean
+    adjustmentMode: StandingsAdjustmentMode
+    freeGamesBaselineAvg: number
+    freeGamesConsecutivePenalty: number
+    freeGamesMinimumAvg: number
+    penaltyFactor: number
   }
 }
 
@@ -66,6 +88,13 @@ export function getResolvedLeagueSettings(settings?: LeagueSettingsDocument | nu
     },
     standings: {
       usePerformanceModifier: source?.standings?.usePerformanceModifier ?? true,
+      includeCommanderXp: source?.standings?.includeCommanderXp ?? true,
+      includeAchievementPoints: source?.standings?.includeAchievementPoints ?? true,
+      adjustmentMode: source?.standings?.adjustmentMode ?? 'compensation',
+      freeGamesBaselineAvg: toNumberOr(source?.standings?.freeGamesBaselineAvg, DEFAULT_FREE_GAMES_BASELINE_AVG),
+      freeGamesConsecutivePenalty: toNumberOr(source?.standings?.freeGamesConsecutivePenalty, DEFAULT_FREE_GAMES_CONSECUTIVE_PENALTY),
+      freeGamesMinimumAvg: toNumberOr(source?.standings?.freeGamesMinimumAvg, DEFAULT_FREE_GAMES_MIN_AVG),
+      penaltyFactor: toNumberOr(source?.standings?.penaltyFactor, DEFAULT_PENALTY_FACTOR),
     },
   }
 }

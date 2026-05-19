@@ -131,6 +131,24 @@
         </div>
       </div>
 
+      <div v-if="showFreeGameAwards" class="game-card__free-games">
+        <div class="game-card__free-games-title">Missing players received free-game points</div>
+        <div class="game-card__free-games-list">
+          <div
+            v-for="entry in freeGameAwards"
+            :key="entry.playerName"
+            class="game-card__free-games-row"
+          >
+            <span class="game-card__free-games-player">{{ entry.playerName }}</span>
+            <span class="game-card__free-games-meta">
+              avg {{ fmt(entry.averagePointsAtTime) }}
+              <span v-if="entry.consecutiveMissesBefore > 0">- {{ fmt(entry.consecutiveMissesBefore * freeGamesPenalty) }}</span>
+            </span>
+            <span class="game-card__free-games-points">+{{ fmt(entry.awardedPoints) }}</span>
+          </div>
+        </div>
+      </div>
+
       <div v-else class="game-card__editor">
         <div class="game-card__editor-hint">Drag rows to reseed placements. Name, commander, and placement remain editable.</div>
         <div
@@ -211,7 +229,7 @@
 
 <script setup lang="ts">
 import { computed, reactive, ref, watch } from 'vue'
-import type { ProcessedGame, ProcessedGamePlayer } from '~/composables/useLeagueState'
+import { getFreeGameAwardsForGame, type ProcessedGame, type ProcessedGamePlayer } from '~/composables/useLeagueState'
 import type { EditableGamePlayer, GameDocument } from '~/utils/gameTypes'
 import { TIER_META, type Tier } from '~/utils/tiers'
 import { getAchievementDefinition } from '~/utils/achievements'
@@ -236,7 +254,8 @@ const emit = defineEmits<{
 }>()
 
 const { preloadCommanderImages, getCachedCommanderImage } = useImageCache()
-const { games, gameRecords } = useLeagueState()
+const { games, gameRecords, players } = useLeagueState()
+const { settings } = useLeagueSettings()
 const { isAdmin } = useAuth()
 
 const canManageGame = computed(() => isAdmin.value && Boolean(props.adminRawGame))
@@ -317,6 +336,28 @@ const otherCommanders = computed(() => {
 })
 
 const artUrls = ref(new Map<string, string>())
+
+const freeGameAwards = computed(() => {
+  const playerNames = Object.keys(players.value)
+    .map((playerName) => formatPlayerName(playerName))
+    .sort((a, b) => a.localeCompare(b))
+
+  return getFreeGameAwardsForGame(
+    props.game.gameId,
+    games.value,
+    gameRecords.value,
+    playerNames,
+    settings.value,
+  )
+})
+
+const showFreeGameAwards = computed(() =>
+  !isEditing.value
+  && settings.value.standings.adjustmentMode === 'freeGames'
+  && freeGameAwards.value.length > 0,
+)
+
+const freeGamesPenalty = computed(() => settings.value.standings.freeGamesConsecutivePenalty)
 
 watch(
   () => [winnerCommander.value, ...otherCommanders.value],
@@ -509,6 +550,11 @@ function toDateInputValue(value: string | Date) {
   const day = String(date.getDate()).padStart(2, '0')
   return `${year}-${month}-${day}`
 }
+
+function fmt(n: number): string {
+  if (n === 0) return '0'
+  return n % 1 === 0 ? String(n) : n.toFixed(3).replace(/\.?0+$/, '')
+}
 </script>
 
 <style lang="scss" scoped>
@@ -698,6 +744,56 @@ function toDateInputValue(value: string | Date) {
     display: flex;
     flex-direction: column;
     gap: $spacing-2;
+  }
+
+  &__free-games {
+    margin-top: $spacing-3;
+    padding-top: $spacing-3;
+    border-top: 1px solid rgba($border-color, 0.55);
+  }
+
+  &__free-games-title {
+    margin-bottom: $spacing-2;
+    font-size: $font-size-xs;
+    font-weight: $font-weight-semibold;
+    text-transform: uppercase;
+    letter-spacing: 0.06em;
+    color: $color-text-muted;
+  }
+
+  &__free-games-list {
+    display: flex;
+    flex-direction: column;
+    gap: $spacing-1;
+  }
+
+  &__free-games-row {
+    display: grid;
+    grid-template-columns: minmax(0, 1fr) auto auto;
+    gap: $spacing-2;
+    align-items: center;
+    font-size: $font-size-xs;
+    padding: 6px 8px;
+    background: rgba($color-primary, 0.08);
+    border: 1px solid rgba($color-primary-light, 0.12);
+    border-radius: $border-radius-sm;
+  }
+
+  &__free-games-player {
+    color: $color-text;
+    font-weight: $font-weight-medium;
+    min-width: 0;
+  }
+
+  &__free-games-meta {
+    color: $color-text-muted;
+    white-space: nowrap;
+  }
+
+  &__free-games-points {
+    color: $color-secondary;
+    font-weight: $font-weight-semibold;
+    white-space: nowrap;
   }
 
   &__player {
