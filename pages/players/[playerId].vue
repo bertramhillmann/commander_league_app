@@ -268,7 +268,7 @@
                   <span class="cmd-row__level-next">{{ cmd.isMaxLevel ? 'MAX' : `Lv ${cmd.level + 1}` }}</span>
                 </div>
                 <div class="cmd-row__xp-detail">
-                  <span class="cmd-row__xp-current">{{ cmd.currentLevelXP }} / {{ cmd.levelSpanXP }} XP</span>
+                  <span class="cmd-row__xp-current">{{ fmtXp(cmd.currentLevelXP) }} / {{ fmtXp(cmd.levelSpanXP) }} XP</span>
                   <span v-if="!cmd.isMaxLevel" class="cmd-row__xp-remaining">· {{ cmd.xpToNext }} to next</span>
                   <span class="cmd-row__xp-pts" title="Score points contributed by XP levels">+{{ cmd.xpScorePts }} pts</span>
                 </div>
@@ -1955,6 +1955,10 @@ function fmtManaValue(value: number) {
 function fmt(n: number): string {
   if (n === 0) return '0'
   return n % 1 === 0 ? String(n) : n.toFixed(3).replace(/\.?0+$/, '')
+}
+
+function fmtXp(value: number): string {
+  return value % 1 === 0 ? String(value) : value.toFixed(1)
 }
 
 function getRelativeDelta(value: number, baseline: number) {

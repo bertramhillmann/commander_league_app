@@ -38,7 +38,7 @@
         {{ isMaxLevel ? 'MAX' : `Lvl ${level + 1}` }}
       </span>
       <div class="cmd-meta__xp-label">
-        {{ currentLevelXP }} / {{ levelSpanXP }} XP
+        {{ fmtXp(currentLevelXP) }} / {{ fmtXp(levelSpanXP) }} XP
       </div>
     
     </div>
@@ -170,6 +170,10 @@ const avgPoints = computed(() => {
 const winRatePct = computed(() =>
   totalGames.value > 0 ? Math.round((firstPlaces.value / totalGames.value) * 100) : 0,
 )
+
+function fmtXp(value: number) {
+  return value % 1 === 0 ? String(value) : value.toFixed(1)
+}
 </script>
 
 <style lang="scss" scoped>

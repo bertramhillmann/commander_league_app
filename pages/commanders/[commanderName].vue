@@ -160,7 +160,7 @@
                     <div class="player-row__bar-fill" :style="{ width: `${row.levelPct}%` }" />
                   </div>
                   <span class="player-row__level-next">{{ row.isMaxLevel ? 'MAX' : `Lv ${row.level + 1}` }}</span>
-                  <span class="player-row__xp-current">{{ row.currentLevelXP }} / {{ row.levelSpanXP }} XP</span>
+                  <span class="player-row__xp-current">{{ fmtXp(row.currentLevelXP) }} / {{ fmtXp(row.levelSpanXP) }} XP</span>
                   <span v-if="!row.isMaxLevel" class="player-row__xp-remaining">· {{ row.xpToNext }} to next</span>
                   <span class="player-row__xp-pts" title="Score points from XP levels">+{{ row.xpScorePts }} pts</span>
                 </div>
@@ -399,6 +399,10 @@ const sortedPlayers = computed(() => {
 function fmt(n: number): string {
   if (n === 0) return '0'
   return n % 1 === 0 ? String(n) : n.toFixed(3).replace(/\.?0+$/, '')
+}
+
+function fmtXp(value: number): string {
+  return value % 1 === 0 ? String(value) : value.toFixed(1)
 }
 
 const PREVIEW_OFFSET_X = 18
