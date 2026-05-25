@@ -6,7 +6,10 @@ export interface IPlayerPurchase {
   type: string
   cost: number
   set: string
+  set_name: string
   cards: string[]
+  date: Date
+  priceEuro: number
   createdAt?: Date
   updatedAt?: Date
 }
@@ -37,7 +40,10 @@ const PlayerPurchaseSchema = new Schema<IPlayerPurchase>(
     type: { type: String, required: true },
     cost: { type: Number, required: true, default: 0 },
     set: { type: String, required: true, default: '' },
+    set_name: { type: String, required: true, default: '' },
     cards: { type: [String], default: [] },
+    date: { type: Date, required: true, default: Date.now },
+    priceEuro: { type: Number, required: true, default: 0 },
   },
   { _id: true, timestamps: true }
 )

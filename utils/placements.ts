@@ -1,5 +1,6 @@
 import { getResolvedLeagueSettings } from '~/utils/leagueSettings'
 import { DEFAULT_BASE_RATINGS, type PlacementRating } from '~/utils/scoringDefaults'
+import { roundLoosterPoints } from '~/utils/loosterPoints'
 
 export { type PlacementRating }
 
@@ -69,7 +70,7 @@ export function computeGamePoints<T extends { placement: number }>(
     return {
       ...player,
       points: round3(totalPoints / count),
-      lPoints: round3(totalLPoints / count),
+      lPoints: roundLoosterPoints(totalLPoints / count),
     }
   })
 }

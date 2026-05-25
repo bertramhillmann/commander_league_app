@@ -16,6 +16,10 @@ export interface LoosterPointTransaction {
   timestamp: Date
 }
 
+export function roundLoosterPoints(value: number): number {
+  return Math.round(value * 2) / 2
+}
+
 export function calcGameLoosterPoints(params: {
   placement: number
   eliminations: number
@@ -29,9 +33,9 @@ export function calcGameLoosterPoints(params: {
 }
 
 export function totalLoosterPoints(transactions: LoosterPointTransaction[]): number {
-  return transactions.reduce((sum, t) => sum + t.amount, 0)
+  return roundLoosterPoints(transactions.reduce((sum, t) => sum + t.amount, 0))
 }
 
 export function getMissedGameLoosterPoints(playerCount: number): number {
-  return MISSED_GAME_LPOINTS_BY_PLAYER_COUNT[playerCount] ?? 0
+  return roundLoosterPoints(MISSED_GAME_LPOINTS_BY_PLAYER_COUNT[playerCount] ?? 0)
 }

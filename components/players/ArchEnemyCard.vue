@@ -22,13 +22,13 @@
           </div>
 
           <div class="arch-enemy-card__wounds">
-            {{ summary.losses }}× hit with
-            <span
+            {{ summary.losses }}× humiliated!
+            <!--<span
               class="arch-enemy-card__card-name"
               @mouseenter="onCardEnter($event)"
               @mousemove="onCardMove($event)"
               @mouseleave="onCardLeave"
-            >{{ randomCard }}</span>
+            >{{ randomCard }}</span>-->
           </div>
         </div>
       </div>

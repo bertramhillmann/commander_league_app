@@ -178,14 +178,16 @@
 
 <script setup lang="ts">
 import { fetchCardByName, getCardImageUrl } from '~/services/scryfallService'
+import { formatPlayerName } from '~/utils/playerNames'
 
 definePageMeta({ middleware: [] })
 
 const { isAdmin } = useAuth()
-const { refresh: refreshLeagueState } = useLeagueState()
+const { refresh: refreshLeagueState, gameRecords, init: initLeagueState } = useLeagueState()
 if (!isAdmin.value) {
   await navigateTo('/login')
 }
+await initLeagueState()
 
 // ── Data fetched from server ────────────────────────────────────────────────
 const { data: allPlayers } = await useFetch<string[]>('/api/players')
@@ -209,6 +211,27 @@ const players = ref<PlayerRow[]>([
   { name: '', commander: '', placement: 3, eliminations: null, commanderCasts: null },
   { name: '', commander: '', placement: 4, eliminations: null, commanderCasts: null },
 ])
+
+const canonicalPlayerNames = computed(() => {
+  const entries = (allPlayers.value ?? []).map((name) => [name.trim().toLowerCase(), formatPlayerName(name)] as const)
+  return new Map(entries)
+})
+
+const commandersByPlayer = computed(() => {
+  const byPlayer = new Map<string, string[]>()
+
+  for (const [playerName, records] of Object.entries(gameRecords.value)) {
+    const uniqueCommanders = Array.from(new Set(
+      Object.values(records)
+        .map((record) => record.commander.trim())
+        .filter(Boolean),
+    )).sort((a, b) => a.localeCompare(b))
+
+    byPlayer.set(playerName, uniqueCommanders)
+  }
+
+  return byPlayer
+})
 
 // ── Player autocomplete ─────────────────────────────────────────────────────
 const playerSuggestOpen = ref<boolean[]>(players.value.map(() => false))
@@ -249,10 +272,20 @@ function openCommanderSuggest(index: number) {
 function closeCommanderSuggest(index: number) {
   setTimeout(() => { commanderSuggestOpen.value[index] = false }, 150)
 }
+function getCommanderSuggestionSource(index: number) {
+  const playerName = players.value[index].name.trim()
+  if (!playerName) return allCommanders.value ?? []
+
+  const canonicalPlayerName = canonicalPlayerNames.value.get(playerName.toLowerCase())
+  if (!canonicalPlayerName) return allCommanders.value ?? []
+
+  return commandersByPlayer.value.get(canonicalPlayerName) ?? []
+}
 function filteredCommanderSuggestions(index: number) {
   const q = players.value[index].commander.toLowerCase()
-  if (!q) return allCommanders.value ?? []
-  return (allCommanders.value ?? []).filter((n) => n.toLowerCase().includes(q))
+  const commanderPool = getCommanderSuggestionSource(index)
+  if (!q) return commanderPool
+  return commanderPool.filter((n) => n.toLowerCase().includes(q))
 }
 function selectCommander(index: number, name: string) {
   players.value[index].commander = name

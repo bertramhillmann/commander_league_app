@@ -189,6 +189,22 @@
       <section class="settings-card">
         <div class="settings-card__header">
           <div>
+            <h2 class="settings-card__title">Shop</h2>
+            <p class="settings-card__subtitle">Configure league shop defaults for Looster purchases.</p>
+          </div>
+        </div>
+
+        <div class="settings-subgrid settings-subgrid--single">
+          <label class="form-field">
+            <span class="form-label">Looster Cost (L-Points)</span>
+            <input v-model.number="form.shop.loosterCost" type="number" step="0.001" min="0" class="form-input" />
+          </label>
+        </div>
+      </section>
+
+      <section class="settings-card">
+        <div class="settings-card__header">
+          <div>
             <h2 class="settings-card__title">Achievement Points</h2>
             <p class="settings-card__subtitle">Every achievement stays listed here, but only the points are adjustable.</p>
           </div>
@@ -269,6 +285,9 @@ type EditableSettingsState = {
     freeGamesMinimumAvg: number
     freeGamesGraceMisses: number
     penaltyFactor: number
+  }
+  shop: {
+    loosterCost: number
   }
 }
 
@@ -382,6 +401,9 @@ function createEditableSettings(source: ReturnType<typeof getResolvedLeagueSetti
       freeGamesGraceMisses: source.standings.freeGamesGraceMisses,
       penaltyFactor: source.standings.penaltyFactor,
     },
+    shop: {
+      loosterCost: source.shop.loosterCost,
+    },
   }
 }
 
@@ -409,6 +431,7 @@ function applyEditableSettings(target: EditableSettingsState, source: ReturnType
   target.standings.freeGamesMinimumAvg = source.standings.freeGamesMinimumAvg
   target.standings.freeGamesGraceMisses = source.standings.freeGamesGraceMisses
   target.standings.penaltyFactor = source.standings.penaltyFactor
+  target.shop.loosterCost = source.shop.loosterCost
 }
 
 function toDocument(source: EditableSettingsState): LeagueSettingsDocument {
@@ -449,6 +472,9 @@ function toDocument(source: EditableSettingsState): LeagueSettingsDocument {
       freeGamesMinimumAvg: sanitizePositiveNumber(source.standings.freeGamesMinimumAvg),
       freeGamesGraceMisses: sanitizeInteger(source.standings.freeGamesGraceMisses),
       penaltyFactor: sanitizePositiveNumber(source.standings.penaltyFactor),
+    },
+    shop: {
+      loosterCost: sanitizePositiveNumber(source.shop.loosterCost),
     },
   }
 }

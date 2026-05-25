@@ -153,7 +153,7 @@
         </div>
       </div>
 
-      <div v-else class="game-card__editor">
+        <div v-else-if="isEditing" class="game-card__editor">
         <div class="game-card__editor-hint">Drag rows to reseed placements. Name, commander, and placement remain editable.</div>
         <div
           v-for="(player, index) in draftPlayers"

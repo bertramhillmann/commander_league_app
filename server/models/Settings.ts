@@ -21,6 +21,9 @@ export interface ISettings extends Document {
     freeGamesGraceMisses?: number
     penaltyFactor?: number
   }
+  shop?: {
+    loosterCost?: number
+  }
   createdAt: Date
   updatedAt: Date
 }
@@ -32,6 +35,7 @@ const SettingsSchema = new Schema<ISettings>(
     achievements: { type: Schema.Types.Mixed, default: undefined },
     level: { type: Schema.Types.Mixed, default: undefined },
     standings: { type: Schema.Types.Mixed, default: undefined },
+    shop: { type: Schema.Types.Mixed, default: undefined },
   },
   { timestamps: true },
 )

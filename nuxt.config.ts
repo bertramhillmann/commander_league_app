@@ -19,6 +19,9 @@ export default defineNuxtConfig({
     mongodbUri: process.env.MONGODB_URI,
     playerLogins: process.env.playerLogins,
     admins: process.env.admins ?? '',
-    public: {},
+    environment: process.env.environment ?? process.env.NODE_ENV ?? 'development',
+    public: {
+      environment: process.env.environment ?? process.env.NODE_ENV ?? 'development',
+    },
   },
 })

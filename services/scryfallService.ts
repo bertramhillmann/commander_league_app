@@ -33,8 +33,17 @@ interface ScryfallCollectionResponse {
   data: ScryfallCard[]
 }
 
+export interface ScryfallSet {
+  code: string
+  name: string
+  scryfall_uri: string
+  search_uri?: string
+  icon_svg_uri?: string
+}
+
 // Module-level cache persists for the lifetime of the page.
 const cache = new Map<string, ScryfallCard | null>()
+const setCache = new Map<string, ScryfallSet | null>()
 
 function normalizeCardName(name: string) {
   return name.trim().toLowerCase()
@@ -118,6 +127,26 @@ export async function fetchCardsByName(names: string[]): Promise<Map<string, Scr
   }
 
   return results
+}
+
+/**
+ * Fetch a Scryfall set by code.
+ * Returns null when the set is not found.
+ */
+export async function fetchSetByCode(code: string): Promise<ScryfallSet | null> {
+  const normalizedCode = code.trim().toLowerCase()
+
+  if (!normalizedCode) return null
+  if (setCache.has(normalizedCode)) return setCache.get(normalizedCode)!
+
+  try {
+    const data = await $fetch<ScryfallSet>(`${BASE_URL}/sets/${normalizedCode}`)
+    setCache.set(normalizedCode, data)
+    return data
+  } catch {
+    setCache.set(normalizedCode, null)
+    return null
+  }
 }
 
 /**

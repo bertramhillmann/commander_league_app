@@ -30,6 +30,7 @@ export default defineEventHandler(async (event) => {
         achievements: nextSettings.achievements ?? undefined,
         level: nextSettings.level ?? undefined,
         standings: nextSettings.standings ?? undefined,
+        shop: nextSettings.shop ?? undefined,
       },
     },
     { new: true, upsert: true, setDefaultsOnInsert: true },
@@ -43,6 +44,7 @@ export default defineEventHandler(async (event) => {
           achievements: updated.achievements ?? undefined,
           level: updated.level ?? undefined,
           standings: updated.standings ?? undefined,
+          shop: updated.shop ?? undefined,
         }
       : null,
   }
@@ -64,4 +66,5 @@ function isEmptySettings(settings: LeagueSettingsDocument) {
     && settings.standings?.freeGamesMinimumAvg === undefined
     && settings.standings?.freeGamesGraceMisses === undefined
     && settings.standings?.penaltyFactor === undefined
+    && settings.shop?.loosterCost === undefined
 }

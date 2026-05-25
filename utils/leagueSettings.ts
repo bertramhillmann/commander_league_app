@@ -16,6 +16,7 @@ export const DEFAULT_FREE_GAMES_CONSECUTIVE_PENALTY = 0.01
 export const DEFAULT_FREE_GAMES_MIN_AVG = 0.3
 export const DEFAULT_FREE_GAMES_GRACE_MISSES = 3
 export const DEFAULT_PENALTY_FACTOR = 0.88
+export const DEFAULT_LOOSTER_COST = 2.4
 export const MIN_GAMES_FOR_PENALTY_MODE = 30
 
 export interface LeagueSettingsDocument {
@@ -37,6 +38,9 @@ export interface LeagueSettingsDocument {
     freeGamesMinimumAvg?: number
     freeGamesGraceMisses?: number
     penaltyFactor?: number
+  }
+  shop?: {
+    loosterCost?: number
   }
 }
 
@@ -60,6 +64,9 @@ export interface ResolvedLeagueSettings {
     freeGamesMinimumAvg: number
     freeGamesGraceMisses: number
     penaltyFactor: number
+  }
+  shop: {
+    loosterCost: number
   }
 }
 
@@ -99,6 +106,9 @@ export function getResolvedLeagueSettings(settings?: LeagueSettingsDocument | nu
       freeGamesMinimumAvg: toNumberOr(source?.standings?.freeGamesMinimumAvg, DEFAULT_FREE_GAMES_MIN_AVG),
       freeGamesGraceMisses: Math.max(0, Math.round(toNumberOr(source?.standings?.freeGamesGraceMisses, DEFAULT_FREE_GAMES_GRACE_MISSES))),
       penaltyFactor: toNumberOr(source?.standings?.penaltyFactor, DEFAULT_PENALTY_FACTOR),
+    },
+    shop: {
+      loosterCost: toNumberOr(source?.shop?.loosterCost, DEFAULT_LOOSTER_COST),
     },
   }
 }

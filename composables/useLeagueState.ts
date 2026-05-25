@@ -11,7 +11,7 @@ import { applyModifiers, type ModifierResult } from '~/utils/modifiers'
 import { calculateXPGained, consumeCommanderRest, xpToLevel } from '~/utils/commanderExperience'
 import { getTier, blendScore, type Tier } from '~/utils/tiers'
 import { getAchievementDefinition, type EarnedAchievement } from '~/utils/achievements'
-import { getMissedGameLoosterPoints } from '~/utils/loosterPoints'
+import { getMissedGameLoosterPoints, roundLoosterPoints } from '~/utils/loosterPoints'
 import { formatPlayerName } from '~/utils/playerNames'
 import { getArchEnemySummary } from '~/utils/archEnemy'
 import { getFeaturedPlayerName } from '~/utils/featuredPlayer'
@@ -1351,7 +1351,7 @@ export function useLeagueState() {
           // Update player totals
           const ps = playerMap[p.name]
           ps.totalPoints = round3(ps.totalPoints + finalPoints)
-          ps.totalLPoints = round3(ps.totalLPoints + p.lPoints)
+          ps.totalLPoints = roundLoosterPoints(ps.totalLPoints + p.lPoints)
           ps.totalBasePoints = round3(ps.totalBasePoints + p.points)
           if (p.placement === 1) ps.baseWins++
           ps.gamesPlayed++
@@ -1362,7 +1362,7 @@ export function useLeagueState() {
           const cs = commanderMap[p.commander]
           cs.totalPoints = round3(cs.totalPoints + finalPoints)
           cs.totalBasePoints = round3(cs.totalBasePoints + p.points)
-          cs.totalLPoints = round3(cs.totalLPoints + p.lPoints)
+          cs.totalLPoints = roundLoosterPoints(cs.totalLPoints + p.lPoints)
           cs.gamesPlayed++
           if (isWinner) cs.wins++
           if (!cs.uniquePlayers.includes(p.name)) cs.uniquePlayers.push(p.name)
@@ -1392,7 +1392,7 @@ export function useLeagueState() {
           for (const playerName of allPlayerNames) {
             if (participants.has(playerName)) continue
             if (!playerMap[playerName]) playerMap[playerName] = createEmptyPlayerState(playerName)
-            playerMap[playerName].totalLPoints = round3(playerMap[playerName].totalLPoints + missedGameLPoints)
+            playerMap[playerName].totalLPoints = roundLoosterPoints(playerMap[playerName].totalLPoints + missedGameLPoints)
           }
         }
 

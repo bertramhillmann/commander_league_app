@@ -3,9 +3,13 @@
     <h1 class="dashboard__title">Standings</h1>
 
     <div v-if="pageLoading" class="dash-loader" aria-live="polite" aria-busy="true">
-      <span class="dash-loader__dot" />
-      <span class="dash-loader__dot" />
-      <span class="dash-loader__dot" />
+      <div class="dash-loader__inner">
+        <div class="dash-loader__dots"><span /><span /><span /></div>
+        <p class="dash-loader__label">{{ progressLabel }}</p>
+        <div class="dash-loader__track">
+          <div class="dash-loader__fill" :style="{ width: `${progressPercent}%` }" />
+        </div>
+      </div>
     </div>
 
     <template v-else>
@@ -102,16 +106,6 @@
             </button>
           </th>
           <th class="standings__th standings__th--commander">Most Played Commander</th>
-          <th class="standings__th standings__th--num">
-            <button
-              type="button"
-              class="standings__sort-button standings__sort-button--num"
-              @click="toggleSort('totalLPoints')"
-            >
-              <span>L-Points</span>
-              <span class="standings__sort-indicator">{{ sortIndicator('totalLPoints') }}</span>
-            </button>
-          </th>
         </tr>
       </thead>
       <tbody>
@@ -191,11 +185,79 @@
             </NuxtLink>
             <span v-else class="standings__muted">—</span>
           </td>
-          <td class="standings__td standings__td--num standings__td--lp">{{ fmt(row.totalLPoints) }}</td>
         </tr>
       </tbody>
     </table>
     </div>
+
+    <div class="dashboard__prize-pool">
+      <span class="dashboard__prize-pool-label">Prize Pool</span>
+      <strong class="dashboard__prize-pool-value">{{ fmtEuro(totalPrizePool) }}</strong>
+    </div>
+
+    <section class="dashboard__looster-section">
+      <header class="dashboard__looster-header">
+        <h2 class="dashboard__looster-title">Looster Points</h2>
+        <p class="dashboard__looster-subtitle">Availability, spending, and set trends per player.</p>
+      </header>
+
+      <div class="dashboard__looster-wrap">
+        <table class="looster-table">
+          <thead>
+            <tr>
+              <th class="looster-table__th looster-table__th--name">Player</th>
+              <th class="looster-table__th looster-table__th--num">Loosters Available</th>
+              <th class="looster-table__th looster-table__th--num">Looster Points Right Now</th>
+              <th class="looster-table__th looster-table__th--num">Looster Points Spent</th>
+              <th class="looster-table__th looster-table__th--num">Bought Loosters</th>
+              <th class="looster-table__th looster-table__th--set">Most Bought Set</th>
+              <th class="looster-table__th looster-table__th--num">LP Over Games</th>
+              <th class="looster-table__th looster-table__th--num">LP Over Missed</th>
+              <th class="looster-table__th looster-table__th--num">Looster Points Total</th>
+            </tr>
+          </thead>
+          <tbody>
+            <tr v-for="row in loosterTable" :key="row.name" class="looster-table__row">
+              <td class="looster-table__td looster-table__td--name">
+                <NuxtLink class="looster-table__player-link" :to="`/players/${encodeURIComponent(row.name)}`">
+                  {{ row.name }}
+                </NuxtLink>
+              </td>
+              <td
+                class="looster-table__td looster-table__td--num looster-table__td--available"
+                :class="row.availableLoosters > 0 ? 'looster-table__td--available-yes' : 'looster-table__td--available-no'"
+              >
+                {{ row.availableLoosters }}
+              </td>
+              <td class="looster-table__td looster-table__td--num">{{ fmt(row.currentLoosterPoints) }}</td>
+              <td class="looster-table__td looster-table__td--num looster-table__td--spent">{{ fmt(row.spentLoosterPoints) }}</td>
+              <td class="looster-table__td looster-table__td--num">{{ row.boughtLoosters }}</td>
+              <td class="looster-table__td looster-table__td--set">
+                <a
+                  v-if="row.mostBoughtSet"
+                  class="looster-table__set-link"
+                  :href="loosterSetMeta[row.mostBoughtSet]?.scryfallUrl || `https://scryfall.com/sets/${row.mostBoughtSet.toLowerCase()}`"
+                  target="_blank"
+                  rel="noopener noreferrer"
+                >
+                  <img
+                    v-if="loosterSetMeta[row.mostBoughtSet]?.iconUrl"
+                    :src="loosterSetMeta[row.mostBoughtSet].iconUrl"
+                    :alt="`${row.mostBoughtSet} set icon`"
+                    class="looster-table__set-icon"
+                  >
+                  <span>{{ row.mostBoughtSet }}</span>
+                </a>
+                <span v-else>-</span>
+              </td>
+              <td class="looster-table__td looster-table__td--num">{{ fmt(row.gameLoosterPoints) }}</td>
+              <td class="looster-table__td looster-table__td--num">{{ fmt(row.missedGameLoosterPoints) }}</td>
+              <td class="looster-table__td looster-table__td--num">{{ fmt(row.totalLoosterPoints) }}</td>
+            </tr>
+          </tbody>
+        </table>
+      </div>
+    </section>
 
     <section
       v-if="featuredPlayer || loggedInArchEnemy"
@@ -585,9 +647,11 @@ import {
   type StandingsAdjustmentResult,
 } from '~/composables/useLeagueState'
 import type { PerformancePlayerSeries } from '~/components/charts/PerformanceTimeline.vue'
+import { fetchSetByCode } from '~/services/scryfallService'
 import { getArchEnemySummary } from '~/utils/archEnemy'
 import { getFeaturedPlayers, type FeaturedPlayerCandidate } from '~/utils/featuredPlayer'
 import { MIN_GAMES_FOR_PENALTY_MODE, type StandingsAdjustmentMode } from '~/utils/leagueSettings'
+import { roundLoosterPoints } from '~/utils/loosterPoints'
 import { formatPlayerName } from '~/utils/playerNames'
 import {
   EXPECTED_WIN_RATE,
@@ -598,8 +662,9 @@ import {
   PERF_MULT_MIN,
 } from '~/utils/placements'
 import { computeGlobalCommanderBaseline, computePlayerCommanderTier, type Tier } from '~/utils/tiers'
+import type { LoosterPurchaseRecord } from '~/utils/loosterPurchases'
 
-const { commanders, gameRecords, games, leagueSnapshots, players, standings, loading, loaded } = useLeagueState()
+const { commanders, gameRecords, games, leagueSnapshots, players, standings, loading, loaded, progress } = useLeagueState()
 const { settings } = useLeagueSettings()
 const { user, ensureSession } = useAuth()
 
@@ -634,10 +699,41 @@ type SpotlightStatTile = {
   initials: string
 }
 
+type LoosterTableRow = {
+  name: string
+  availableLoosters: number
+  currentLoosterPoints: number
+  gameLoosterPoints: number
+  spentLoosterPoints: number
+  boughtLoosters: number
+  mostBoughtSet: string
+  missedGameLoosterPoints: number
+  totalLoosterPoints: number
+}
+
+type DashboardSetMeta = {
+  iconUrl: string
+  scryfallUrl: string
+}
+
 const sortKey = ref<SortKey>('totalScore')
 const sortDirection = ref<'desc' | 'asc'>('desc')
 const hasMounted = ref(false)
+const purchases = ref<LoosterPurchaseRecord[]>([])
+const loosterSetMeta = ref<Record<string, DashboardSetMeta>>({})
 const pageLoading = computed(() => !hasMounted.value || loading.value || !loaded.value)
+const progressPercent = computed(() => {
+  if (progress.value.total <= 0) return 8
+  return Math.max(8, Math.min(100, Math.round((progress.value.current / progress.value.total) * 100)))
+})
+const progressLabel = computed(() => {
+  if (progress.value.total <= 0) return 'Preparing league data...'
+  return `${progress.value.current}/${progress.value.total} games computed`
+})
+const totalPrizePool = computed(() =>
+  purchases.value.reduce((sum, purchase) => sum + Number(purchase.priceEuro ?? 0), 0),
+)
+const loosterCost = computed(() => Number(settings.value.shop.loosterCost ?? 0))
 const chronologicalGames = computed(() => [...games.value].sort(compareGamesChronological))
 const playerPortraitModules = import.meta.glob('../assets/img/*.png', { eager: true, import: 'default' })
 const playerPortraits = Object.fromEntries(
@@ -692,10 +788,105 @@ const totalScoreColumnTitle = computed(() => {
   return '((Points + Missed-Game Compensation) + Achievement Points + Commander XP Points) × Performance Multiplier'
 })
 
+const purchasesByPlayer = computed(() => {
+  const grouped = new Map<string, LoosterPurchaseRecord[]>()
+
+  for (const purchase of purchases.value) {
+    const existing = grouped.get(purchase.playerName) ?? []
+    existing.push(purchase)
+    grouped.set(purchase.playerName, existing)
+  }
+
+  return grouped
+})
+
+const loosterTable = computed<LoosterTableRow[]>(() =>
+  table.value.map((standingRow) => {
+    const playerName = standingRow.name
+    const player = players.value[playerName]
+    const playerPurchases = purchasesByPlayer.value.get(playerName) ?? []
+    const gameLoosterPoints = roundLoosterPoints(
+      Object.values(gameRecords.value[playerName] ?? {}).reduce((sum, record) => sum + record.lPoints, 0),
+    )
+    const spentLoosterPoints = r3(
+      playerPurchases.reduce((sum, purchase) => sum + Number(purchase.cost ?? 0), 0),
+    )
+    const totalLoosterPoints = roundLoosterPoints(player?.totalLPoints ?? 0)
+    const missedGameLoosterPoints = roundLoosterPoints(
+      Math.max(0, totalLoosterPoints - gameLoosterPoints),
+    )
+    const currentLoosterPoints = r3(totalLoosterPoints - spentLoosterPoints)
+    const availableLoosters = loosterCost.value > 0
+      ? Math.max(0, Math.floor(currentLoosterPoints / loosterCost.value))
+      : 0
+
+    const setCounts = playerPurchases.reduce((counts, purchase) => {
+      counts.set(purchase.set, (counts.get(purchase.set) ?? 0) + 1)
+      return counts
+    }, new Map<string, number>())
+
+    const mostBoughtSet = [...setCounts.entries()]
+      .sort((left, right) => right[1] - left[1] || left[0].localeCompare(right[0]))[0]?.[0] ?? ''
+
+    return {
+      name: playerName,
+      availableLoosters,
+      currentLoosterPoints,
+      gameLoosterPoints,
+      spentLoosterPoints,
+      boughtLoosters: playerPurchases.length,
+      mostBoughtSet,
+      missedGameLoosterPoints,
+      totalLoosterPoints,
+    }
+  }),
+)
+
 onMounted(async () => {
   hasMounted.value = true
   await ensureSession()
+  await loadPrizePool()
 })
+
+async function loadPrizePool() {
+  try {
+    const response = await $fetch<{ purchases: LoosterPurchaseRecord[] }>('/api/purchases')
+    purchases.value = response.purchases ?? []
+    await loadLoosterSetMeta()
+  } catch {
+    purchases.value = []
+    loosterSetMeta.value = {}
+  }
+}
+
+async function loadLoosterSetMeta() {
+  const uniqueSetCodes = [...new Set(
+    purchases.value.map((purchase) => purchase.set?.trim()).filter(Boolean),
+  )] as string[]
+
+  if (uniqueSetCodes.length === 0) {
+    loosterSetMeta.value = {}
+    return
+  }
+
+  const resolvedSets = await Promise.all(uniqueSetCodes.map(async (setCode) => {
+    const set = await fetchSetByCode(setCode)
+    return [setCode, set] as const
+  }))
+
+  const nextMeta: Record<string, DashboardSetMeta> = {}
+
+  for (const [setCode, set] of resolvedSets) {
+    if (!set?.icon_svg_uri || !set?.scryfall_uri) continue
+
+    nextMeta[setCode] = {
+      iconUrl: set.icon_svg_uri,
+      scryfallUrl: set.scryfall_uri,
+    }
+  }
+
+  loosterSetMeta.value = nextMeta
+}
 
 type MultRow = {
   winRate: number
@@ -743,6 +934,13 @@ function topCommander(playerName: string): string | null {
   const counts: Record<string, number> = {}
   for (const r of records) counts[r.commander] = (counts[r.commander] ?? 0) + 1
   return Object.entries(counts).sort((a, b) => b[1] - a[1])[0]?.[0] ?? null
+}
+
+function fmtEuro(value: number) {
+  return new Intl.NumberFormat('de-DE', {
+    style: 'currency',
+    currency: 'EUR',
+  }).format(value)
 }
 
 const globalCommanderBaseline = computed(() =>
@@ -1637,26 +1835,55 @@ function onCompLeave() {
 
 <style lang="scss" scoped>
 .dash-loader {
-  display: flex;
-  justify-content: center;
-  gap: 6px;
-  padding: $spacing-12 0;
+  position: fixed;
+  inset: 0;
+  z-index: 10;
+  display: grid;
+  place-items: center;
 
-  &__dot {
-    width: 5px;
-    height: 5px;
-    border-radius: 50%;
-    background: rgba($color-primary-light, 0.5);
-    animation: dash-dot 1.6s ease-in-out infinite;
-
-    &:nth-child(2) { animation-delay: 0.18s; }
-    &:nth-child(3) { animation-delay: 0.36s; }
+  &__inner {
+    display: flex;
+    flex-direction: column;
+    align-items: center;
+    gap: $spacing-3;
   }
-}
 
-@keyframes dash-dot {
-  0%, 70%, 100% { opacity: 0.2; }
-  35% { opacity: 0.75; }
+  &__dots {
+    display: flex;
+    gap: 7px;
+
+    span {
+      width: 7px;
+      height: 7px;
+      border-radius: 50%;
+      background: $color-primary-light;
+      animation: page-loader-dot 1.4s ease-in-out infinite;
+
+      &:nth-child(2) { animation-delay: 0.15s; }
+      &:nth-child(3) { animation-delay: 0.3s; }
+    }
+  }
+
+  &__label {
+    font-size: $font-size-xs;
+    letter-spacing: 0.05em;
+    color: $color-text-muted;
+  }
+
+  &__track {
+    width: min(100%, 220px);
+    height: 3px;
+    border-radius: 2px;
+    background: rgba($color-primary-light, 0.1);
+    overflow: hidden;
+  }
+
+  &__fill {
+    height: 100%;
+    border-radius: inherit;
+    background: linear-gradient(90deg, $color-primary, $color-primary-light);
+    transition: width 0.25s ease;
+  }
 }
 
 .dashboard__title {
@@ -1664,6 +1891,160 @@ function onCompLeave() {
   font-weight: $font-weight-bold;
   color: $color-text;
   margin-bottom: $spacing-6;
+}
+
+.dashboard__prize-pool {
+  margin-top: $spacing-4;
+  display: flex;
+  align-items: center;
+  justify-content: flex-end;
+  gap: $spacing-3;
+  padding: $spacing-3 $spacing-4;
+  border: 1px solid rgba($color-primary-light, 0.16);
+  border-radius: $border-radius-lg;
+  background:
+    linear-gradient(180deg, rgba($color-primary, 0.08), rgba(255, 255, 255, 0.02)),
+    rgba(7, 10, 16, 0.72);
+
+  &-label {
+    color: $color-text-muted;
+    font-size: $font-size-xs;
+    text-transform: uppercase;
+    letter-spacing: 0.08em;
+    font-weight: $font-weight-semibold;
+  }
+
+  &-value {
+    color: $color-secondary;
+    font-size: $font-size-lg;
+    font-weight: $font-weight-bold;
+  }
+}
+
+.dashboard__looster-section {
+  margin-top: $spacing-4;
+}
+
+.dashboard__looster-header {
+  display: flex;
+  align-items: flex-end;
+  justify-content: space-between;
+  gap: $spacing-3;
+  margin-bottom: $spacing-3;
+}
+
+.dashboard__looster-title {
+  margin: 0;
+  color: $color-text;
+  font-size: $font-size-lg;
+  font-weight: $font-weight-bold;
+}
+
+.dashboard__looster-subtitle {
+  margin: 0;
+  color: $color-text-muted;
+  font-size: $font-size-sm;
+}
+
+.dashboard__looster-wrap {
+  overflow-x: auto;
+  border: 1px solid rgba($color-primary-light, 0.16);
+  border-radius: $border-radius-lg;
+  background:
+    linear-gradient(180deg, rgba($color-primary, 0.06), rgba(255, 255, 255, 0.02)),
+    rgba(7, 10, 16, 0.72);
+}
+
+.looster-table {
+  width: 100%;
+  min-width: 1100px;
+  border-collapse: collapse;
+
+  &__th,
+  &__td {
+    padding: $spacing-3 $spacing-4;
+    border-bottom: 1px solid rgba($border-color, 0.42);
+    text-align: left;
+    vertical-align: middle;
+  }
+
+  &__th {
+    color: $color-text-muted;
+    font-size: 10px;
+    text-transform: uppercase;
+    letter-spacing: 0.08em;
+    font-weight: $font-weight-semibold;
+    background: rgba(0, 0, 0, 0.14);
+    white-space: nowrap;
+  }
+
+  &__row:last-child &__td {
+    border-bottom: none;
+  }
+
+  &__td {
+    color: $color-text;
+    font-size: $font-size-sm;
+  }
+
+  &__th--num,
+  &__td--num {
+    text-align: center;
+  }
+
+  &__th--set,
+  &__td--set {
+    text-align: center;
+  }
+
+  &__player-link {
+    color: $color-text;
+    text-decoration: none;
+    font-weight: $font-weight-semibold;
+
+    &:hover {
+      color: $color-primary-light;
+    }
+  }
+
+  &__set-link {
+    display: inline-flex;
+    align-items: center;
+    justify-content: center;
+    gap: $spacing-2;
+    color: $color-text;
+    text-decoration: none;
+    font-weight: $font-weight-semibold;
+
+    &:hover {
+      color: $color-primary-light;
+    }
+  }
+
+  &__set-icon {
+    width: 18px;
+    height: 18px;
+    display: block;
+    object-fit: contain;
+    filter: brightness(0) invert(1) drop-shadow(0 4px 8px rgba(0, 0, 0, 0.35));
+  }
+
+  &__td--available {
+    font-weight: $font-weight-bold;
+  }
+
+  &__td--available-yes {
+    color: $color-success;
+  }
+
+  &__td--available-no {
+    color: $color-danger;
+  }
+
+  &__td--spent {
+    color: #f08bb4;
+    font-weight: $font-weight-semibold;
+  }
 }
 
 
@@ -2199,8 +2580,7 @@ function onCompLeave() {
     transition: background $transition-fast;
 
     &:hover {
-      // background: $color-bg-elevated;
-      background:rgba(16,16,16,0.35);
+      background: rgba(16, 16, 16, 0.35);
       backdrop-filter: blur(3px);
     }
 

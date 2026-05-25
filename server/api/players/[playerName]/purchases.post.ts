@@ -1,15 +1,21 @@
 import { connectToDatabase } from '../../../utils/mongoose'
 import { Player } from '../../../models/Player'
-import { addCardsToPlayerCardpool, ensurePlayerExists, normalizeCardNames } from '../../../utils/playerData'
+import { addCardsToPlayerCardpool, ensurePlayerExists } from '../../../utils/playerData'
 import { getPlayerSession, isAdminUser } from '../../../utils/playerAuth'
+import { flattenPlayerPurchases, normalizeEuroPrice, parsePurchaseDate, validateAndCanonicalizeCards } from '../../../utils/purchases'
+import { Settings } from '../../../models/Settings'
 import { formatPlayerName } from '~/utils/playerNames'
+import { DEFAULT_LOOSTER_COST } from '~/utils/leagueSettings'
 
 type PurchaseBody = {
   name?: string
   type?: string
   cost?: number
   set?: string
-  cards?: string[]
+  set_name?: string
+  cards?: string[] | string
+  date?: string
+  priceEuro?: number
 }
 
 export default defineEventHandler(async (event) => {
@@ -32,18 +38,24 @@ export default defineEventHandler(async (event) => {
     throw createError({ statusCode: 403, statusMessage: 'You can only add purchases to your own player record' })
   }
 
-  const purchaseName = (body.name ?? '').trim()
-  const type = (body.type ?? '').trim()
+  const purchaseName = (body.name ?? 'Looster').trim() || 'Looster'
+  const type = (body.type ?? 'looster').trim() || 'looster'
   const set = (body.set ?? '').trim()
-  const cost = Number(body.cost ?? 0)
-  const cards = normalizeCardNames(body.cards ?? [])
+  const setName = (body.set_name ?? '').trim()
+  const cards = await validateAndCanonicalizeCards(body.cards)
+  const purchaseDate = parsePurchaseDate(body.date)
+  const priceEuro = normalizeEuroPrice(body.priceEuro)
 
-  if (!purchaseName || !type) {
-    throw createError({ statusCode: 400, statusMessage: 'Purchase name and type are required' })
+  if (!purchaseName || !type || !set || !setName) {
+    throw createError({ statusCode: 400, statusMessage: 'Purchase name, type, set, and set name are required' })
   }
 
   await connectToDatabase()
   await ensurePlayerExists(playerName)
+  const settingsDoc = await Settings.findOne({ key: 'league' }).lean()
+  const loosterCost = Number.isFinite(Number(settingsDoc?.shop?.loosterCost))
+    ? Number(settingsDoc?.shop?.loosterCost)
+    : DEFAULT_LOOSTER_COST
 
   await Player.updateOne(
     { name: playerName },
@@ -52,9 +64,12 @@ export default defineEventHandler(async (event) => {
         purchases: {
           name: purchaseName,
           type,
-          cost: Number.isFinite(cost) ? cost : 0,
+          cost: loosterCost,
           set,
+          set_name: setName,
           cards,
+          date: purchaseDate,
+          priceEuro,
         },
       },
     },
@@ -67,6 +82,6 @@ export default defineEventHandler(async (event) => {
     ok: true,
     playerName,
     cardpool: player?.cardpool ?? [],
-    purchases: player?.purchases ?? [],
+    purchases: flattenPlayerPurchases(playerName, player?.purchases ?? []),
   }
 })
