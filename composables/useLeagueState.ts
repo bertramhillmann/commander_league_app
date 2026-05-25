@@ -715,7 +715,7 @@ export function getPlayerCommanderMetrics(
   const last = records.filter((record) => record.placement === record.playerCount).length
   const totalBasePoints = round3(records.reduce((sum, record) => sum + record.basePoints, 0))
   const totalFinalPoints = round3(records.reduce((sum, record) => sum + record.finalPoints, 0))
-  const totalLPoints = round3(records.reduce((sum, record) => sum + record.lPoints, 0))
+  const totalLPoints = roundLoosterPoints(records.reduce((sum, record) => sum + record.lPoints, 0))
   const totalLosses = records.filter((record) => record.basePoints === 0).length
   const avgBasePoints = plays > 0 ? round3(totalBasePoints / plays) : 0
   const avgPlacement = plays > 0
@@ -1665,7 +1665,8 @@ export function useLeagueState() {
 }
 
 function round3(n: number): number {
-  return Math.round(n * 1000) / 1000
+  // return Math.round(n * 1000) / 1000
+  return n;
 }
 
 function pauseForUi() {

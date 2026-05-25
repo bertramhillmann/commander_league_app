@@ -229,8 +229,8 @@
               >
                 {{ row.availableLoosters }}
               </td>
-              <td class="looster-table__td looster-table__td--num">{{ fmt(row.currentLoosterPoints) }}</td>
-              <td class="looster-table__td looster-table__td--num looster-table__td--spent">{{ fmt(row.spentLoosterPoints) }}</td>
+              <td class="looster-table__td looster-table__td--num">{{ fmtLooster(row.currentLoosterPoints) }}</td>
+              <td class="looster-table__td looster-table__td--num looster-table__td--spent">{{ fmtLooster(row.spentLoosterPoints) }}</td>
               <td class="looster-table__td looster-table__td--num">{{ row.boughtLoosters }}</td>
               <td class="looster-table__td looster-table__td--set">
                 <a
@@ -250,9 +250,19 @@
                 </a>
                 <span v-else>-</span>
               </td>
-              <td class="looster-table__td looster-table__td--num">{{ fmt(row.gameLoosterPoints) }}</td>
-              <td class="looster-table__td looster-table__td--num">{{ fmt(row.missedGameLoosterPoints) }}</td>
-              <td class="looster-table__td looster-table__td--num">{{ fmt(row.totalLoosterPoints) }}</td>
+              <td
+                class="looster-table__td looster-table__td--num looster-table__td--hoverable"
+                :title="row.gameLoosterPointsTitle"
+              >
+                {{ fmtLooster(row.gameLoosterPoints) }}
+              </td>
+              <td
+                class="looster-table__td looster-table__td--num looster-table__td--hoverable"
+                :title="row.missedGameLoosterPointsTitle"
+              >
+                {{ fmtLooster(row.missedGameLoosterPoints) }}
+              </td>
+              <td class="looster-table__td looster-table__td--num">{{ fmtLooster(row.totalLoosterPoints) }}</td>
             </tr>
           </tbody>
         </table>
@@ -651,7 +661,7 @@ import { fetchSetByCode } from '~/services/scryfallService'
 import { getArchEnemySummary } from '~/utils/archEnemy'
 import { getFeaturedPlayers, type FeaturedPlayerCandidate } from '~/utils/featuredPlayer'
 import { MIN_GAMES_FOR_PENALTY_MODE, type StandingsAdjustmentMode } from '~/utils/leagueSettings'
-import { roundLoosterPoints } from '~/utils/loosterPoints'
+import { formatLoosterPoints, roundLoosterPoints } from '~/utils/loosterPoints'
 import { formatPlayerName } from '~/utils/playerNames'
 import {
   EXPECTED_WIN_RATE,
@@ -704,10 +714,12 @@ type LoosterTableRow = {
   availableLoosters: number
   currentLoosterPoints: number
   gameLoosterPoints: number
+  gameLoosterPointsTitle: string
   spentLoosterPoints: number
   boughtLoosters: number
   mostBoughtSet: string
   missedGameLoosterPoints: number
+  missedGameLoosterPointsTitle: string
   totalLoosterPoints: number
 }
 
@@ -800,22 +812,52 @@ const purchasesByPlayer = computed(() => {
   return grouped
 })
 
+const missedLoosterBreakdownByPlayer = computed(() => {
+  const grouped = new Map<string, { counts: Record<3 | 4 | 5, number>, total: number }>()
+
+  for (const standingRow of table.value) {
+    grouped.set(standingRow.name, {
+      counts: { 3: 0, 4: 0, 5: 0 },
+      total: 0,
+    })
+  }
+
+  for (const game of chronologicalGames.value) {
+    const playerCount = game.players.length
+    if (playerCount !== 3 && playerCount !== 4 && playerCount !== 5) continue
+
+    const missedPoints = getMissedGameLoosterPoints(playerCount)
+    if (missedPoints <= 0) continue
+
+    const participants = new Set(game.players.map((player) => player.name))
+
+    for (const [playerName, breakdown] of grouped.entries()) {
+      if (participants.has(playerName)) continue
+      breakdown.counts[playerCount] += 1
+      breakdown.total = roundLoosterPoints(breakdown.total + missedPoints)
+    }
+  }
+
+  return grouped
+})
+
 const loosterTable = computed<LoosterTableRow[]>(() =>
   table.value.map((standingRow) => {
     const playerName = standingRow.name
     const player = players.value[playerName]
     const playerPurchases = purchasesByPlayer.value.get(playerName) ?? []
+    const playerRecords = Object.values(gameRecords.value[playerName] ?? {})
     const gameLoosterPoints = roundLoosterPoints(
-      Object.values(gameRecords.value[playerName] ?? {}).reduce((sum, record) => sum + record.lPoints, 0),
+      playerRecords.reduce((sum, record) => sum + record.lPoints, 0),
     )
-    const spentLoosterPoints = r3(
+    const spentLoosterPoints = roundLoosterPoints(
       playerPurchases.reduce((sum, purchase) => sum + Number(purchase.cost ?? 0), 0),
     )
     const totalLoosterPoints = roundLoosterPoints(player?.totalLPoints ?? 0)
     const missedGameLoosterPoints = roundLoosterPoints(
       Math.max(0, totalLoosterPoints - gameLoosterPoints),
     )
-    const currentLoosterPoints = r3(totalLoosterPoints - spentLoosterPoints)
+    const currentLoosterPoints = roundLoosterPoints(totalLoosterPoints - spentLoosterPoints)
     const availableLoosters = loosterCost.value > 0
       ? Math.max(0, Math.floor(currentLoosterPoints / loosterCost.value))
       : 0
@@ -828,15 +870,55 @@ const loosterTable = computed<LoosterTableRow[]>(() =>
     const mostBoughtSet = [...setCounts.entries()]
       .sort((left, right) => right[1] - left[1] || left[0].localeCompare(right[0]))[0]?.[0] ?? ''
 
+    const placementCounts = playerRecords.reduce((counts, record) => {
+      counts.set(record.placement, (counts.get(record.placement) ?? 0) + 1)
+      return counts
+    }, new Map<number, number>())
+    const placementTotals = playerRecords.reduce((totals, record) => {
+      totals.set(record.placement, roundLoosterPoints((totals.get(record.placement) ?? 0) + record.lPoints))
+      return totals
+    }, new Map<number, number>())
+    const gameLoosterPointsTitle = playerRecords.length > 0
+      ? [
+          'L-Points over games',
+          ...[...placementCounts.entries()]
+            .sort((left, right) => left[0] - right[0])
+            .map(([placement, count]) =>
+              `${placementLabel(placement)}: ${count}x -> ${fmtLooster(placementTotals.get(placement) ?? 0)} LP`,
+            ),
+          `Total: ${fmtLooster(gameLoosterPoints)} LP`,
+        ].join('\n')
+      : 'No L-Points earned over played games yet.'
+
+    const missedBreakdown = missedLoosterBreakdownByPlayer.value.get(playerName) ?? {
+      counts: { 3: 0, 4: 0, 5: 0 },
+      total: 0,
+    }
+    const missedGameLoosterPointsTitle = missedBreakdown.total > 0
+      ? [
+          'L-Points over missed games',
+          ...(Object.entries(missedBreakdown.counts) as [string, number][])
+            .filter(([, count]) => count > 0)
+            .map(([playerCount, count]) => {
+              const numericPlayerCount = Number(playerCount) as 3 | 4 | 5
+              const total = roundLoosterPoints(count * getMissedGameLoosterPoints(numericPlayerCount))
+              return `${playerCount}-player missed: ${count}x -> ${fmtLooster(total)} LP`
+            }),
+          `Total: ${fmtLooster(missedGameLoosterPoints)} LP`,
+        ].join('\n')
+      : 'No L-Points earned over missed games yet.'
+
     return {
       name: playerName,
       availableLoosters,
       currentLoosterPoints,
       gameLoosterPoints,
+      gameLoosterPointsTitle,
       spentLoosterPoints,
       boughtLoosters: playerPurchases.length,
       mostBoughtSet,
       missedGameLoosterPoints,
+      missedGameLoosterPointsTitle,
       totalLoosterPoints,
     }
   }),
@@ -1423,6 +1505,15 @@ function fmt(n: number | null | undefined): string {
   return n % 1 === 0 ? String(n) : n.toFixed(3).replace(/\.?0+$/, '')
 }
 
+function fmtLooster(n: number | null | undefined): string {
+  return formatLoosterPoints(n)
+}
+
+function placementLabel(placement: number): string {
+  const suffix = placement === 1 ? 'st' : placement === 2 ? 'nd' : placement === 3 ? 'rd' : 'th'
+  return `${placement}${suffix} place`
+}
+
 function pct(n: number): string {
   return `${(n * 100).toFixed(1).replace(/\.0$/, '')}%`
 }
@@ -1985,6 +2076,10 @@ function onCompLeave() {
   &__td {
     color: $color-text;
     font-size: $font-size-sm;
+  }
+
+  &__td--hoverable {
+    cursor: help;
   }
 
   &__th--num,

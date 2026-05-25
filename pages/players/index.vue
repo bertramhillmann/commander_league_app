@@ -63,7 +63,7 @@
               <span class="player-card__stat-lbl">Top Cmdr</span>
             </div>
             <div v-if="player.totalLPoints" class="player-card__stat">
-              <span class="player-card__stat-val player-card__stat-val--lp">{{ fmt(player.totalLPoints) }}</span>
+              <span class="player-card__stat-val player-card__stat-val--lp">{{ fmtLooster(player.totalLPoints) }}</span>
               <span class="player-card__stat-lbl">L-Pts</span>
             </div>
           </div>
@@ -78,6 +78,7 @@
 </template>
 
 <script setup lang="ts">
+import { formatLoosterPoints } from '~/utils/loosterPoints'
 import { getFeaturedPlayers, type FeaturedPlayerCandidate } from '~/utils/featuredPlayer'
 import { compareGamesChronological } from '~/composables/useLeagueState'
 
@@ -138,6 +139,10 @@ function rankLabel(rank: number): string {
 function fmt(n: number): string {
   if (n === 0) return '0'
   return n % 1 === 0 ? String(n) : n.toFixed(3).replace(/\.?0+$/, '')
+}
+
+function fmtLooster(n: number): string {
+  return formatLoosterPoints(n)
 }
 </script>
 

@@ -52,7 +52,7 @@
               <span class="cmd-page__agg-lbl">Players</span>
             </div>
             <div class="cmd-page__agg-stat">
-              <span class="cmd-page__agg-val cmd-page__agg-val--lp">{{ fmt(cmdState.totalLPoints) }}</span>
+              <span class="cmd-page__agg-val cmd-page__agg-val--lp">{{ fmtLooster(cmdState.totalLPoints) }}</span>
               <span class="cmd-page__agg-lbl">L-Points</span>
             </div>
           </div>
@@ -209,6 +209,7 @@ import { compareGamesChronological } from '~/composables/useLeagueState'
 import { getCommanderLevelProgress } from '~/utils/commanderExperience'
 import { buildCommanderPlacementTimeline, type PlacementTimelinePoint } from '~/utils/commanderTimeline'
 import { normalizeDeckIdentityKey } from '~/utils/deckLinks'
+import { formatLoosterPoints } from '~/utils/loosterPoints'
 import { TIER_META, blendScore, getTier, smoothedTierScore } from '~/utils/tiers'
 import { getAchievementDefinition } from '~/utils/achievements'
 import { getCommanderTitleSummary, type CommanderTitleResult } from '~/utils/titles'
@@ -399,6 +400,10 @@ const sortedPlayers = computed(() => {
 function fmt(n: number): string {
   if (n === 0) return '0'
   return n % 1 === 0 ? String(n) : n.toFixed(3).replace(/\.?0+$/, '')
+}
+
+function fmtLooster(n: number): string {
+  return formatLoosterPoints(n)
 }
 
 function fmtXp(value: number): string {

@@ -17,7 +17,15 @@ export interface LoosterPointTransaction {
 }
 
 export function roundLoosterPoints(value: number): number {
-  return Math.round(value * 2) / 2
+  // L-Points can legitimately produce 4-decimal values from tied placement splits
+  // (for example 0.1375), so we preserve 4 decimals while removing float drift.
+  return Math.round(value * 10000) / 10000
+}
+
+export function formatLoosterPoints(value: number | null | undefined): string {
+  if (typeof value !== 'number' || Number.isNaN(value)) return '0'
+  if (value === 0) return '0'
+  return roundLoosterPoints(value).toFixed(4).replace(/\.?0+$/, '')
 }
 
 export function calcGameLoosterPoints(params: {
@@ -25,7 +33,7 @@ export function calcGameLoosterPoints(params: {
   eliminations: number
   commanderCasts: number
 }): number {
-  const placementBonus: Record<number, number> = { 1: 100, 2: 60, 3: 30, 4: 10 }
+  const placementBonus: Record<number, number> = { 1: 0, 2: 0, 3: 0, 4: 0 }
   const base = placementBonus[params.placement] ?? 0
   const eliminationBonus = params.eliminations * 15
   const castBonus = params.commanderCasts * 5

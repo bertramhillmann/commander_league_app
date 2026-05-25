@@ -91,7 +91,7 @@
               <span class="commander-row__stat-lbl">{{ leaderMode === 'overall' ? 'Players' : 'Player' }}</span>
             </div>
             <div class="commander-row__stat">
-              <span class="commander-row__stat-val commander-row__stat-val--danger">{{ fmt(displayLPoints(row)) }}</span>
+              <span class="commander-row__stat-val commander-row__stat-val--danger">{{ fmtLooster(displayLPoints(row)) }}</span>
               <span class="commander-row__stat-lbl">L-Points</span>
             </div>
           </div>
@@ -153,6 +153,8 @@
 </template>
 
 <script setup lang="ts">
+import { formatLoosterPoints, roundLoosterPoints } from '~/utils/loosterPoints'
+
 import { TIER_META, blendScore, getTier, computeGlobalCommanderBaseline, computePlayerCommanderTier, type Tier } from '~/utils/tiers'
 
 type SortKey = 'plays' | 'winRate' | 'avgPoints'
@@ -219,7 +221,7 @@ const commanderRows = computed((): CommanderRow[] => {
 
           const plays = records.length
           const totalBasePoints = records.reduce((sum, record) => sum + record.basePoints, 0)
-          const totalLPoints = round3(records.reduce((sum, record) => sum + record.lPoints, 0))
+          const totalLPoints = roundLoosterPoints(records.reduce((sum, record) => sum + record.lPoints, 0))
           const avgPoints = round3(totalBasePoints / plays)
           const { detail, context } = computePlayerCommanderTier(records, globalCommanderBaseline.value)
           const wins = context.wins
@@ -376,6 +378,10 @@ function metricsLabel(row: CommanderRow) {
 function fmt(n: number) {
   if (n === 0) return '0'
   return n % 1 === 0 ? String(n) : n.toFixed(3).replace(/\.?0+$/, '')
+}
+
+function fmtLooster(n: number) {
+  return formatLoosterPoints(n)
 }
 
 function round3(n: number) {

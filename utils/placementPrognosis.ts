@@ -5,6 +5,7 @@ import {
   type ProcessedGame,
 } from '~/composables/useLeagueState'
 import type { CommanderState } from '~/composables/useLeagueState'
+import { roundLoosterPoints } from '~/utils/loosterPoints'
 import {
   buildPlayerCommanderPickSuggestions,
   type PlayerCommanderPickSuggestion,
@@ -152,7 +153,7 @@ function buildPlayerStateMap(
 function buildPlayerState(playerName: string, records: PlayerGameRecord[]): PlayerState {
   const totalPoints = round3(records.reduce((sum, record) => sum + record.finalPoints, 0))
   const totalBasePoints = round3(records.reduce((sum, record) => sum + record.basePoints, 0))
-  const totalLPoints = round3(records.reduce((sum, record) => sum + record.lPoints, 0))
+  const totalLPoints = roundLoosterPoints(records.reduce((sum, record) => sum + record.lPoints, 0))
   const baseWins = records.filter((record) => record.placement === 1).length
 
   return {

@@ -142,7 +142,7 @@
           <span class="player__stat-lbl">Participation</span>
         </div>
         <div class="player__stat">
-          <span class="player__stat-val player__stat-val--lp">{{ fmt(player.totalLPoints) }}</span>
+          <span class="player__stat-val player__stat-val--lp">{{ fmtLooster(player.totalLPoints) }}</span>
           <span class="player__stat-lbl">L-Points</span>
         </div>
       </div>
@@ -750,6 +750,7 @@ import { buildPlacementPrognosis } from '~/utils/placementPrognosis'
 import { formatPlayerName } from '~/utils/playerNames'
 import { normalizeDeckIdentityKey } from '~/utils/deckLinks'
 import { getResolvedLeagueSettings } from '~/utils/leagueSettings'
+import { formatLoosterPoints } from '~/utils/loosterPoints'
 import { buildPlayerSuggestion, type PlayerCommanderPickSuggestion } from '~/utils/playerSuggestions'
 import { computeGlobalCommanderBaseline, computePlayerCommanderTier, smoothedTierScore, getTierDetail, type TierDetail, type TierContext } from '~/utils/tiers'
 import { getAchievementDefinition } from '~/utils/achievements'
@@ -1955,6 +1956,10 @@ function fmtManaValue(value: number) {
 function fmt(n: number): string {
   if (n === 0) return '0'
   return n % 1 === 0 ? String(n) : n.toFixed(3).replace(/\.?0+$/, '')
+}
+
+function fmtLooster(n: number): string {
+  return formatLoosterPoints(n)
 }
 
 function fmtXp(value: number): string {

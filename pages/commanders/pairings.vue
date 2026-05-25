@@ -119,7 +119,7 @@
             <td class="standings__td standings__td--num">{{ row.totalLosses }}</td>
             <td class="standings__td standings__td--num">{{ row.winRate }}%</td>
             <td class="standings__td standings__td--num">{{ fmt(row.avgPerGame) }}</td>
-            <td class="standings__td standings__td--num standings__td--lp">{{ fmt(row.totalLPoints) }}</td>
+            <td class="standings__td standings__td--num standings__td--lp">{{ fmtLooster(row.totalLPoints) }}</td>
           </tr>
         </tbody>
       </table>
@@ -224,6 +224,7 @@ import {
   PERF_MULT_MAX,
   PERF_MULT_MIN,
 } from '~/utils/placements'
+import { formatLoosterPoints } from '~/utils/loosterPoints'
 import { computeGlobalCommanderBaseline, computePlayerCommanderTier, type Tier } from '~/utils/tiers'
 import { formatPlayerName } from '~/utils/playerNames'
 
@@ -388,6 +389,10 @@ function r3(n: number): number { return Math.round(n * 1000) / 1000 }
 function fmt(n: number): string {
   if (n === 0) return '0'
   return n % 1 === 0 ? String(n) : n.toFixed(3).replace(/\.?0+$/, '')
+}
+
+function fmtLooster(n: number): string {
+  return formatLoosterPoints(n)
 }
 
 function rankLabel(rank: number) {
