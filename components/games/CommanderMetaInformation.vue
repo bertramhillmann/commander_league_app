@@ -15,8 +15,10 @@
     <div class="cmd-meta__header">
       <span class="cmd-meta__name">{{ playerName }} × {{ commanderName }}</span>
       <span class="cmd-meta__title">{{ commanderTitle.name }}</span>
-      <span v-if="tierDetail" class="cmd-meta__tier">
-        <UITierBadge :detail="tierDetail" :context="tierContext" />
+      <span v-if="commanderMmr > 0" class="cmd-meta__mmr">{{ formatCommanderMmr(commanderMmr) }}</span>
+      <span v-if="commanderMmr > 0" class="cmd-meta__tier">
+        <IconsTierIcon :tier="commanderMmrTier" :size="13" />
+        <span class="cmd-meta__tier-label" :class="`tier-text--${commanderMmrTier}`">{{ commanderMmrTierLabel }}</span>
       </span>
     </div>
 
@@ -80,8 +82,8 @@
 <script setup lang="ts">
 import { computed, ref, watch } from 'vue'
 import { compareGamesChronological } from '~/composables/useLeagueState'
+import { getCommanderTierFromMMR, type CommanderMMRTier } from '~/composables/useCommanderMMR'
 import { normalizeDeckIdentityKey } from '~/utils/deckLinks'
-import { computeGlobalCommanderBaseline, computePlayerCommanderTier, type TierDetail, type TierContext } from '~/utils/tiers'
 import { getCommanderLevelProgress } from '~/utils/commanderExperience'
 import { getCommanderTitleSummary } from '~/utils/titles'
 
@@ -113,20 +115,17 @@ const commanderRecords = computed(() =>
   ),
 )
 
-// ── Tier ───────────────────────────────────────────────────────────────────────
-
-const globalCommanderBaseline = computed(() =>
-  computeGlobalCommanderBaseline(commanders.value),
+const commanderMmr = computed(() =>
+  commanderRecords.value[commanderRecords.value.length - 1]?.commanderMMRAfter ?? 0,
 )
 
-const tierComputed = computed(() =>
-  computePlayerCommanderTier(commanderRecords.value, globalCommanderBaseline.value),
+const commanderMmrTier = computed((): CommanderMMRTier =>
+  getCommanderTierFromMMR(commanderMmr.value),
 )
 
-const tierDetail = computed((): TierDetail | null => tierComputed.value.detail)
-const tierContext = computed((): TierContext | undefined =>
-  tierComputed.value.detail ? tierComputed.value.context : undefined,
-)
+const commanderMmrTierLabel = computed(() => {
+  return commanderMmrTier.value.charAt(0).toUpperCase() + commanderMmrTier.value.slice(1)
+})
 
 const commanderTitle = computed(() =>
   getCommanderTitleSummary({
@@ -173,6 +172,10 @@ const winRatePct = computed(() =>
 
 function fmtXp(value: number) {
   return value % 1 === 0 ? String(value) : value.toFixed(1)
+}
+
+function formatCommanderMmr(value: number) {
+  return `${Math.round(value)} MMR`
 }
 </script>
 
@@ -235,6 +238,21 @@ function fmtXp(value: number) {
     background:
       linear-gradient(180deg, rgba(29, 22, 18, 0.98), rgba(14, 10, 8, 0.98));
     box-shadow: inset 0 0 0 1px rgba(255, 224, 154, 0.04);
+  }
+
+  &__mmr {
+    font-size: $font-size-sm;
+    font-weight: $font-weight-bold;
+    color: $color-secondary;
+    font-variant-numeric: tabular-nums;
+  }
+
+  &__tier-label {
+    font-size: 10px;
+    font-weight: $font-weight-semibold;
+    text-transform: uppercase;
+    letter-spacing: 0.08em;
+    color: rgba($color-primary-light, 0.85);
   }
 
   &__tier {

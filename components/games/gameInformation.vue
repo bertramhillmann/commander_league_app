@@ -56,6 +56,12 @@
         <span class="game-info__label">Score after game</span>
         <span class="game-info__value">{{ fmt(record.ratingAfter) }}</span>
       </div>
+      <div class="game-info__row game-info__row--stacked">
+        <span class="game-info__label">Commander MMR change</span>
+        <span class="game-info__value game-info__value--mmr" :class="commanderMmrDeltaClass">
+          {{ fmtSigned(record.commanderMMRDelta) }} ({{ fmt(record.commanderMMRBefore) }} → {{ fmt(record.commanderMMRAfter) }})
+        </span>
+      </div>
       <div class="game-info__row">
         <span class="game-info__label">Rank at that time</span>
         <span class="game-info__rank-change">
@@ -109,7 +115,7 @@ import { computed } from 'vue'
 import { getAchievementDefinition } from '~/utils/achievements'
 import { TIER_META, type Tier } from '~/utils/tiers'
 import { getLeagueStandingMetrics } from '~/composables/useLeagueState'
-import { getHistoricalCommanderTierAtGame } from '~/utils/historicalCommanderTier'
+import { getCommanderTierFromMMR } from '~/composables/useCommanderMMR'
 
 const props = defineProps<{
   playerName: string
@@ -158,14 +164,7 @@ const commanderPlayerAvg = computed(() => {
 
 const commanderTier = computed((): Tier | null => {
   if (!record.value) return null
-
-  return getHistoricalCommanderTierAtGame(
-    props.playerName,
-    record.value.commander,
-    props.gameId,
-    games.value,
-    gameRecords.value,
-  )
+  return getCommanderTierFromMMR(record.value.commanderMMRAfter) as Tier
 })
 
 // ── Rank change ───────────────────────────────────────────────────────────────
@@ -188,9 +187,20 @@ const rankChangeClass = computed(() => {
   return 'game-info__rank--same'
 })
 
+const commanderMmrDeltaClass = computed(() => {
+  if (!record.value) return 'game-info__value--muted'
+  if (record.value.commanderMMRDelta > 0) return 'game-info__mmr--up'
+  if (record.value.commanderMMRDelta < 0) return 'game-info__mmr--down'
+  return 'game-info__value--muted'
+})
+
 function fmt(n: number): string {
   if (n === 0) return '0'
   return n % 1 === 0 ? String(n) : n.toFixed(3).replace(/\.?0+$/, '')
+}
+
+function fmtSigned(n: number): string {
+  return n > 0 ? `+${fmt(n)}` : fmt(n)
 }
 
 function round3(n: number): number {
@@ -292,6 +302,17 @@ function round3(n: number): number {
       margin-top: $spacing-1;
       padding-top: $spacing-1;
     }
+
+    &--stacked {
+      flex-direction: column;
+      align-items: flex-start;
+      gap: 1px;
+    }
+  }
+
+  &__value--mmr {
+    font-variant-numeric: tabular-nums;
+    white-space: nowrap;
   }
 
   &__label {
@@ -361,5 +382,8 @@ function round3(n: number): number {
   &__rank--up   { color: $color-success; }
   &__rank--down { color: $color-danger; }
   &__rank--same { color: $color-text-muted; }
+
+  &__mmr--up   { color: rgba($color-success, 0.65); }
+  &__mmr--down { color: rgba($color-danger, 0.65); }
 }
 </style>

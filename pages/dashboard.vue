@@ -105,7 +105,8 @@
               <span class="standings__sort-indicator">{{ sortIndicator('avgPerGame') }}</span>
             </button>
           </th>
-          <th class="standings__th standings__th--commander">Most Played Commander</th>
+          <!-- <th class="standings__th standings__th--commander">Most Played Commander</th> -->
+          <th class="standings__th standings__th--commander">Top Commander</th>
         </tr>
       </thead>
       <tbody>
@@ -180,8 +181,10 @@
                 v-if="row.topCommanderTier"
                 :tier="row.topCommanderTier"
                 :size="12"
+                :title="row.topCommanderTierLabel ?? undefined"
               />
               {{ row.topCommander }}
+              <span v-if="row.topCommanderMmr" class="standings__commander-mmr">{{ Math.round(row.topCommanderMmr) }} MMR</span>
             </NuxtLink>
             <span v-else class="standings__muted">—</span>
           </td>
@@ -660,6 +663,7 @@ import type { PerformancePlayerSeries } from '~/components/charts/PerformanceTim
 import { fetchSetByCode } from '~/services/scryfallService'
 import { getArchEnemySummary } from '~/utils/archEnemy'
 import { getFeaturedPlayers, type FeaturedPlayerCandidate } from '~/utils/featuredPlayer'
+import { getCommanderTierFromMMR, type CommanderMMRTier } from '~/composables/useCommanderMMR'
 import { MIN_GAMES_FOR_PENALTY_MODE, type StandingsAdjustmentMode } from '~/utils/leagueSettings'
 import { formatLoosterPoints, roundLoosterPoints } from '~/utils/loosterPoints'
 import { formatPlayerName } from '~/utils/playerNames'
@@ -671,10 +675,9 @@ import {
   PERF_MULT_MAX,
   PERF_MULT_MIN,
 } from '~/utils/placements'
-import { computeGlobalCommanderBaseline, computePlayerCommanderTier, type Tier } from '~/utils/tiers'
 import type { LoosterPurchaseRecord } from '~/utils/loosterPurchases'
 
-const { commanders, gameRecords, games, leagueSnapshots, players, standings, loading, loaded, progress } = useLeagueState()
+const { gameRecords, games, leagueSnapshots, players, standings, loading, loaded, progress } = useLeagueState()
 const { settings } = useLeagueSettings()
 const { user, ensureSession } = useAuth()
 
@@ -1010,13 +1013,13 @@ type CompensationRow = {
 
 // ── Most played commander ─────────────────────────────────────────────────────
 
-function topCommander(playerName: string): string | null {
-  const records = Object.values(gameRecords.value[playerName] ?? {})
-  if (records.length === 0) return null
-  const counts: Record<string, number> = {}
-  for (const r of records) counts[r.commander] = (counts[r.commander] ?? 0) + 1
-  return Object.entries(counts).sort((a, b) => b[1] - a[1])[0]?.[0] ?? null
-}
+// function topCommander(playerName: string): string | null {
+//   const records = Object.values(gameRecords.value[playerName] ?? {})
+//   if (records.length === 0) return null
+//   const counts: Record<string, number> = {}
+//   for (const r of records) counts[r.commander] = (counts[r.commander] ?? 0) + 1
+//   return Object.entries(counts).sort((a, b) => b[1] - a[1])[0]?.[0] ?? null
+// }
 
 function fmtEuro(value: number) {
   return new Intl.NumberFormat('de-DE', {
@@ -1025,16 +1028,22 @@ function fmtEuro(value: number) {
   }).format(value)
 }
 
-const globalCommanderBaseline = computed(() =>
-  computeGlobalCommanderBaseline(commanders.value),
-)
+function topCommanderByMmr(playerName: string) {
+  const records = Object.values(gameRecords.value[playerName] ?? {})
+  if (records.length === 0) return null
 
-function playerCommanderTier(playerName: string, commanderName: string): Tier | null {
-  const records = Object.values(gameRecords.value[playerName] ?? {}).filter(
-    (record) => record.commander === commanderName,
-  )
-  const { detail } = computePlayerCommanderTier(records, globalCommanderBaseline.value)
-  return detail?.tier ?? null
+  const latestByCommander = records.reduce<Record<string, { commander: string; mmr: number; tier: CommanderMMRTier }>>((acc, record) => {
+    acc[record.commander] = {
+      commander: record.commander,
+      mmr: record.commanderMMRAfter,
+      tier: getCommanderTierFromMMR(record.commanderMMRAfter),
+    }
+    return acc
+  }, {})
+
+  return Object.values(latestByCommander).sort((left, right) =>
+    right.mmr - left.mmr || left.commander.localeCompare(right.commander),
+  )[0] ?? null
 }
 
 function buildPerformanceMetrics(
@@ -1142,7 +1151,7 @@ const table = computed(() => {
       adjustment.adjustmentPoints,
     )
 
-    const tc = topCommander(player.name)
+    const topCommanderEntry = topCommanderByMmr(player.name)
     return {
       rank: 0,
       name: player.name,
@@ -1182,8 +1191,10 @@ const table = computed(() => {
       winRateTerm: performance.winRateTerm,
       avgFraction: performance.avgFraction,
       avgTerm: performance.avgTerm,
-      topCommander: tc,
-      topCommanderTier: tc ? playerCommanderTier(player.name, tc) : null,
+      topCommander: topCommanderEntry?.commander ?? null,
+      topCommanderMmr: topCommanderEntry?.mmr ?? 0,
+      topCommanderTier: topCommanderEntry?.tier ?? null,
+      topCommanderTierLabel: topCommanderEntry ? commanderMmrTierLabel(topCommanderEntry.tier) : null,
       totalLPoints: player.totalLPoints,
     }
   })
@@ -1492,6 +1503,10 @@ function toggleSort(key: SortKey) {
 function sortIndicator(key: SortKey) {
   if (sortKey.value !== key) return '↕'
   return sortDirection.value === 'desc' ? '↓' : '↑'
+}
+
+function commanderMmrTierLabel(tier: CommanderMMRTier) {
+  return tier.charAt(0).toUpperCase() + tier.slice(1)
 }
 
 
@@ -2741,13 +2756,22 @@ function onCompLeave() {
     align-items: center;
     gap: 4px;
     cursor: default;
-    white-space: nowrap;
+    flex-wrap: wrap;
 
     &:hover {
       cursor:pointer;
       color: $color-primary-light;
       text-decoration: underline dotted;
     }
+  }
+
+  &__commander-mmr {
+    font-size: 10px;
+    font-weight: $font-weight-semibold;
+    color: $color-secondary;
+    letter-spacing: 0.04em;
+    width: 100%;
+    text-align: left;
   }
 
   &__muted {

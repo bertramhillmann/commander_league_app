@@ -7,6 +7,8 @@ import { formatPlayerName } from '~/utils/playerNames'
 const { ensureSession, isAdmin } = useAuth()
 await ensureSession()
 const runtimeConfig = useRuntimeConfig()
+const route = useRoute()
+const highlightGameId = computed(() => (route.query.highlight as string) || null)
 
 const { games, loading, loaded, error, init, refresh: refreshLeagueState, progress } = useLeagueState()
 const hasMounted = ref(false)
@@ -98,6 +100,15 @@ onMounted(() => {
     void init()
   }
 })
+
+watch(pageLoading, (isLoading) => {
+  if (!isLoading && highlightGameId.value) {
+    nextTick(() => {
+      const el = document.getElementById(`game-${highlightGameId.value}`)
+      el?.scrollIntoView({ behavior: 'smooth', block: 'center' })
+    })
+  }
+}, { immediate: true })
 
 async function onGameUpdated() {
   await Promise.all([
@@ -283,16 +294,21 @@ function sampleGames<T>(items: T[], count: number) {
             Test mode is active via `environment=test`, so destructive game-list tools are enabled.
           </div>
 
-          <GamesGame
+          <div
             v-for="game in filteredGames"
             :key="game.gameId"
-            :game="game"
-            :highlight-player="selectedPlayer"
-            :admin-raw-game="isAdmin ? (adminGames ?? []).find((entry) => entry.gameId === game.gameId) ?? null : null"
-            :all-player-options="isAdmin ? (allPlayers ?? []) : []"
-            :all-commander-options="isAdmin ? (allCommanders ?? []) : []"
-            @updated="onGameUpdated"
-          />
+            :id="`game-${game.gameId}`"
+          >
+            <GamesGame
+              :game="game"
+              :highlight-player="selectedPlayer"
+              :highlight="highlightGameId === game.gameId"
+              :admin-raw-game="isAdmin ? (adminGames ?? []).find((entry) => entry.gameId === game.gameId) ?? null : null"
+              :all-player-options="isAdmin ? (allPlayers ?? []) : []"
+              :all-commander-options="isAdmin ? (allCommanders ?? []) : []"
+              @updated="onGameUpdated"
+            />
+          </div>
         </div>
 
         <aside class="game-list__sidebar">

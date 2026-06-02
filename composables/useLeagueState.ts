@@ -9,7 +9,6 @@ import {
 } from '~/utils/placements'
 import { applyModifiers, type ModifierResult } from '~/utils/modifiers'
 import { calculateXPGained, consumeCommanderRest, xpToLevel } from '~/utils/commanderExperience'
-import { getTier, blendScore, type Tier } from '~/utils/tiers'
 import { getAchievementDefinition, type EarnedAchievement } from '~/utils/achievements'
 import { getMissedGameLoosterPoints, roundLoosterPoints } from '~/utils/loosterPoints'
 import { formatPlayerName } from '~/utils/playerNames'
@@ -23,6 +22,12 @@ import {
   type StandingsAdjustmentMode,
 } from '~/utils/leagueSettings'
 import type { CommanderTitleId } from '~/utils/titles'
+import {
+  calculateCommanderMMRChanges,
+  getCommanderTierFromMMR,
+  getInitialCommanderMMR,
+  type CommanderMMRTier,
+} from './useCommanderMMR'
 
 // ─── Types ────────────────────────────────────────────────────────────────────
 
@@ -66,6 +71,9 @@ export interface PlayerGameRecord {
   finalPoints: number
   ratingBefore: number
   ratingAfter: number
+  commanderMMRBefore: number
+  commanderMMRAfter: number
+  commanderMMRDelta: number
   rankBefore: number
   rankAfter: number
   commanderXpBefore: number
@@ -87,7 +95,7 @@ export interface PlayerState {
   wins: number
   commanderXP: Record<string, number>
   commanderRested: Record<string, number>
-  commanderTiers: Record<string, Tier>
+  commanderTiers: Record<string, CommanderMMRTier>
   earnedAchievements: EarnedAchievement[]
   achievementPoints: number
 }
@@ -102,6 +110,8 @@ export interface CommanderState {
   gamesPlayed: number
   wins: number
   uniquePlayers: string[]
+  mmr: number
+  tier: CommanderMMRTier
 }
 
 export interface LeagueStanding {
@@ -1039,6 +1049,40 @@ export function useLeagueState() {
         }
 
         const computed = computeGamePoints(game.players) as ProcessedGamePlayer[]
+        const commanderMMRParticipants = computed.map((player, index) => ({
+          participantId: `${player.name}::${player.commander}::${index}`,
+          commanderName: player.commander,
+          currentMMR: commanderMap[player.commander]?.mmr ?? getInitialCommanderMMR(),
+          placement: player.placement,
+        }))
+        const commanderMMRChanges = calculateCommanderMMRChanges(
+          commanderMMRParticipants.map((participant) => ({
+            commanderId: participant.participantId,
+            commanderName: participant.commanderName,
+            currentMMR: participant.currentMMR,
+            placement: participant.placement,
+          })),
+        )
+        const commanderMMRChangeMap = Object.fromEntries(
+          commanderMMRChanges.map((change) => [change.commanderId, change]),
+        )
+        const commanderMMRAggregateMap = commanderMMRParticipants.reduce<Record<string, {
+          oldMMR: number
+          delta: number
+          newMMR: number
+        }>>((acc, participant) => {
+          const participantChange = commanderMMRChangeMap[participant.participantId]
+          const existing = acc[participant.commanderName] ?? {
+            oldMMR: participant.currentMMR,
+            delta: 0,
+            newMMR: participant.currentMMR,
+          }
+
+          existing.delta = round3(existing.delta + (participantChange?.delta ?? 0))
+          existing.newMMR = round3(existing.oldMMR + existing.delta)
+          acc[participant.commanderName] = existing
+          return acc
+        }, {})
 
         // All other players finished 2nd (killing the table check)
         const allOthers2nd = computed.every((p) => p.placement === 1 || p.placement === 2)
@@ -1057,7 +1101,7 @@ export function useLeagueState() {
           scoreBeforeMap[p.name] = entry?.totalScore ?? 0
         }
 
-        for (const p of computed) {
+        for (const [playerIndex, p] of computed.entries()) {
           const isWinner = p.placement === 1
 
           const commanderXpBefore = playerMap[p.name]?.commanderXP?.[p.commander] ?? 0
@@ -1076,10 +1120,15 @@ export function useLeagueState() {
 
           const modifierSum = modifiers.reduce((s, m) => s + (m.informational ? 0 : m.value), 0)
           const finalPoints = round3(p.points + modifierSum)
+          const commanderMMRParticipantId = commanderMMRParticipants[playerIndex]?.participantId
+          const commanderMMRChange = commanderMMRParticipantId
+            ? commanderMMRChangeMap[commanderMMRParticipantId]
+            : undefined
 
           if (!playerMap[p.name]) playerMap[p.name] = createEmptyPlayerState(p.name)
 
           if (!commanderMap[p.commander]) {
+            const initialCommanderMMR = getInitialCommanderMMR()
             commanderMap[p.commander] = {
               name: p.commander,
               totalPoints: 0,
@@ -1088,6 +1137,8 @@ export function useLeagueState() {
               gamesPlayed: 0,
               wins: 0,
               uniquePlayers: [],
+              mmr: initialCommanderMMR,
+              tier: getCommanderTierFromMMR(initialCommanderMMR),
             }
           }
 
@@ -1103,6 +1154,9 @@ export function useLeagueState() {
             finalPoints,
             ratingBefore: scoreBeforeMap[p.name] ?? 0,
             ratingAfter: 0,
+            commanderMMRBefore: commanderMMRChange?.oldMMR ?? getInitialCommanderMMR(),
+            commanderMMRAfter: commanderMMRChange?.newMMR ?? getInitialCommanderMMR(),
+            commanderMMRDelta: commanderMMRChange?.delta ?? 0,
             rankBefore: rankBeforeMap[p.name] ?? 0,
             rankAfter: 0,
             commanderXpBefore,
@@ -1366,6 +1420,8 @@ export function useLeagueState() {
           cs.gamesPlayed++
           if (isWinner) cs.wins++
           if (!cs.uniquePlayers.includes(p.name)) cs.uniquePlayers.push(p.name)
+          cs.mmr = commanderMMRAggregateMap[p.commander]?.newMMR ?? cs.mmr
+          cs.tier = getCommanderTierFromMMR(cs.mmr)
 
           // Update own game index and commander last-seen index
           playerCommanderLastOwnIdx[p.name][p.commander] = ownIdx
@@ -1474,18 +1530,9 @@ export function useLeagueState() {
 
       // ── Post-processing: tiers + tier/rock-bottom achievements ─────────────
 
-      // Global baseline: mean blended score across all commanders
-      const globalScores = Object.values(commanderMap)
-        .filter((cs) => cs.gamesPlayed > 0)
-        .map((cs) => blendScore(cs.totalBasePoints / cs.gamesPlayed, cs.wins / cs.gamesPlayed))
-      const globalAvgScore =
-        globalScores.length > 0
-          ? globalScores.reduce((s, r) => s + r, 0) / globalScores.length
-          : 0
-
       const gameOrder = new Map(processedGames.map((game, index) => [game.gameId, index]))
 
-      const tierAchievements: Partial<Record<Tier, string>> = {
+      const tierAchievements: Partial<Record<CommanderMMRTier, string>> = {
         god: 'god_tier',
         legend: 'legend_tier',
         diamond: 'diamond_tier',
@@ -1528,11 +1575,12 @@ export function useLeagueState() {
         const ps = playerMap[playerName]
 
         for (const [cmdName, data] of Object.entries(byCommander)) {
-          const rawScore = data.games > 0
-            ? blendScore(data.totalPoints / data.games, data.wins / data.games)
-            : 0
-          const tier = getTier(rawScore, globalAvgScore, data.games)
-          playerMap[playerName].commanderTiers[cmdName] = tier
+          const commanderState = commanderMap[cmdName]
+          const mmrTier = commanderState?.tier ?? getCommanderTierFromMMR(getInitialCommanderMMR())
+          playerMap[playerName].commanderTiers[cmdName] = mmrTier
+
+          // Previous commander tiers were derived from blended score / global baseline.
+          // That aggregate tier system has been retired in favor of per-game commander MMR.
 
           const cumulativeRecords: PlayerGameRecord[] = []
           let cumulativeLasts = 0
@@ -1544,11 +1592,7 @@ export function useLeagueState() {
             cumulativeBasePoints += record.basePoints
             if (record.placement === 1) cumulativeWins++
             if (record.placement === record.playerCount) cumulativeLasts++
-            const cumulativeScore = blendScore(
-              cumulativeBasePoints / cumulativeGames,
-              cumulativeWins / cumulativeGames,
-            )
-            const currentTier = getTier(cumulativeScore, globalAvgScore, cumulativeGames)
+            const currentTier = getCommanderTierFromMMR(record.commanderMMRAfter)
             const achId = tierAchievements[currentTier]
             if (!achId) continue
 

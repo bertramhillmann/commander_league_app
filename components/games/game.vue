@@ -1,5 +1,5 @@
 <template>
-  <div class="game-card" :class="{ 'game-card--hidden': game.hidden, 'game-card--editing': isEditing }">
+  <div class="game-card" :class="{ 'game-card--hidden': game.hidden, 'game-card--editing': isEditing, 'game-card--highlighted': highlight }">
     <div class="game-card__art">
       <div class="game-card__art-winner">
         <img
@@ -114,6 +114,11 @@
               :size="13"
               :title="getTierMeta(player.name, player.commander)?.label"
             />
+            <span
+              v-if="playerCommanderMmr(player.name) !== null"
+              class="game-card__commander-mmr"
+              :title="`Commander MMR after this game: ${fmt(playerCommanderMmr(player.name)!)}`"
+            >{{ fmt(playerCommanderMmr(player.name)!) }}</span>
             <NuxtLink
               class="game-card__commander"
               :to="`/commanders/${encodeURIComponent(player.commander)}`"
@@ -237,17 +242,19 @@ import { getFreeGameAwardsForGame, type ProcessedGame, type ProcessedGamePlayer 
 import type { EditableGamePlayer, GameDocument } from '~/utils/gameTypes'
 import { TIER_META, type Tier } from '~/utils/tiers'
 import { getAchievementDefinition } from '~/utils/achievements'
-import { getHistoricalCommanderTierAtGame } from '~/utils/historicalCommanderTier'
+import { getCommanderTierFromMMR } from '~/composables/useCommanderMMR'
 import { formatPlayerName } from '~/utils/playerNames'
 
 const props = withDefaults(defineProps<{
   game: ProcessedGame
   highlightPlayer?: string | null
+  highlight?: boolean
   adminRawGame?: GameDocument | null
   allPlayerOptions?: string[]
   allCommanderOptions?: string[]
 }>(), {
   highlightPlayer: null,
+  highlight: false,
   adminRawGame: null,
   allPlayerOptions: () => [],
   allCommanderOptions: () => [],
@@ -303,18 +310,18 @@ function placementLabel(p: number) {
 }
 
 function playerTier(playerName: string, commander: string): Tier | null {
-  return getHistoricalCommanderTierAtGame(
-    playerName,
-    commander,
-    props.game.gameId,
-    games.value,
-    gameRecords.value,
-  )
+  const mmr = gameRecords.value[playerName]?.[props.game.gameId]?.commanderMMRAfter
+  if (mmr == null) return null
+  return getCommanderTierFromMMR(mmr) as Tier
 }
 
 function getTierMeta(playerName: string, commander: string) {
   const tier = playerTier(playerName, commander)
   return tier ? TIER_META[tier] : null
+}
+
+function playerCommanderMmr(playerName: string): number | null {
+  return gameRecords.value[playerName]?.[props.game.gameId]?.commanderMMRAfter ?? null
 }
 
 function gameAchievements(playerName: string) {
@@ -584,6 +591,11 @@ function fmt(n: number): string {
 
   &--editing {
     border-color: rgba($color-primary-light, 0.55);
+  }
+
+  &--highlighted {
+    border-color: rgba(255, 210, 50, 0.75);
+    box-shadow: 0 0 0 2px rgba(255, 210, 50, 0.18), $shadow-lg;
   }
 
   &__art {
@@ -857,9 +869,17 @@ function fmt(n: number): string {
     min-width: 0;
   }
 
-  &__commander {
-    color: $color-text-muted;
+  &__commander-mmr {
     font-size: $font-size-xs;
+    color: $color-success;
+    font-variant-numeric: tabular-nums;
+    flex-shrink: 0;
+    opacity: 0.8;
+  }
+
+  &__commander {
+    color: $color-text;
+    font-size: $font-size-sm;
     white-space: nowrap;
     overflow: hidden;
     text-overflow: ellipsis;

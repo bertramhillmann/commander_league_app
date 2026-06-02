@@ -22,8 +22,8 @@
           </div>
 
           <div class="arch-enemy-card__wounds">
-            {{ summary.losses }}× humiliated!
-            <!--<span
+            {{ formatMmr(summary.mmrLost) }} MMR lost
+          <!--<span
               class="arch-enemy-card__card-name"
               @mouseenter="onCardEnter($event)"
               @mousemove="onCardMove($event)"
@@ -89,6 +89,11 @@ const randomCard = computed(() => {
   }
   return BAD_CARDS[hash % BAD_CARDS.length]
 })
+
+function formatMmr(value: number | null | undefined) {
+  if (!Number.isFinite(value)) return '0'
+  return (Math.round((value ?? 0) * 100) / 100).toFixed(2).replace(/\.?0+$/, '')
+}
 
 const cardImageUrl = ref<string | null>(null)
 const cardPreview = reactive({ visible: false, x: 0, y: 0 })

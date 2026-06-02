@@ -27,15 +27,17 @@
 
 <script setup lang="ts">
 import type { Chart, ChartConfiguration, Plugin, TooltipItem } from 'chart.js'
-import type { PlacementTimelinePoint } from '~/utils/commanderTimeline'
+import type { CommanderMMRTimelinePoint, PlacementTimelinePoint } from '~/utils/commanderTimeline'
 
 const props = withDefaults(defineProps<{
-  points: PlacementTimelinePoint[]
+  points: Array<PlacementTimelinePoint | CommanderMMRTimelinePoint>
   title?: string
   compact?: boolean
+  mode?: "placement" | "mmr"
 }>(), {
   title: 'Placements Over Time',
   compact: false,
+  mode: "placement",
 })
 
 const tierPalette: Record<string, string> = {
@@ -65,8 +67,16 @@ const legendTierExamples = computed(() => {
   }).slice(0, 4)
 })
 
+const placementPoints = computed(() =>
+  props.points.filter((point): point is PlacementTimelinePoint => "placement" in point),
+)
+
+const mmrPoints = computed(() =>
+  props.points.filter((point): point is CommanderMMRTimelinePoint => "mmr" in point),
+)
+
 const maxPlacement = computed(() =>
-  Math.max(...props.points.map((point) => point.playerCount), 4),
+  Math.max(...placementPoints.value.map((point) => point.playerCount), 4),
 )
 
 watch(
@@ -79,6 +89,13 @@ watch(
 
 watch(
   () => props.compact,
+  async () => {
+    await renderChart()
+  },
+)
+
+watch(
+  () => props.mode,
   async () => {
     await renderChart()
   },
@@ -108,10 +125,15 @@ function destroyChart() {
 
 function buildChartConfig(): ChartConfiguration<'line' | 'scatter'> {
   const labels = props.points.map((point) => point.dateLabel)
-  const placements = props.points.map((point) => point.placement)
+  const metricValues = props.mode === "mmr"
+    ? mmrPoints.value.map((point) => point.mmr)
+    : placementPoints.value.map((point) => point.placement)
   const markerData = props.points.map((point, index) =>
-    point.tierChange ? { x: index, y: point.placement } : { x: index, y: null },
+    point.tierChange
+      ? { x: index, y: props.mode === "mmr" && "mmr" in point ? point.mmr : "placement" in point ? point.placement : null }
+      : { x: index, y: null },
   )
+  const mmrBounds = getMmrBounds(mmrPoints.value.map((point) => point.mmr))
 
   return {
     type: 'line',
@@ -120,8 +142,8 @@ function buildChartConfig(): ChartConfiguration<'line' | 'scatter'> {
       datasets: [
         {
           type: 'line',
-          label: 'Placement',
-          data: placements,
+          label: props.mode === "mmr" ? "MMR Rating" : "Placement",
+          data: metricValues,
           borderColor: '#9b6ee8',
           backgroundColor: 'rgba(155, 110, 232, 0.14)',
           tension: 0.34,
@@ -188,9 +210,16 @@ function buildChartConfig(): ChartConfiguration<'line' | 'scatter'> {
             label(item: TooltipItem<'line' | 'scatter'>) {
               const point = props.points[item.dataIndex]
               if (!point) return ''
-              const bits = [`${ordinal(point.placement)} of ${point.playerCount}`, point.tierLabel]
-              if (point.gamesWithCommander < 20 && point.projectedTierLabel && point.projectedTierLabel !== point.tierLabel) {
+              const bits = props.mode === "mmr" && "mmr" in point
+                ? [`MMR ${formatMmr(point.mmr)}`, point.tierLabel]
+                : "placement" in point
+                  ? [`${ordinal(point.placement)} of ${point.playerCount}`, point.tierLabel]
+                  : []
+              if ("gamesWithCommander" in point && point.gamesWithCommander < 20 && point.projectedTierLabel && point.projectedTierLabel !== point.tierLabel) {
                 bits.push(`Projected ${point.projectedTierLabel}`)
+              }
+              if ("delta" in point && point.delta !== 0) {
+                bits.push(`${point.delta > 0 ? "+" : ""}${formatMmr(point.delta)} MMR`)
               }
               if (point.tierChange === 'rise') bits.push(`Tier rose to ${point.tierLabel}`)
               if (point.tierChange === 'drop') bits.push(`Tier dropped to ${point.tierLabel}`)
@@ -219,13 +248,14 @@ function buildChartConfig(): ChartConfiguration<'line' | 'scatter'> {
           },
         },
         y: {
-          reverse: true,
-          min: 0.5,
-          max: maxPlacement.value + 0.5,
+          reverse: props.mode === "placement",
+          min: props.mode === "mmr" ? mmrBounds.min : 0.5,
+          max: props.mode === "mmr" ? mmrBounds.max : maxPlacement.value + 0.5,
           ticks: {
             autoSkip: false,
             color: 'rgba(136, 136, 170, 0.78)',
             callback(value) {
+              if (props.mode === "mmr") return formatMmr(Number(value))
               const numericValue = Number(value)
               if (!Number.isInteger(numericValue)) return ''
               if (props.compact) {
@@ -242,6 +272,9 @@ function buildChartConfig(): ChartConfiguration<'line' | 'scatter'> {
           grid: {
             color(context) {
               const value = Number(context.tick.value)
+              if (props.mode === "mmr") {
+                return 'rgba(136, 136, 170, 0.12)'
+              }
               if (props.compact && value !== 1 && value !== maxPlacement.value) {
                 return 'rgba(136, 136, 170, 0.06)'
               }
@@ -301,6 +334,26 @@ function ordinal(value: number) {
   if (value % 10 === 2) return `${value}nd`
   if (value % 10 === 3) return `${value}rd`
   return `${value}th`
+}
+
+function getMmrBounds(values: number[]) {
+  if (values.length === 0) return { min: 1400, max: 1600 }
+
+  const minValue = Math.min(...values)
+  const maxValue = Math.max(...values)
+  if (minValue === maxValue) {
+    return { min: minValue - 50, max: maxValue + 50 }
+  }
+
+  const padding = Math.max(25, Math.round((maxValue - minValue) * 0.12))
+  return {
+    min: minValue - padding,
+    max: maxValue + padding,
+  }
+}
+
+function formatMmr(value: number) {
+  return Math.round(value).toString()
 }
 </script>
 

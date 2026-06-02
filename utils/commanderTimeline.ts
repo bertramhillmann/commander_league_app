@@ -1,5 +1,6 @@
 import { blendScore, computeGlobalCommanderBaselineFromRecords, getTier, smoothedTierScore, type Tier } from '~/utils/tiers'
 import type { PlayerGameRecord, ProcessedGame } from '~/composables/useLeagueState'
+import { getCommanderTierFromMMR, type CommanderMMRTier } from '~/composables/useCommanderMMR'
 
 export interface PlacementTimelinePoint {
   gameId: string
@@ -12,6 +13,16 @@ export interface PlacementTimelinePoint {
   tierChange: 'rise' | 'drop' | null
   projectedTier: Tier | null
   projectedTierLabel: string | null
+}
+
+export interface CommanderMMRTimelinePoint {
+  gameId: string
+  dateLabel: string
+  mmr: number
+  delta: number
+  tier: CommanderMMRTier
+  tierLabel: string
+  tierChange: "rise" | "drop" | null
 }
 
 interface PairTotals {
@@ -124,6 +135,45 @@ export function buildCommanderPlacementTimeline(
   return timeline
 }
 
+export function buildCommanderMMRTimeline(
+  games: ProcessedGame[],
+  gameRecords: Record<string, Record<string, PlayerGameRecord>>,
+  playerName: string,
+  commanderName: string,
+): CommanderMMRTimelinePoint[] {
+  let previousTier: CommanderMMRTier | null = null
+  const timeline: CommanderMMRTimelinePoint[] = []
+
+  for (const game of games) {
+    const targetRecord = gameRecords[playerName]?.[game.gameId]
+    if (!targetRecord || targetRecord.commander !== commanderName) continue
+
+    const tier = getCommanderTierFromMMR(targetRecord.commanderMMRAfter)
+    let tierChange: "rise" | "drop" | null = null
+
+    if (previousTier) {
+      const previousRank = COMMANDER_MMR_TIER_RANK[previousTier]
+      const nextRank = COMMANDER_MMR_TIER_RANK[tier]
+      if (nextRank < previousRank) tierChange = "rise"
+      if (nextRank > previousRank) tierChange = "drop"
+    }
+
+    timeline.push({
+      gameId: game.gameId,
+      dateLabel: formatGameDate(game.date),
+      mmr: targetRecord.commanderMMRAfter,
+      delta: targetRecord.commanderMMRDelta,
+      tier,
+      tierLabel: commanderMmrTierLabel(tier),
+      tierChange,
+    })
+
+    previousTier = tier
+  }
+
+  return timeline
+}
+
 function formatGameDate(date: string | Date) {
   return new Date(date).toLocaleDateString('de-DE', {
     day: '2-digit',
@@ -133,5 +183,20 @@ function formatGameDate(date: string | Date) {
 }
 
 function tierLabel(tier: Tier) {
+  return tier.charAt(0).toUpperCase() + tier.slice(1)
+}
+
+const COMMANDER_MMR_TIER_RANK: Record<CommanderMMRTier, number> = {
+  god: 0,
+  legend: 1,
+  diamond: 2,
+  platinum: 3,
+  gold: 4,
+  silver: 5,
+  bronze: 6,
+  trash: 7,
+}
+
+function commanderMmrTierLabel(tier: CommanderMMRTier) {
   return tier.charAt(0).toUpperCase() + tier.slice(1)
 }

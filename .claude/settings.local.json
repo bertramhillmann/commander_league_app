@@ -9,7 +9,10 @@
       "Bash(npx nuxt:*)",
       "Bash(npx nuxi:*)",
       "Bash(node -e ':*)",
-      "Bash(python3 -c ':*)"
+      "Bash(python3 -c ':*)",
+      "Bash(Get-Content \"c:\\\\Users\\\\bertr\\\\Desktop\\\\Work\\\\cmd_app\\\\components\\\\commanders\\\\TopCommander.vue\")",
+      "Bash(Select-Object -Last 300)",
+      "Bash(Out-String)"
     ]
   }
 }

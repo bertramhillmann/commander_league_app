@@ -40,6 +40,15 @@
 
         <div class="top-commander__metrics">
           <div class="top-commander__metric">
+            <span class="top-commander__metric-label">MMR</span>
+            <span class="top-commander__metric-value">
+              {{ formatMmr(topEntry.currentMmr) }}
+              <span class="top-commander__metric-delta top-commander__metric-delta--up">
+                Peak {{ formatMmr(topEntry.peakMmr) }}
+              </span>
+            </span>
+          </div>
+          <div class="top-commander__metric">
             <span class="top-commander__metric-label">Record</span>
             <span class="top-commander__metric-value">
               {{ topEntry.plays }} games · {{ topEntry.wins }} wins
@@ -79,6 +88,38 @@
             </span>
           </div>
         </div>
+      </div>
+    </article>
+
+    <article
+      v-if="peakEntry"
+      class="top-commander__peak"
+    >
+      <div class="top-commander__peak-label">Honorable Mention</div>
+      <div class="top-commander__peak-title">
+        Highest ever MMR:
+        <NuxtLink class="top-commander__peak-player" :to="`/players/${encodeURIComponent(peakEntry.player)}`">
+          {{ peakEntry.player }}
+        </NuxtLink>
+        <span class="top-commander__peak-sep">×</span>
+        <NuxtLink class="top-commander__peak-commander" :to="`/commanders/${encodeURIComponent(peakEntry.commander)}`">
+          {{ peakEntry.commander }}
+        </NuxtLink>
+      </div>
+      <div class="top-commander__peak-stats">
+        <span class="top-commander__peak-stat--mmr">{{ formatMmr(peakEntry.peakMmr) }} peak MMR</span>
+        <span class="top-commander__peak-stat--mmr">{{ formatMmr(peakEntry.currentMmr) }} current MMR</span>
+        <span>{{ peakEntry.plays }} games</span>
+        <span>{{ pct(peakEntry.winRate) }}% win</span>
+      </div>
+      <div v-if="peakEntry.peakReachedAt || peakEntry.peakPod.length > 0 || peakEntry.peakGameId" class="top-commander__peak-context">
+        <span v-if="peakEntry.peakReachedAt">Hit on {{ formatPeakDate(peakEntry.peakReachedAt) }}</span>
+        <span v-if="peakEntry.peakPod.length > 0">Against pod: {{ peakEntry.peakPod.join(', ') }}</span>
+        <NuxtLink
+          v-if="peakEntry.peakGameId"
+          class="top-commander__peak-game-link"
+          :to="`/gameList?highlight=${encodeURIComponent(peakEntry.peakGameId)}`"
+        >View game →</NuxtLink>
       </div>
     </article>
 
@@ -123,6 +164,7 @@
         </button>
 
         <div class="top-commander__runner-stats">
+          <span>{{ formatMmr(entry.currentMmr) }} MMR</span>
           <span>{{ entry.plays }} games</span>
           <span>{{ pct(entry.winRate) }}% win</span>
           <span>{{ fmt(entry.avgPoints) }} avg pts</span>
@@ -170,7 +212,11 @@ type PairStats = {
   winRate: number
   avgPoints: number
   zeroPointRate: number
-  score: number
+  currentMmr: number
+  peakMmr: number
+  peakGameId: string | null
+  peakReachedAt: string | Date | null
+  peakPod: string[]
   winRateDiff: number
   avgPointsDiff: number
   zeroPointAvoidanceDiff: number
@@ -204,6 +250,7 @@ const PREVIEW_OFFSET_X = 18
 const PREVIEW_OFFSET_Y = 18
 const chronologicalGames = computed(() => [...games.value].sort(compareGamesChronological))
 const allLeagueRecords = computed(() => Object.values(gameRecords.value).flatMap((records) => Object.values(records)))
+const gamesById = computed(() => new Map(games.value.map((game) => [game.gameId, game])))
 
 const rankedEntries = computed<PairStats[]>(() => {
   const pairStats: PairStats[] = []
@@ -230,17 +277,18 @@ const rankedEntries = computed<PairStats[]>(() => {
       const avgPoints = commanderRecords.reduce((sum, record) => sum + record.basePoints, 0) / plays
       const zeroPointRate = zeroPointGames / plays
 
-      const winRateRatio = leagueWinRate > 0 ? winRate / leagueWinRate : 1
-      const avgPointsRatio = leagueAvgPoints > 0 ? avgPoints / leagueAvgPoints : 1
       const zeroPointAvoidance = 1 - zeroPointRate
       const leagueZeroPointAvoidance = 1 - leagueZeroPointRate
-      const zeroPointRatio = leagueZeroPointAvoidance > 0 ? zeroPointAvoidance / leagueZeroPointAvoidance : 1
-      const confidence = Math.min(1, plays / 5)
-      const score = confidence * (
-        (winRateRatio * 0.5) +
-        (avgPointsRatio * 0.35) +
-        (zeroPointRatio * 0.15)
-      )
+      const currentMmr = commanderRecords[commanderRecords.length - 1]?.commanderMMRAfter ?? 0
+      const peakRecord = commanderRecords.reduce((best, record) => {
+        if (!best) return record
+        if (record.commanderMMRAfter > best.commanderMMRAfter) return record
+        return best
+      }, commanderRecords[0] ?? null)
+      const peakGame = peakRecord ? gamesById.value.get(peakRecord.gameId) : null
+      const peakPod = (peakGame?.players ?? [])
+        .filter((podPlayer) => podPlayer.name !== player)
+        .map((podPlayer) => `${podPlayer.name} (${podPlayer.commander})`)
 
       pairStats.push({
         player,
@@ -250,7 +298,11 @@ const rankedEntries = computed<PairStats[]>(() => {
         winRate,
         avgPoints,
         zeroPointRate,
-        score,
+        currentMmr,
+        peakMmr: peakRecord?.commanderMMRAfter ?? currentMmr,
+        peakGameId: peakRecord?.gameId ?? null,
+        peakReachedAt: peakGame?.date ?? null,
+        peakPod,
         winRateDiff: relativeDiff(winRate, leagueWinRate),
         avgPointsDiff: relativeDiff(avgPoints, leagueAvgPoints),
         zeroPointAvoidanceDiff: relativeDiff(zeroPointAvoidance, leagueZeroPointAvoidance),
@@ -268,7 +320,7 @@ const rankedEntries = computed<PairStats[]>(() => {
   }
 
   return pairStats.sort((a, b) => {
-    if (b.score !== a.score) return b.score - a.score
+    if (b.currentMmr !== a.currentMmr) return b.currentMmr - a.currentMmr
     if (b.plays !== a.plays) return b.plays - a.plays
     return a.commander.localeCompare(b.commander)
   })
@@ -276,6 +328,17 @@ const rankedEntries = computed<PairStats[]>(() => {
 
 const topEntry = computed(() => rankedEntries.value[0] ?? null)
 const runnerUps = computed(() => rankedEntries.value.slice(1, 3))
+const peakEntry = computed(() => {
+  const entries = [...rankedEntries.value]
+  if (entries.length === 0) return null
+
+  return entries.sort((a, b) => {
+    if (b.peakMmr !== a.peakMmr) return b.peakMmr - a.peakMmr
+    if (b.currentMmr !== a.currentMmr) return b.currentMmr - a.currentMmr
+    if (b.plays !== a.plays) return b.plays - a.plays
+    return a.commander.localeCompare(b.commander)
+  })[0] ?? null
+})
 
 watch(
   rankedEntries,
@@ -299,6 +362,20 @@ function relativeDiff(value: number, baseline: number) {
 function fmt(n: number) {
   if (n === 0) return '0'
   return n % 1 === 0 ? String(n) : n.toFixed(3).replace(/\.?0+$/, '')
+}
+
+function formatMmr(value: number) {
+  return `${Math.round(value)}`
+}
+
+function formatPeakDate(value: string | Date) {
+  const date = value instanceof Date ? value : new Date(value)
+  if (Number.isNaN(date.getTime())) return String(value)
+  return new Intl.DateTimeFormat('en-GB', {
+    day: '2-digit',
+    month: 'short',
+    year: 'numeric',
+  }).format(date)
 }
 
 function pct(n: number) {
@@ -524,6 +601,86 @@ function onTitleLeave() {
 
     &--up { color: $color-success; }
     &--down { color: $color-danger; }
+  }
+
+  &__peak {
+    display: flex;
+    flex-wrap: wrap;
+    align-items: center;
+    gap: $spacing-2 $spacing-4;
+    padding: $spacing-3 $spacing-4;
+    border: 1px solid rgba($color-primary-light, 0.14);
+    border-radius: $border-radius-lg;
+    background: linear-gradient(180deg, rgba(10, 0, 14, 0.5), rgba(19, 14, 19, 0.98));
+    box-shadow:
+      inset 0 0 0 1px rgba(255, 240, 214, 0.025),
+      $shadow-md;
+  }
+
+  &__peak-label {
+    font-size: 10px;
+    text-transform: uppercase;
+    letter-spacing: 0.12em;
+    color: $color-primary-light;
+    font-weight: $font-weight-semibold;
+    flex-shrink: 0;
+  }
+
+  &__peak-title {
+    flex: 1;
+    display: flex;
+    flex-wrap: wrap;
+    align-items: baseline;
+    gap: $spacing-1;
+    font-size: $font-size-base;
+    color: $color-text-muted;
+    min-width: 0;
+  }
+
+  &__peak-player,
+  &__peak-commander {
+    color: $color-text;
+    text-decoration: none;
+
+    &:hover { color: $color-primary-light; }
+  }
+
+  &__peak-sep {
+    color: rgba($color-primary-light, 0.7);
+  }
+
+  &__peak-stats {
+    display: flex;
+    flex-wrap: wrap;
+    gap: $spacing-2 $spacing-3;
+    font-size: $font-size-xs;
+    color: $color-text-muted;
+    flex-shrink: 0;
+  }
+
+  &__peak-stat--mmr {
+    color: $color-success;
+    font-weight: $font-weight-semibold;
+  }
+
+  &__peak-context {
+    flex-basis: 100%;
+    display: flex;
+    flex-wrap: wrap;
+    gap: $spacing-2 $spacing-4;
+    font-size: $font-size-xs;
+    color: rgba($color-text-muted, 0.7);
+    padding-top: $spacing-1;
+    border-top: 1px solid rgba($border-color, 0.35);
+  }
+
+  &__peak-game-link {
+    color: $color-primary-light;
+    text-decoration: none;
+    margin-left: auto;
+    white-space: nowrap;
+
+    &:hover { text-decoration: underline dotted; }
   }
 
   &__podium {

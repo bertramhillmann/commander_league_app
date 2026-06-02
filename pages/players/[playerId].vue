@@ -284,46 +284,42 @@
               <!-- Name + tier -->
               <div class="cmd-row__header">
                 <NuxtLink class="cmd-row__name" :to="`/commanders/${encodeURIComponent(cmd.name)}`">{{ cmd.name }}</NuxtLink>
-                <button
-                  type="button"
-                  class="cmd-row__title-badge"
-                  @mouseenter="onTitleEnter(cmd.title, $event)"
-                  @mousemove="onTitleMove($event)"
-                  @mouseleave="onTitleLeave"
-                >
-                  {{ cmd.title.name }}
-                </button>
-                <label
-                  v-if="isOwnProfile && cmd.availableTitles.length > 1"
-                  class="cmd-row__title-select-wrap"
-                >
-                  <span class="cmd-row__title-select-label">Display Title</span>
-                  <select
-                    :value="getCommanderSelectedTitleValue(cmd)"
-                    class="cmd-row__title-select"
-                    :disabled="titleSaving[cmd.name]"
-                    @change="onCommanderTitleChange(cmd, $event)"
+                <span class="cmd-row__mmr">{{ formatCommanderMmr(cmd.mmr) }}</span>
+                <span class="cmd-row__tier">
+                  <IconsTierIcon :tier="cmd.mmrTier" :size="13" />
+                  <span class="cmd-row__tier-label" :class="`tier-text--${cmd.mmrTier}`">{{ cmd.mmrTierLabel }}</span>
+                </span>
+                <div class="cmd-row__title-row">
+                  <button
+                    type="button"
+                    class="cmd-row__title-badge"
+                    @mouseenter="onTitleEnter(cmd.title, $event)"
+                    @mousemove="onTitleMove($event)"
+                    @mouseleave="onTitleLeave"
                   >
-                    <option
-                      v-for="titleOption in cmd.availableTitles"
-                      :key="`${cmd.name}-${titleOption.id}`"
-                      :value="titleOption.id"
+                    {{ cmd.title.name }}
+                  </button>
+                  <label
+                    v-if="isOwnProfile && cmd.availableTitles.length > 1"
+                    class="cmd-row__title-select-wrap"
+                  >
+                    <span class="cmd-row__title-select-label">Display Title</span>
+                    <select
+                      :value="getCommanderSelectedTitleValue(cmd)"
+                      class="cmd-row__title-select"
+                      :disabled="titleSaving[cmd.name]"
+                      @change="onCommanderTitleChange(cmd, $event)"
                     >
-                      {{ titleOption.name }}
-                    </option>
-                  </select>
-                </label>
-                <span v-if="cmd.tierDetail" class="cmd-row__tier">
-                  <UITierBadge :detail="cmd.tierDetail" :context="cmd.tierContext" />
-                </span>
-                <span
-                  v-if="cmd.plays < 20 && cmd.projectedTierDetail"
-                  class="cmd-row__tier cmd-row__tier--projected"
-                >
-                  <span class="cmd-row__tier-prefix">Projected</span>
-                  <UITierBadge :detail="cmd.projectedTierDetail" />
-                </span>
-
+                      <option
+                        v-for="titleOption in cmd.availableTitles"
+                        :key="`${cmd.name}-${titleOption.id}`"
+                        :value="titleOption.id"
+                      >
+                        {{ titleOption.name }}
+                      </option>
+                    </select>
+                  </label>
+                </div>
                 <button
                   v-if="isOwnProfile || getCommanderDeckLink(cmd.name)"
                   type="button"
@@ -450,12 +446,33 @@
                   </div>
                 </div>
 
-                <ChartsPlacementTimeline
-                  v-if="cmd.timeline.length > 0"
-                  :points="cmd.timeline"
-                  class="cmd-row__timeline"
-                  compact
-                />
+                <div v-if="cmd.timeline.length > 0 || cmd.mmrTimeline.length > 0" class="cmd-row__timeline-wrap">
+                  <div class="cmd-row__timeline-switcher">
+                    <button
+                      type="button"
+                      class="cmd-row__timeline-switch"
+                      :class="{ 'cmd-row__timeline-switch--active': activeCommanderTimeline === 'mmr' }"
+                      @click="activeCommanderTimeline = 'mmr'"
+                    >
+                      MMR Rating
+                    </button>
+                    <button
+                      type="button"
+                      class="cmd-row__timeline-switch"
+                      :class="{ 'cmd-row__timeline-switch--active': activeCommanderTimeline === 'placement' }"
+                      @click="activeCommanderTimeline = 'placement'"
+                    >
+                      Placement
+                    </button>
+                  </div>
+                  <ChartsPlacementTimeline
+                    :points="activeCommanderTimeline === 'mmr' ? cmd.mmrTimeline : cmd.timeline"
+                    :mode="activeCommanderTimeline"
+                    :title="activeCommanderTimeline === 'mmr' ? 'MMR Rating Over Time' : 'Placements Over Time'"
+                    class="cmd-row__timeline"
+                    compact
+                  />
+                </div>
               </div>
 
               <!-- Commander-scoped achievements -->
@@ -743,7 +760,7 @@ import { fetchCardsByName, getCardImageUrl, type ScryfallCard } from '~/services
 import { xpToLevel, getCommanderLevelProgress, getRestedXpMultiplier } from '~/utils/commanderExperience'
 import { getArchEnemySummary } from '~/utils/archEnemy'
 import { extractArchidektDeckId } from '~/utils/archidekt'
-import { buildCommanderPlacementTimeline, type PlacementTimelinePoint } from '~/utils/commanderTimeline'
+import { buildCommanderMMRTimeline, buildCommanderPlacementTimeline, type CommanderMMRTimelinePoint, type PlacementTimelinePoint } from '~/utils/commanderTimeline'
 import { buildPlayerLeagueTimeline } from '~/utils/playerLeagueTimeline'
 import { buildPlayerMatchTimeline } from '~/utils/playerMatchTimeline'
 import { buildPlacementPrognosis } from '~/utils/placementPrognosis'
@@ -752,9 +769,9 @@ import { normalizeDeckIdentityKey } from '~/utils/deckLinks'
 import { getResolvedLeagueSettings } from '~/utils/leagueSettings'
 import { formatLoosterPoints } from '~/utils/loosterPoints'
 import { buildPlayerSuggestion, type PlayerCommanderPickSuggestion } from '~/utils/playerSuggestions'
-import { computeGlobalCommanderBaseline, computePlayerCommanderTier, smoothedTierScore, getTierDetail, type TierDetail, type TierContext } from '~/utils/tiers'
 import { getAchievementDefinition } from '~/utils/achievements'
 import type { CommanderTitleId } from '~/utils/titles'
+import { getCommanderTierFromMMR, type CommanderMMRTier } from '~/composables/useCommanderMMR'
 
 const RARITY_ORDER: Record<string, number> = { common: 0, uncommon: 1, rare: 2, mythic: 3 }
 import { getCommanderTitleSummary, type CommanderTitleResult } from '~/utils/titles'
@@ -808,6 +825,7 @@ const currentLeagueRank = computed(() =>
   standings.value.find((entry) => entry.name === playerId.value)?.rank ?? standings.value.length,
 )
 const activePlayerChart = ref<'league' | 'results'>('league')
+const activeCommanderTimeline = ref<"mmr" | "placement">("mmr")
 const placementPrognosis = computed(() =>
   buildPlacementPrognosis(playerId.value, chronologicalGames.value, gameRecords.value, players.value, commanders.value),
 )
@@ -904,9 +922,6 @@ interface CommanderRow {
   winRate: number
   avgPoints: number
   avgPlacement: number
-  tierDetail: TierDetail | null
-  tierContext: TierContext
-  projectedTierDetail: TierDetail | null
   level: number
   levelPct: number
   xp: number
@@ -930,6 +945,10 @@ interface CommanderRow {
   edgeLowPoolSample: boolean
   edgeReliable: boolean
   timeline: PlacementTimelinePoint[]
+  mmr: number
+  mmrTier: CommanderMMRTier
+  mmrTierLabel: string
+  mmrTimeline: CommanderMMRTimelinePoint[]
   currentTitle: CommanderTitleResult
   title: CommanderTitleResult
   availableTitles: CommanderTitleResult[]
@@ -1065,8 +1084,6 @@ function standardDeviation(values: number[]) {
 }
 
 const commanderRows = computed((): CommanderRow[] => {
-  const globalAvgScore = computeGlobalCommanderBaseline(commanders.value)
-
   const byCommander: Record<string, typeof allRecords.value> = {}
   for (const r of allRecords.value) {
     if (!byCommander[r.commander]) byCommander[r.commander] = []
@@ -1086,19 +1103,6 @@ const commanderRows = computed((): CommanderRow[] => {
     const metrics = getPlayerCommanderMetrics(playerId.value, name, gameRecords.value, players.value)
     if (!metrics) return null
     const edgeMetrics = getPlayerCommanderPerformanceEdgeMetrics(playerId.value, name, gameRecords.value)
-
-    const { detail: tierDetail, context: tierContext } = computePlayerCommanderTier(records, globalAvgScore)
-
-    const playerAvgPts = player.value && player.value.gamesPlayed > 0
-      ? player.value.totalBasePoints / player.value.gamesPlayed
-      : 0
-    const playerWinRate = player.value && player.value.gamesPlayed > 0
-      ? player.value.baseWins / player.value.gamesPlayed
-      : 0
-    const projectedScore = metrics.plays > 0
-      ? smoothedTierScore(metrics.totalBasePoints, metrics.first, metrics.plays, playerAvgPts, playerWinRate)
-      : 0
-    const projectedTierDetail = metrics.plays > 0 ? getTierDetail(projectedScore, globalAvgScore, metrics.plays) : null
     const xp = player.value?.commanderXP?.[name] ?? 0
     const rested = player.value?.commanderRested?.[name] ?? 0
     const {
@@ -1112,7 +1116,16 @@ const commanderRows = computed((): CommanderRow[] => {
 
     const xpScorePts = level * leagueSettings.value.level.pointsPerLevel
     const restedMultiplier = getRestedXpMultiplier(rested)
+    const mmr = records[records.length - 1]?.commanderMMRAfter ?? 0
+    const mmrTier = getCommanderTierFromMMR(mmr)
+    const mmrTierLabel = commanderMmrTierLabel(mmrTier)
     const timeline = buildCommanderPlacementTimeline(
+      chronologicalGames.value,
+      gameRecords.value,
+      playerId.value,
+      name,
+    )
+    const mmrTimeline = buildCommanderMMRTimeline(
       chronologicalGames.value,
       gameRecords.value,
       playerId.value,
@@ -1145,9 +1158,6 @@ const commanderRows = computed((): CommanderRow[] => {
       winRate: metrics.winRate,
       avgPoints: metrics.avgBasePoints,
       avgPlacement: metrics.avgPlacement,
-      tierDetail,
-      tierContext,
-      projectedTierDetail,
       level,
       levelPct: progressPct,
       xp,
@@ -1171,6 +1181,10 @@ const commanderRows = computed((): CommanderRow[] => {
       edgeLowPoolSample: edgeMetrics?.hasLowPoolSample ?? true,
       edgeReliable: edgeMetrics?.isReliable ?? false,
       timeline,
+      mmr,
+      mmrTier,
+      mmrTierLabel,
+      mmrTimeline,
       currentTitle: titleSummary.currentTitle,
       title: titleSummary.displayTitle,
       availableTitles: titleSummary.earnedTitles,
@@ -1181,6 +1195,14 @@ const commanderRows = computed((): CommanderRow[] => {
 
 function formatRestedMultiplier(multiplier: number) {
   return Number.isInteger(multiplier) ? multiplier.toFixed(0) : multiplier.toFixed(1)
+}
+
+function formatCommanderMmr(value: number) {
+  return `${Math.round(value)} MMR`
+}
+
+function commanderMmrTierLabel(tier: ReturnType<typeof getCommanderTierFromMMR>) {
+  return tier.charAt(0).toUpperCase() + tier.slice(1)
 }
 
 // ── Card art images ───────────────────────────────────────────────────────────
@@ -1738,14 +1760,26 @@ function closeDeckPanel() {
   deckPanel.loadingCards = false
 }
 
+const COMMANDER_TIER_SORT_ORDER: Record<CommanderMMRTier, number> = {
+  god: 0,
+  legend: 1,
+  diamond: 2,
+  platinum: 3,
+  gold: 4,
+  silver: 5,
+  bronze: 6,
+  trash: 7,
+}
+
 const sortOptions = [
+  { key: 'tier',      label: 'Tier' },
   { key: 'plays',     label: 'Plays' },
   { key: 'avgPoints', label: 'Avg Pts' },
   { key: 'winRate',   label: 'Win %' },
   { key: 'alpha',     label: 'A–Z' },
 ]
 
-const sortKey = ref<string>('avgPoints')
+const sortKey = ref<string>('tier')
 
 const activeIndicatorMetric = computed<'avgPoints' | 'winRate'>(() =>
   sortKey.value === 'winRate' ? 'winRate' : 'avgPoints',
@@ -1754,6 +1788,13 @@ const activeIndicatorMetric = computed<'avgPoints' | 'winRate'>(() =>
 const sortedCommanders = computed(() => {
   const rows = [...commanderRows.value]
   switch (sortKey.value) {
+    case 'tier':
+      return rows.sort((a, b) =>
+        (COMMANDER_TIER_SORT_ORDER[a.mmrTier] - COMMANDER_TIER_SORT_ORDER[b.mmrTier]) ||
+        (b.mmr - a.mmr) ||
+        (b.plays - a.plays) ||
+        a.name.localeCompare(b.name),
+      )
     case 'avgPoints': return rows.sort((a, b) => b.avgPoints - a.avgPoints)
     case 'winRate':   return rows.sort((a, b) => b.winRate - a.winRate)
     case 'alpha':     return rows.sort((a, b) => a.name.localeCompare(b.name))
@@ -2616,6 +2657,21 @@ function getEdgeTooltipText(cmd: CommanderRow) {
     flex-wrap: wrap;
   }
 
+  &__mmr {
+    font-size: $font-size-sm;
+    font-weight: $font-weight-bold;
+    color: $color-secondary;
+    font-variant-numeric: tabular-nums;
+  }
+
+  &__tier-label {
+    font-size: 10px;
+    font-weight: $font-weight-semibold;
+    letter-spacing: 0.08em;
+    text-transform: uppercase;
+    color: rgba($color-primary-light, 0.85);
+  }
+
   &__deck-trigger {
     appearance: none;
     margin-left: auto;
@@ -2758,6 +2814,15 @@ function getEdgeTooltipText(cmd: CommanderRow) {
     }
   }
 
+  &__title-row {
+    order: 2;
+    flex-basis: 100%;
+    display: flex;
+    align-items: center;
+    gap: $spacing-2;
+    flex-wrap: nowrap;
+  }
+
   &__title-badge {
     appearance: none;
     border: 1px solid rgba(196, 148, 72, 0.38);
@@ -2776,7 +2841,7 @@ function getEdgeTooltipText(cmd: CommanderRow) {
     width: fit-content;
     max-width: 100%;
     text-align: left;
-    flex: 0 0 auto;
+    flex-shrink: 0;
     border-radius: 3px;
     box-shadow:
       inset 0 0 0 1px rgba(255, 225, 155, 0.04),
@@ -3011,8 +3076,43 @@ function getEdgeTooltipText(cmd: CommanderRow) {
   &__timeline {
     width: min(100%, 400px);
     min-width: 320px;
+    flex: 0 0 220px;
+    margin-left: auto;
+  }
+
+  &__timeline-wrap {
+    width: min(100%, 400px);
+    min-width: 320px;
     flex: 0 0 400px;
     margin-left: auto;
+    display: flex;
+    flex-direction: column;
+    gap: 6px;
+  }
+
+  &__timeline-switcher {
+    display: flex;
+    justify-content: flex-end;
+    gap: 6px;
+  }
+
+  &__timeline-switch {
+    appearance: none;
+    padding: 3px 10px;
+    border: 1px solid rgba($border-color, 0.7);
+    border-radius: 6px;
+    background: rgba(0, 0, 0, 0.24);
+    color: $color-text-muted;
+    font: inherit;
+    font-size: 10px;
+    letter-spacing: 0.04em;
+    cursor: pointer;
+
+    &--active {
+      color: $color-text;
+      border-color: rgba($color-primary-light, 0.45);
+      background: rgba($color-primary, 0.14);
+    }
   }
 }
 
@@ -3153,6 +3253,13 @@ function getEdgeTooltipText(cmd: CommanderRow) {
 
   .cmd-row {
     &__timeline {
+      width: 100%;
+      min-width: 0;
+      flex-basis: 100%;
+      margin-left: 0;
+    }
+
+    &__timeline-wrap {
       width: 100%;
       min-width: 0;
       flex-basis: 100%;
