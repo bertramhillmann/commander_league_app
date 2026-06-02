@@ -14,6 +14,17 @@ export default defineEventHandler(async (event) => {
   const body = await readBody<{ settings?: LeagueSettingsDocument | null }>(event)
   const nextSettings = body?.settings ?? null
 
+  if (nextSettings?.playerRankingSystem === 'player_rating_based') {
+    const weights = nextSettings.playerRating?.weights
+    const totalWeight = Object.values(weights ?? {}).reduce((sum, value) => sum + (Number(value) || 0), 0)
+    if (Math.abs(totalWeight - 1) > 0.0001) {
+      throw createError({
+        statusCode: 400,
+        statusMessage: 'Player Rating weights must total 100%.',
+      })
+    }
+  }
+
   await connectToDatabase()
 
   if (!nextSettings || isEmptySettings(nextSettings)) {
@@ -61,6 +72,7 @@ function isEmptySettings(settings: LeagueSettingsDocument) {
     && settings.playerRating?.provisionalGames === undefined
     && settings.playerRating?.commanderMMRPointModifier?.enabled === undefined
     && settings.playerRating?.commanderMMRPointModifier?.maxModifierPercent === undefined
+    && Object.keys(settings.playerRating?.weights ?? {}).length === 0
     && Object.keys(settings.level?.xpPerGame ?? {}).length === 0
     && Object.keys(settings.level?.winBonusXp ?? {}).length === 0
     && (settings.level?.thresholds?.length ?? 0) === 0

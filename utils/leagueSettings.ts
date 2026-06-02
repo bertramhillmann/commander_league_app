@@ -29,6 +29,7 @@ export interface PlayerRatingWeights {
   allTimePerformance: number
   winRate: number
   commanderMMRContext: number
+  averageCommanderMMR: number
   commanderPoints: number
   achievements: number
   clutch: number
@@ -50,7 +51,8 @@ const DEFAULT_PLAYER_RATING_WEIGHTS: PlayerRatingWeights = {
   recentPerformance: 0.28,
   allTimePerformance: 0.17,
   winRate: 0.12,
-  commanderMMRContext: 0.18,
+  commanderMMRContext: 0.10,
+  averageCommanderMMR: 0.08,
   commanderPoints: 0.05,
   achievements: 0.08,
   clutch: 0.07,
@@ -171,6 +173,10 @@ export function getResolvedLeagueSettings(settings?: LeagueSettingsDocument | nu
         commanderMMRContext: toNumberOr(
           source?.playerRating?.weights?.commanderMMRContext,
           DEFAULT_PLAYER_RATING_WEIGHTS.commanderMMRContext,
+        ),
+        averageCommanderMMR: toNumberOr(
+          source?.playerRating?.weights?.averageCommanderMMR,
+          DEFAULT_PLAYER_RATING_WEIGHTS.averageCommanderMMR,
         ),
         commanderPoints: toNumberOr(
           source?.playerRating?.weights?.commanderPoints,

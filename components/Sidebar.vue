@@ -63,7 +63,7 @@
               :labels="comparisonHistoryLabels"
               :series="comparisonOverallSeries"
               title="Player Rating Comparison"
-              subtitle="Both players' live rating after each counted game."
+              subtitle="Both players' live rating across the shared league timeline."
               class="rating-sidebar__chart"
             />
           </section>
@@ -98,7 +98,7 @@
                 :labels="comparisonHistoryLabels"
                 :series="factor.series"
                 :title="`${factor.label} Comparison`"
-                subtitle="Weighted contribution over time."
+                subtitle="Weighted contribution across the shared league timeline."
                 class="rating-sidebar__chart rating-sidebar__chart--factor"
               />
             </article>
@@ -163,7 +163,7 @@
               :labels="historyLabels"
               :series="overallSeries"
               title="Player Rating Over Time"
-              subtitle="The final rating after each recorded game for this player."
+              subtitle="The final rating across the shared league timeline."
               class="rating-sidebar__chart"
             />
           </section>
@@ -199,7 +199,7 @@
                 :labels="historyLabels"
                 :series="factor.series"
                 :title="`${factor.current.label} Over Time`"
-                subtitle="Weighted contribution after each game."
+                subtitle="Weighted contribution across the shared league timeline."
                 class="rating-sidebar__chart rating-sidebar__chart--factor"
               />
             </article>
@@ -352,7 +352,12 @@
 </template>
 
 <script setup lang="ts">
-import type { PlayerRatingBreakdownKey, PlayerRatingDetail, PlayerRatingFactorDetail } from '~/composables/usePlayerRating'
+import type {
+  PlayerRatingBreakdownKey,
+  PlayerRatingDetail,
+  PlayerRatingFactorDetail,
+  PlayerRatingSnapshot,
+} from '~/composables/usePlayerRating'
 import { buildPlayerRatingDetail } from '~/composables/usePlayerRating'
 import { useLeagueSettings } from '~/composables/useLeagueSettings'
 import { getCommanderLevelProgress } from '~/utils/commanderExperience'
@@ -417,15 +422,21 @@ const compareDetail = computed<PlayerRatingDetail | null>(() => {
   })
 })
 
-const historyLabels = computed(() =>
-  detail.value?.history.map((entry, index) => `${entry.date} · G${index + 1}`) ?? [],
+const leagueTimeline = computed(() =>
+  chronologicalGames.value.map((game, index) => ({
+    gameId: game.gameId,
+    date: game.date,
+    label: `${formatGameDate(game.date)} · L${index + 1}`,
+  })),
 )
+
+const historyLabels = computed(() => leagueTimeline.value.map((entry) => entry.label))
 
 const overallSeries = computed(() => [
   {
     name: 'Rating',
     color: '#f59e0b',
-    data: detail.value?.history.map((entry) => entry.rating) ?? [],
+    data: buildAlignedRatingSeries(detail.value?.history ?? [], (entry) => entry.rating).data,
   },
 ])
 
@@ -434,6 +445,7 @@ const factorKeys: PlayerRatingBreakdownKey[] = [
   'allTimePerformance',
   'winRate',
   'commanderMMRContext',
+  'averageCommanderMMR',
   'activityPoints',
   'achievements',
   'clutch',
@@ -445,6 +457,7 @@ const factorColors: Record<PlayerRatingBreakdownKey, string> = {
   allTimePerformance: '#f97316',
   winRate: '#facc15',
   commanderMMRContext: '#38bdf8',
+  averageCommanderMMR: '#0ea5e9',
   activityPoints: '#34d399',
   achievements: '#a78bfa',
   clutch: '#f472b6',
@@ -472,9 +485,14 @@ const PLAYER_RATING_FACTOR_META: Record<PlayerRatingBreakdownKey, {
     tip: 'Convert more top-table appearances into actual wins to close the cleanest rating gap.',
   },
   commanderMMRContext: {
-    label: 'Commander MMR Context',
+    label: 'Finishes Against Stronger Opponents',
     note: 'beating stronger pods and expectations',
     tip: 'Gain here by outperforming the expected finish when your commander enters tougher MMR pods.',
+  },
+  averageCommanderMMR: {
+    label: 'Average Commander MMR',
+    note: 'bringing stronger commanders on average',
+    tip: 'Raise this by succeeding with higher-MMR commanders instead of leaning only on lower-rated picks.',
   },
   activityPoints: {
     label: 'Activity',
@@ -505,6 +523,8 @@ function formatFactorExplanation(factor: PlayerRatingFactorDetail) {
   switch (factor.key) {
     case 'commanderMMRContext':
       return 'Shows how often you finish better than your commander MMR would have predicted against the pods you faced.'
+    case 'averageCommanderMMR':
+      return 'Shows the average strength of the commanders you bring into league games.'
     case 'activityPoints':
       return 'A small rating boost based on the real points you have earned by playing.'
     default:
@@ -532,6 +552,8 @@ function formatRawFactorValue(
       return `win rate ${Math.round(rawValue * 100)}%`
     case 'commanderMMRContext':
       return `${Math.round(Math.max(0, Math.min(100, ((rawValue + 1.5) / 3) * 100)))}% MMR context`
+    case 'averageCommanderMMR':
+      return `avg commander MMR ${round3(rawValue)}`
     case 'activityPoints':
       return detailLines.find((line) => line.toLowerCase().startsWith('earned base points:'))
         ?.replace(/^earned base points:/i, 'total points:')
@@ -548,6 +570,49 @@ function formatRawFactorValue(
   })()
 
   return detailSummary ? `${base}; ${detailSummary}` : base
+}
+
+function buildAlignedRatingSeries(
+  history: PlayerRatingSnapshot[],
+  valueGetter: (entry: PlayerRatingSnapshot) => number,
+  tooltipGetter?: (entry: PlayerRatingSnapshot) => string,
+) {
+  const historyByGameId = new Map(history.map((entry) => [entry.gameId, entry]))
+  let hasStarted = false
+  let lastValue: number | null = null
+  let lastTooltip: string | null = null
+
+  const data = leagueTimeline.value.map((timelineEntry) => {
+    const snapshot = historyByGameId.get(timelineEntry.gameId)
+    if (snapshot) {
+      hasStarted = true
+      lastValue = valueGetter(snapshot)
+      lastTooltip = tooltipGetter ? tooltipGetter(snapshot) : null
+      return lastValue
+    }
+
+    return hasStarted ? lastValue : null
+  })
+
+  if (!tooltipGetter) {
+    return { data }
+  }
+
+  hasStarted = false
+  lastTooltip = null
+
+  const tooltipData = leagueTimeline.value.map((timelineEntry) => {
+    const snapshot = historyByGameId.get(timelineEntry.gameId)
+    if (snapshot) {
+      hasStarted = true
+      lastTooltip = tooltipGetter(snapshot)
+      return lastTooltip
+    }
+
+    return hasStarted ? lastTooltip : null
+  })
+
+  return { data, tooltipData }
 }
 
 const comparisonDetail = computed(() => {
@@ -589,26 +654,30 @@ const comparisonDetail = computed(() => {
   }
 })
 
-const comparisonHistoryLabels = computed(() => {
-  const targetLength = detail.value?.history.length ?? 0
-  const viewerLength = compareDetail.value?.history.length ?? 0
-  const maxLength = Math.max(targetLength, viewerLength)
-  return Array.from({ length: maxLength }, (_, index) => `Game ${index + 1}`)
-})
+const comparisonHistoryLabels = computed(() => leagueTimeline.value.map((entry) => entry.label))
 
 const comparisonOverallSeries = computed(() => {
   if (!comparisonDetail.value) return []
+
+  const targetSeries = buildAlignedRatingSeries(
+    comparisonDetail.value.target.history,
+    (entry) => entry.rating,
+  )
+  const viewerSeries = buildAlignedRatingSeries(
+    comparisonDetail.value.viewer.history,
+    (entry) => entry.rating,
+  )
 
   return [
     {
       name: comparisonDetail.value.target.playerName,
       color: COMPARISON_TARGET_COLOR,
-      data: comparisonDetail.value.target.history.map((entry) => entry.rating),
+      data: targetSeries.data,
     },
     {
       name: comparisonDetail.value.viewer.playerName,
       color: COMPARISON_VIEWER_COLOR,
-      data: comparisonDetail.value.viewer.history.map((entry) => entry.rating),
+      data: viewerSeries.data,
     },
   ]
 })
@@ -634,17 +703,19 @@ const comparisonFactorPanels = computed(() => {
           {
             name: comparisonDetail.value.target.playerName,
             color: COMPARISON_TARGET_COLOR,
-            data: comparisonDetail.value.target.history.map((entry) => entry.factors[key].weightedContribution),
-            tooltipData: comparisonDetail.value.target.history.map((entry) =>
-              formatRawFactorValue(key, entry.factors[key].rawValue, entry.factors[key].detailLines),
+            ...buildAlignedRatingSeries(
+              comparisonDetail.value.target.history,
+              (entry) => entry.factors[key].weightedContribution,
+              (entry) => formatRawFactorValue(key, entry.factors[key].rawValue, entry.factors[key].detailLines),
             ),
           },
           {
             name: comparisonDetail.value.viewer.playerName,
             color: COMPARISON_VIEWER_COLOR,
-            data: comparisonDetail.value.viewer.history.map((entry) => entry.factors[key].weightedContribution),
-            tooltipData: comparisonDetail.value.viewer.history.map((entry) =>
-              formatRawFactorValue(key, entry.factors[key].rawValue, entry.factors[key].detailLines),
+            ...buildAlignedRatingSeries(
+              comparisonDetail.value.viewer.history,
+              (entry) => entry.factors[key].weightedContribution,
+              (entry) => formatRawFactorValue(key, entry.factors[key].rawValue, entry.factors[key].detailLines),
             ),
           },
         ],
@@ -667,10 +738,11 @@ const factorPanels = computed(() =>
           {
             name: 'Contribution',
             color: factorColors[key],
-            data: detail.value?.history.map((entry) => entry.factors[key].weightedContribution) ?? [],
-            tooltipData: detail.value?.history.map((entry) =>
-              formatRawFactorValue(key, entry.factors[key].rawValue, entry.factors[key].detailLines),
-            ) ?? [],
+            ...buildAlignedRatingSeries(
+              detail.value?.history ?? [],
+              (entry) => entry.factors[key].weightedContribution,
+              (entry) => formatRawFactorValue(key, entry.factors[key].rawValue, entry.factors[key].detailLines),
+            ),
           },
         ],
       }
@@ -681,8 +753,8 @@ const factorPanels = computed(() =>
       series: {
         name: string
         color: string
-        data: number[]
-        tooltipData?: string[]
+        data: Array<number | null>
+        tooltipData?: Array<string | null>
       }[]
     } => Boolean(entry)),
 )

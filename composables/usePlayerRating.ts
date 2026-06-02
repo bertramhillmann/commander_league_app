@@ -6,6 +6,7 @@ export type PlayerRatingBreakdownKey =
   | 'allTimePerformance'
   | 'winRate'
   | 'commanderMMRContext'
+  | 'averageCommanderMMR'
   | 'activityPoints'
   | 'achievements'
   | 'clutch'
@@ -217,6 +218,7 @@ function buildPlayerRatingComputation(input: CalculatePlayerRatingInput): Rating
   const allTimePerformance = calculateAllTimePerformanceScore(records, gameContexts)
   const winRate = calculateWinRateScore(input.player)
   const commanderMMRContext = calculateCommanderMMRContextScore(gameContexts)
+  const averageCommanderMMR = calculateAverageCommanderMMRScore(records)
   const activityPoints = calculateActivityPointsScore(input.player, records)
   const achievements = calculateAchievementScore(input.player, settings.achievements)
   const clutch = calculateClutchScore(gameContexts)
@@ -228,6 +230,7 @@ function buildPlayerRatingComputation(input: CalculatePlayerRatingInput): Rating
     allTimePerformance: buildBreakdownEntry(allTimePerformance.rawValue, allTimePerformance.normalizedScore, weights.allTimePerformance),
     winRate: buildBreakdownEntry(winRate.rawValue, winRate.normalizedScore, weights.winRate),
     commanderMMRContext: buildBreakdownEntry(commanderMMRContext.rawValue, commanderMMRContext.normalizedScore, weights.commanderMMRContext),
+    averageCommanderMMR: buildBreakdownEntry(averageCommanderMMR.rawValue, averageCommanderMMR.normalizedScore, weights.averageCommanderMMR),
     activityPoints: buildBreakdownEntry(activityPoints.rawValue, activityPoints.normalizedScore, weights.commanderPoints),
     achievements: buildBreakdownEntry(achievements.rawValue, achievements.normalizedScore, weights.achievements),
     clutch: buildBreakdownEntry(clutch.rawValue, clutch.normalizedScore, weights.clutch),
@@ -250,6 +253,7 @@ function buildPlayerRatingComputation(input: CalculatePlayerRatingInput): Rating
       allTimePerformance,
       winRate,
       commanderMMRContext,
+      averageCommanderMMR,
       activityPoints,
       achievements,
       clutch,
@@ -351,6 +355,15 @@ export function calculateCommanderMMRContextScore(gameContexts: RatingGameContex
     normalizedScore: normalizeScore(rawValue, -1.5, 1.5),
     averagePerformanceDelta: round3(rawValue),
     averageMmrGap: round3(average(gameContexts.map((context) => context.mmrGap))),
+  }
+}
+
+export function calculateAverageCommanderMMRScore(records: PlayerRatingRecord[]) {
+  const rawValue = average(records.map((record) => record.commanderMMRAfter ?? record.commanderMMRBefore ?? 0))
+  return {
+    rawValue,
+    normalizedScore: normalizeScore(rawValue, 1000, 2600),
+    averageCommanderMMR: round3(rawValue),
   }
 }
 
@@ -491,6 +504,14 @@ function buildFactorDetails(
         'positive values mean you beat MMR expectations',
       ],
     ),
+    averageCommanderMMR: buildFactorDetail(
+      'averageCommanderMMR',
+      breakdown.averageCommanderMMR,
+      [
+        `average commander MMR: ${round3(factors.averageCommanderMMR.averageCommanderMMR ?? 0)}`,
+        'higher values mean your regular commander pool is stronger on average',
+      ],
+    ),
     activityPoints: buildFactorDetail(
       'activityPoints',
       breakdown.activityPoints,
@@ -624,9 +645,14 @@ const FACTOR_META: Record<PlayerRatingBreakdownKey, { label: string, description
     formula: 'Normalize(wins / games played) × weight',
   },
   commanderMMRContext: {
-    label: 'Commander MMR Context',
+    label: 'Finishes Against Stronger Opponents',
     description: 'Rewards beating the placement your commander MMR predicted against the pod you faced.',
     formula: 'Normalize(avg(expected placement - actual placement)) × weight',
+  },
+  averageCommanderMMR: {
+    label: 'Average Commander MMR',
+    description: 'Rewards maintaining a stronger commander pool on average across your games.',
+    formula: 'Normalize(avg commander MMR) × weight',
   },
   activityPoints: {
     label: 'Activity',

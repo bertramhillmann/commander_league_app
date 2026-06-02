@@ -15,7 +15,12 @@
         <div class="settings-hero__actions">
           <button type="button" class="btn btn--muted" @click="loadDefaultsLocally">Load Utils Defaults</button>
           <button type="button" class="btn btn--ghost" :disabled="saving" @click="clearOverrides">Clear Saved Overrides</button>
-          <button type="button" class="btn btn--primary" :disabled="saving" @click="saveSettings">
+          <button
+            type="button"
+            class="btn btn--primary"
+            :disabled="saving || (form.playerRankingSystem === 'player_rating_based' && !canSavePlayerRatingWeights)"
+            @click="saveSettings"
+          >
             {{ saving ? 'Saving...' : 'Save Settings' }}
           </button>
         </div>
@@ -117,6 +122,37 @@
           <label class="form-field">
             <span class="form-label">MMR Point Modifier Cap %</span>
             <input v-model.number="form.playerRating.commanderMMRPointModifier.maxModifierPercent" type="number" step="1" min="0" class="form-input" />
+          </label>
+        </div>
+
+        <div v-if="form.playerRankingSystem === 'player_rating_based'" class="settings-card__header settings-card__header--nested">
+          <div>
+            <h3 class="settings-card__title settings-card__title--small">Player Rating Weights</h3>
+            <p class="settings-card__subtitle">Edit in percent. Saving is only allowed when the weights total exactly 100%.</p>
+          </div>
+          <div
+            class="settings-weight-total"
+            :class="{ 'settings-weight-total--invalid': !canSavePlayerRatingWeights }"
+          >
+            Total: {{ fmtWeight(playerRatingWeightTotal) }}%
+          </div>
+        </div>
+
+        <div v-if="form.playerRankingSystem === 'player_rating_based'" class="settings-weight-grid">
+          <label
+            v-for="field in playerRatingWeightFields"
+            :key="field.key"
+            class="form-field"
+          >
+            <span class="form-label">{{ field.label }}</span>
+            <input
+              v-model.number="form.playerRating.weights[field.key]"
+              type="number"
+              step="0.1"
+              min="0"
+              class="form-input"
+            />
+            <span class="form-help">{{ field.hint }}</span>
           </label>
         </div>
       </section>
@@ -275,6 +311,7 @@ import {
   getResolvedLeagueSettings,
   type LeagueSettingsDocument,
   type PlayerRankingSystem,
+  type PlayerRatingWeights,
   type StandingsAdjustmentMode,
 } from '~/utils/leagueSettings'
 import { DEFAULT_MAX_LEVEL, type AchievementDef } from '~/utils/scoringDefaults'
@@ -305,6 +342,7 @@ type EditableSettingsState = {
       enabled: boolean
       maxModifierPercent: number
     }
+    weights: Record<keyof PlayerRatingWeights, number>
   }
   level: {
     xpPerGame: Record<number, number>
@@ -329,6 +367,28 @@ type EditableSettingsState = {
 }
 
 const form = reactive<EditableSettingsState>(createEditableSettings(settings.value))
+
+const playerRatingWeightFields: Array<{
+  key: keyof PlayerRatingWeights
+  label: string
+  hint: string
+}> = [
+  { key: 'recentPerformance', label: 'Recent Form', hint: 'Recent finishes and current-season form.' },
+  { key: 'allTimePerformance', label: 'Long-Term Performance', hint: 'Full-history adjusted performance.' },
+  { key: 'winRate', label: 'Win Rate', hint: 'How often a player turns games into wins.' },
+  { key: 'commanderMMRContext', label: 'Finishes vs Stronger Opponents', hint: 'How often a player beats MMR-based placement expectations.' },
+  { key: 'averageCommanderMMR', label: 'Average Commander MMR', hint: 'Average commander strength across the player pool.' },
+  { key: 'commanderPoints', label: 'Activity', hint: 'A small reward for total points earned through play.' },
+  { key: 'achievements', label: 'Achievements', hint: 'Achievement-based rating value.' },
+  { key: 'clutch', label: 'Clutch', hint: 'Big wins and overperforming into tough pods.' },
+  { key: 'commanderDiversity', label: 'Commander Diversity', hint: 'Maintaining results across more commanders.' },
+]
+
+const playerRatingWeightTotal = computed(() =>
+  playerRatingWeightFields.reduce((sum, field) => sum + sanitizeNumber(form.playerRating.weights[field.key]), 0),
+)
+
+const canSavePlayerRatingWeights = computed(() => Math.abs(playerRatingWeightTotal.value - 100) < 0.001)
 
 watch(
   settings,
@@ -371,6 +431,11 @@ async function saveSettings() {
   errorMessage.value = ''
 
   try {
+    if (form.playerRankingSystem === 'player_rating_based' && !canSavePlayerRatingWeights.value) {
+      errorMessage.value = `Player Rating weights must total 100%. Current total: ${fmtWeight(playerRatingWeightTotal.value)}%.`
+      return
+    }
+
     normalizeThresholds(form.level.thresholds)
 
     const response = await $fetch<{ settings: LeagueSettingsDocument | null }>('/api/settings', {
@@ -444,6 +509,17 @@ function createEditableSettings(source: ReturnType<typeof getResolvedLeagueSetti
         enabled: source.playerRating.commanderMMRPointModifier.enabled,
         maxModifierPercent: source.playerRating.commanderMMRPointModifier.maxModifierPercent,
       },
+      weights: {
+        recentPerformance: source.playerRating.weights.recentPerformance * 100,
+        allTimePerformance: source.playerRating.weights.allTimePerformance * 100,
+        winRate: source.playerRating.weights.winRate * 100,
+        commanderMMRContext: source.playerRating.weights.commanderMMRContext * 100,
+        averageCommanderMMR: source.playerRating.weights.averageCommanderMMR * 100,
+        commanderPoints: source.playerRating.weights.commanderPoints * 100,
+        achievements: source.playerRating.weights.achievements * 100,
+        clutch: source.playerRating.weights.clutch * 100,
+        commanderDiversity: source.playerRating.weights.commanderDiversity * 100,
+      },
     },
     level: {
       xpPerGame: { ...source.level.xpPerGame },
@@ -483,6 +559,15 @@ function applyEditableSettings(target: EditableSettingsState, source: ReturnType
   target.playerRating.provisionalGames = source.playerRating.provisionalGames
   target.playerRating.commanderMMRPointModifier.enabled = source.playerRating.commanderMMRPointModifier.enabled
   target.playerRating.commanderMMRPointModifier.maxModifierPercent = source.playerRating.commanderMMRPointModifier.maxModifierPercent
+  target.playerRating.weights.recentPerformance = source.playerRating.weights.recentPerformance * 100
+  target.playerRating.weights.allTimePerformance = source.playerRating.weights.allTimePerformance * 100
+  target.playerRating.weights.winRate = source.playerRating.weights.winRate * 100
+  target.playerRating.weights.commanderMMRContext = source.playerRating.weights.commanderMMRContext * 100
+  target.playerRating.weights.averageCommanderMMR = source.playerRating.weights.averageCommanderMMR * 100
+  target.playerRating.weights.commanderPoints = source.playerRating.weights.commanderPoints * 100
+  target.playerRating.weights.achievements = source.playerRating.weights.achievements * 100
+  target.playerRating.weights.clutch = source.playerRating.weights.clutch * 100
+  target.playerRating.weights.commanderDiversity = source.playerRating.weights.commanderDiversity * 100
   target.level.xpPerGame = { ...source.level.xpPerGame }
   target.level.winBonusXp = { ...source.level.winBonusXp }
   target.level.thresholds = [...source.level.thresholds]
@@ -521,6 +606,17 @@ function toDocument(source: EditableSettingsState): LeagueSettingsDocument {
       commanderMMRPointModifier: {
         enabled: source.playerRating.commanderMMRPointModifier.enabled,
         maxModifierPercent: sanitizePositiveNumber(source.playerRating.commanderMMRPointModifier.maxModifierPercent),
+      },
+      weights: {
+        recentPerformance: sanitizePositiveNumber(source.playerRating.weights.recentPerformance) / 100,
+        allTimePerformance: sanitizePositiveNumber(source.playerRating.weights.allTimePerformance) / 100,
+        winRate: sanitizePositiveNumber(source.playerRating.weights.winRate) / 100,
+        commanderMMRContext: sanitizePositiveNumber(source.playerRating.weights.commanderMMRContext) / 100,
+        averageCommanderMMR: sanitizePositiveNumber(source.playerRating.weights.averageCommanderMMR) / 100,
+        commanderPoints: sanitizePositiveNumber(source.playerRating.weights.commanderPoints) / 100,
+        achievements: sanitizePositiveNumber(source.playerRating.weights.achievements) / 100,
+        clutch: sanitizePositiveNumber(source.playerRating.weights.clutch) / 100,
+        commanderDiversity: sanitizePositiveNumber(source.playerRating.weights.commanderDiversity) / 100,
       },
     },
     level: {
@@ -569,6 +665,11 @@ function sanitizeInteger(value: number) {
 
 function sanitizePositiveNumber(value: number) {
   return Math.max(0, sanitizeNumber(value))
+}
+
+function fmtWeight(value: number) {
+  const normalized = sanitizeNumber(value)
+  return normalized % 1 === 0 ? String(normalized) : normalized.toFixed(1).replace(/\.?0+$/, '')
 }
 
 function ordinal(value: number) {
@@ -796,8 +897,39 @@ function getRarityRank(rarity: AchievementDef['rarity']) {
   margin-top: $spacing-2;
 }
 
+.settings-weight-grid {
+  display: grid;
+  grid-template-columns: repeat(3, minmax(0, 1fr));
+  gap: $spacing-3;
+  margin-top: $spacing-2;
+}
+
 .settings-subgrid--single {
   grid-template-columns: minmax(0, 280px);
+}
+
+.settings-card__header--nested {
+  margin-top: $spacing-4;
+  align-items: flex-end;
+}
+
+.settings-card__title--small {
+  font-size: 1rem;
+}
+
+.settings-weight-total {
+  font-size: 0.95rem;
+  font-weight: 700;
+  color: $color-success;
+}
+
+.settings-weight-total--invalid {
+  color: $color-danger;
+}
+
+.form-help {
+  font-size: 0.8rem;
+  color: rgba($color-text, 0.72);
 }
 
 .toggle-field {
@@ -913,7 +1045,8 @@ function getRarityRank(rarity: AchievementDef['rarity']) {
   .placement-grid,
   .xp-settings__row,
   .threshold-grid,
-  .settings-subgrid {
+  .settings-subgrid,
+  .settings-weight-grid {
     grid-template-columns: repeat(2, minmax(0, 1fr));
   }
 
@@ -934,7 +1067,8 @@ function getRarityRank(rarity: AchievementDef['rarity']) {
   .placement-grid,
   .xp-settings__row,
   .threshold-grid,
-  .settings-subgrid {
+  .settings-subgrid,
+  .settings-weight-grid {
     grid-template-columns: 1fr;
   }
 
