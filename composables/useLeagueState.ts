@@ -19,6 +19,7 @@ import {
   getResolvedLeagueSettings,
   MIN_GAMES_FOR_PENALTY_MODE,
   type LeagueSettingsDocument,
+  type PlayerRankingSystem,
   type StandingsAdjustmentMode,
 } from '~/utils/leagueSettings'
 import type { CommanderTitleId } from '~/utils/titles'
@@ -28,6 +29,10 @@ import {
   getInitialCommanderMMR,
   type CommanderMMRTier,
 } from './useCommanderMMR'
+import {
+  calculatePlayerRatings,
+  type PlayerRatingResult,
+} from './usePlayerRating'
 
 // ─── Types ────────────────────────────────────────────────────────────────────
 
@@ -118,6 +123,10 @@ export interface LeagueStanding {
   name: string
   totalScore: number
   rank: number
+  rankingSystem?: PlayerRankingSystem
+  playerRating?: number
+  provisional?: boolean
+  ratingBreakdown?: PlayerRatingResult['breakdown']
   totalPoints: number
   adjustmentMode: StandingsAdjustmentMode
   adjustmentPoints: number
@@ -391,6 +400,31 @@ export function calculateStandingsAdjustment(
   context?: StandingAdjustmentContext,
 ): StandingAdjustmentResult {
   const resolvedSettings = getResolvedLeagueSettings(settings)
+  if (resolvedSettings.playerRankingSystem === 'player_rating_based') {
+    return {
+      adjustmentMode: resolvedSettings.standings.adjustmentMode,
+      adjustmentPoints: 0,
+      adjustmentDisplayPoints: 0,
+      adjustedTotalPoints: round3(player.totalPoints),
+      missingGames: 0,
+      cappedMissingGames: 0,
+      maxGamesPlayed: 0,
+      leagueFloorScore: 0,
+      averageScore: player.gamesPlayed > 0 ? round3(player.totalPoints / player.gamesPlayed) : 0,
+      sampleFactor: 0,
+      decayFactor: 0,
+      projectedGameValueFactor: 0,
+      maxProjectedGames: 0,
+      sampleSmoothingGames: 0,
+      baselineAvgPoints: 0,
+      consecutiveMissPenalty: 0,
+      minimumAvgPoints: 0,
+      graceMisses: 0,
+      lowestGamesPlayed: 0,
+      gameGap: 0,
+      penaltyFactor: 0,
+    }
+  }
   const mode = resolvedSettings.standings.adjustmentMode
 
   if (mode === 'freeGames') {
@@ -1735,30 +1769,42 @@ function buildLeagueStandings(
   settings?: LeagueSettingsDocument | null,
   context?: StandingAdjustmentContext,
 ): LeagueStanding[] {
+  const resolvedSettings = getResolvedLeagueSettings(settings)
   const allPlayers = Object.values(playerMap)
+  const playerRatings = resolvedSettings.playerRankingSystem === 'player_rating_based' && context
+    ? calculatePlayerRatings(playerMap, context.gameRecords, context.games, settings)
+    : null
 
   return allPlayers
     .map((player) => {
-      const metrics = getLeagueStandingMetrics(player, playerMap, settings, context)
+      const classicMetrics = getLeagueStandingMetrics(player, playerMap, settings, context)
+      const ratingResult = playerRatings?.[player.name]
+      const totalScore = resolvedSettings.playerRankingSystem === 'player_rating_based'
+        ? ratingResult?.rating ?? 0
+        : classicMetrics.totalScore
 
       return {
         name: player.name,
-        totalScore: metrics.totalScore,
+        totalScore,
         rank: 0,
-        totalPoints: metrics.totalPoints,
-        adjustmentMode: metrics.adjustmentMode,
-        adjustmentPoints: metrics.adjustmentPoints,
-        adjustmentDisplayPoints: metrics.adjustmentDisplayPoints,
-        adjustedTotalPoints: metrics.adjustedTotalPoints,
-        projectedPoints: metrics.projectedPoints,
-        compensatedTotalPoints: metrics.compensatedTotalPoints,
-        achievementPoints: metrics.achievementPoints,
-        xpPoints: metrics.xpPoints,
-        perfMult: metrics.perfMult,
-        gamesPlayed: metrics.gamesPlayed,
-        baseWins: metrics.baseWins,
-        avgPerGame: metrics.avgPerGame,
-        totalLPoints: metrics.totalLPoints,
+        rankingSystem: resolvedSettings.playerRankingSystem,
+        playerRating: ratingResult?.rating,
+        provisional: ratingResult?.provisional ?? false,
+        ratingBreakdown: ratingResult?.breakdown,
+        totalPoints: classicMetrics.totalPoints,
+        adjustmentMode: classicMetrics.adjustmentMode,
+        adjustmentPoints: classicMetrics.adjustmentPoints,
+        adjustmentDisplayPoints: classicMetrics.adjustmentDisplayPoints,
+        adjustedTotalPoints: classicMetrics.adjustedTotalPoints,
+        projectedPoints: classicMetrics.projectedPoints,
+        compensatedTotalPoints: classicMetrics.compensatedTotalPoints,
+        achievementPoints: classicMetrics.achievementPoints,
+        xpPoints: classicMetrics.xpPoints,
+        perfMult: classicMetrics.perfMult,
+        gamesPlayed: classicMetrics.gamesPlayed,
+        baseWins: classicMetrics.baseWins,
+        avgPerGame: classicMetrics.avgPerGame,
+        totalLPoints: classicMetrics.totalLPoints,
       }
     })
     .sort((a, b) => {

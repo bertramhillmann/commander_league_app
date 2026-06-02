@@ -11,6 +11,8 @@ export default defineEventHandler(async () => {
         ? {
             points: doc.points ?? undefined,
             achievements: doc.achievements ?? undefined,
+            playerRankingSystem: doc.playerRankingSystem ?? undefined,
+            playerRating: doc.playerRating ?? undefined,
             level: doc.level ?? undefined,
             standings: doc.standings ?? undefined,
             shop: doc.shop ?? undefined,

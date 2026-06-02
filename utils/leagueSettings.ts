@@ -10,6 +10,7 @@ import {
 } from '~/utils/scoringDefaults'
 
 export type StandingsAdjustmentMode = 'compensation' | 'freeGames' | 'penaltyGames'
+export type PlayerRankingSystem = 'classic' | 'player_rating_based'
 
 export const DEFAULT_FREE_GAMES_BASELINE_AVG = 0.5
 export const DEFAULT_FREE_GAMES_CONSECUTIVE_PENALTY = 0.01
@@ -18,10 +19,58 @@ export const DEFAULT_FREE_GAMES_GRACE_MISSES = 3
 export const DEFAULT_PENALTY_FACTOR = 0.88
 export const DEFAULT_LOOSTER_COST = 2.4
 export const MIN_GAMES_FOR_PENALTY_MODE = 30
+export const DEFAULT_PLAYER_RATING_MIN = 0
+export const DEFAULT_PLAYER_RATING_MAX = 4000
+export const DEFAULT_PLAYER_RATING_PROVISIONAL_GAMES = 10
+export const DEFAULT_PLAYER_RATING_MMR_POINT_MODIFIER_MAX = 50
+
+export interface PlayerRatingWeights {
+  recentPerformance: number
+  allTimePerformance: number
+  winRate: number
+  commanderMMRContext: number
+  commanderPoints: number
+  achievements: number
+  clutch: number
+  commanderDiversity: number
+}
+
+export interface PlayerRatingConfig {
+  minRating: number
+  maxRating: number
+  provisionalGames: number
+  commanderMMRPointModifier: {
+    enabled: boolean
+    maxModifierPercent: number
+  }
+  weights: PlayerRatingWeights
+}
+
+const DEFAULT_PLAYER_RATING_WEIGHTS: PlayerRatingWeights = {
+  recentPerformance: 0.28,
+  allTimePerformance: 0.17,
+  winRate: 0.12,
+  commanderMMRContext: 0.18,
+  commanderPoints: 0.05,
+  achievements: 0.08,
+  clutch: 0.07,
+  commanderDiversity: 0.05,
+}
 
 export interface LeagueSettingsDocument {
   points?: Partial<Record<number, PlacementRating[]>>
   achievements?: Record<string, number>
+  playerRankingSystem?: PlayerRankingSystem
+  playerRating?: {
+    minRating?: number
+    maxRating?: number
+    provisionalGames?: number
+    commanderMMRPointModifier?: {
+      enabled?: boolean
+      maxModifierPercent?: number
+    }
+    weights?: Partial<PlayerRatingWeights>
+  }
   level?: {
     xpPerGame?: Partial<Record<number, number>>
     winBonusXp?: Partial<Record<number, number>>
@@ -47,6 +96,8 @@ export interface LeagueSettingsDocument {
 export interface ResolvedLeagueSettings {
   points: Record<number, PlacementRating[]>
   achievements: Record<string, AchievementDef>
+  playerRankingSystem: PlayerRankingSystem
+  playerRating: PlayerRatingConfig
   level: {
     xpPerGame: Record<number, number>
     winBonusXp: Record<number, number>
@@ -89,6 +140,56 @@ export function getResolvedLeagueSettings(settings?: LeagueSettingsDocument | nu
   return {
     points,
     achievements,
+    playerRankingSystem: source?.playerRankingSystem ?? 'classic',
+    playerRating: {
+      minRating: toNumberOr(source?.playerRating?.minRating, DEFAULT_PLAYER_RATING_MIN),
+      maxRating: toNumberOr(source?.playerRating?.maxRating, DEFAULT_PLAYER_RATING_MAX),
+      provisionalGames: Math.max(1, Math.round(toNumberOr(
+        source?.playerRating?.provisionalGames,
+        DEFAULT_PLAYER_RATING_PROVISIONAL_GAMES,
+      ))),
+      commanderMMRPointModifier: {
+        enabled: source?.playerRating?.commanderMMRPointModifier?.enabled ?? true,
+        maxModifierPercent: Math.max(0, toNumberOr(
+          source?.playerRating?.commanderMMRPointModifier?.maxModifierPercent,
+          DEFAULT_PLAYER_RATING_MMR_POINT_MODIFIER_MAX,
+        )),
+      },
+      weights: {
+        recentPerformance: toNumberOr(
+          source?.playerRating?.weights?.recentPerformance,
+          DEFAULT_PLAYER_RATING_WEIGHTS.recentPerformance,
+        ),
+        allTimePerformance: toNumberOr(
+          source?.playerRating?.weights?.allTimePerformance,
+          DEFAULT_PLAYER_RATING_WEIGHTS.allTimePerformance,
+        ),
+        winRate: toNumberOr(
+          source?.playerRating?.weights?.winRate,
+          DEFAULT_PLAYER_RATING_WEIGHTS.winRate,
+        ),
+        commanderMMRContext: toNumberOr(
+          source?.playerRating?.weights?.commanderMMRContext,
+          DEFAULT_PLAYER_RATING_WEIGHTS.commanderMMRContext,
+        ),
+        commanderPoints: toNumberOr(
+          source?.playerRating?.weights?.commanderPoints,
+          DEFAULT_PLAYER_RATING_WEIGHTS.commanderPoints,
+        ),
+        achievements: toNumberOr(
+          source?.playerRating?.weights?.achievements,
+          DEFAULT_PLAYER_RATING_WEIGHTS.achievements,
+        ),
+        clutch: toNumberOr(
+          source?.playerRating?.weights?.clutch,
+          DEFAULT_PLAYER_RATING_WEIGHTS.clutch,
+        ),
+        commanderDiversity: toNumberOr(
+          source?.playerRating?.weights?.commanderDiversity,
+          DEFAULT_PLAYER_RATING_WEIGHTS.commanderDiversity,
+        ),
+      },
+    },
     level: {
       xpPerGame: resolveNumericMap(DEFAULT_XP_PER_GAME, source?.level?.xpPerGame),
       winBonusXp: resolveNumericMap(DEFAULT_WIN_BONUS_XP, source?.level?.winBonusXp),

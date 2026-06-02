@@ -118,7 +118,7 @@
               v-if="playerCommanderMmr(player.name) !== null"
               class="game-card__commander-mmr"
               :title="`Commander MMR after this game: ${fmt(playerCommanderMmr(player.name)!)}`"
-            >{{ fmt(playerCommanderMmr(player.name)!) }}</span>
+            ><IconsMmrIcon :size="11" />{{ fmt(playerCommanderMmr(player.name)!) }}</span>
             <NuxtLink
               class="game-card__commander"
               :to="`/commanders/${encodeURIComponent(player.commander)}`"
@@ -364,6 +364,7 @@ const freeGameAwards = computed(() => {
 
 const showFreeGameAwards = computed(() =>
   !isEditing.value
+  && settings.value.playerRankingSystem !== 'player_rating_based'
   && settings.value.standings.adjustmentMode === 'freeGames'
   && freeGameAwards.value.length > 0,
 )
@@ -870,6 +871,9 @@ function fmt(n: number): string {
   }
 
   &__commander-mmr {
+    display: inline-flex;
+    align-items: center;
+    gap: 2px;
     font-size: $font-size-xs;
     color: $color-success;
     font-variant-numeric: tabular-nums;

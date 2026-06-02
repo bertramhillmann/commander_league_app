@@ -34,61 +34,89 @@
         </div>
 
         <label class="form-field settings-mode-field">
-          <span class="form-label">Calculation System</span>
-          <select v-model="form.standings.adjustmentMode" class="form-input">
-            <option value="compensation">Current compensation system</option>
-            <option value="freeGames">Free games on missed participation</option>
-            <option value="penaltyGames">Penalty for excess games played</option>
+          <span class="form-label">Player Ranking</span>
+          <select v-model="form.playerRankingSystem" class="form-input">
+            <option value="classic">Classic standings</option>
+            <option value="player_rating_based">Player Rating Based System</option>
           </select>
         </label>
 
-        <label class="toggle-field">
-          <input v-model="form.standings.usePerformanceModifier" type="checkbox" class="toggle-field__input" />
-          <span class="toggle-field__copy">
-            <span class="toggle-field__label">Use performance modifier</span>
-            <span class="toggle-field__hint">When off, standings use a fixed multiplier of 1.0.</span>
-          </span>
-        </label>
+        <template v-if="form.playerRankingSystem === 'classic'">
+          <label class="form-field settings-mode-field">
+            <span class="form-label">Calculation System</span>
+            <select v-model="form.standings.adjustmentMode" class="form-input">
+              <option value="compensation">Current compensation system</option>
+              <option value="freeGames">Free games on missed participation</option>
+              <option value="penaltyGames">Penalty for excess games played</option>
+            </select>
+          </label>
 
-        <label class="toggle-field">
-          <input v-model="form.standings.includeCommanderXp" type="checkbox" class="toggle-field__input" />
-          <span class="toggle-field__copy">
-            <span class="toggle-field__label">Include Commander XP</span>
-            <span class="toggle-field__hint">When off, Commander XP adds 0 points to standings and the XP column is hidden on the dashboard.</span>
-          </span>
-        </label>
+          <label class="toggle-field">
+            <input v-model="form.standings.usePerformanceModifier" type="checkbox" class="toggle-field__input" />
+            <span class="toggle-field__copy">
+              <span class="toggle-field__label">Use performance modifier</span>
+              <span class="toggle-field__hint">When off, standings use a fixed multiplier of 1.0.</span>
+            </span>
+          </label>
 
-        <label class="toggle-field">
-          <input v-model="form.standings.includeAchievementPoints" type="checkbox" class="toggle-field__input" />
-          <span class="toggle-field__copy">
-            <span class="toggle-field__label">Include achievement points</span>
-            <span class="toggle-field__hint">When off, achievement points add 0 points to standings and the achievement column is hidden on the dashboard.</span>
-          </span>
-        </label>
+          <label class="toggle-field">
+            <input v-model="form.standings.includeCommanderXp" type="checkbox" class="toggle-field__input" />
+            <span class="toggle-field__copy">
+              <span class="toggle-field__label">Include Commander XP</span>
+              <span class="toggle-field__hint">When off, Commander XP adds 0 points to standings and the XP column is hidden on the dashboard.</span>
+            </span>
+          </label>
 
-        <div v-if="form.standings.adjustmentMode === 'freeGames'" class="settings-subgrid">
+          <label class="toggle-field">
+            <input v-model="form.standings.includeAchievementPoints" type="checkbox" class="toggle-field__input" />
+            <span class="toggle-field__copy">
+              <span class="toggle-field__label">Include achievement points</span>
+              <span class="toggle-field__hint">When off, achievement points add 0 points to standings and the achievement column is hidden on the dashboard.</span>
+            </span>
+          </label>
+
+          <div v-if="form.standings.adjustmentMode === 'freeGames'" class="settings-subgrid">
+            <label class="form-field">
+              <span class="form-label">Starting Avg For Pre-Participation Misses</span>
+              <input v-model.number="form.standings.freeGamesBaselineAvg" type="number" step="0.001" min="0" class="form-input" />
+            </label>
+            <label class="form-field">
+              <span class="form-label">Misses Before Free Games Start</span>
+              <input v-model.number="form.standings.freeGamesGraceMisses" type="number" step="1" min="0" class="form-input" />
+            </label>
+            <label class="form-field">
+              <span class="form-label">Consecutive Miss Reduction</span>
+              <input v-model.number="form.standings.freeGamesConsecutivePenalty" type="number" step="0.001" min="0" class="form-input" />
+            </label>
+            <label class="form-field">
+              <span class="form-label">Minimum Avg Floor</span>
+              <input v-model.number="form.standings.freeGamesMinimumAvg" type="number" step="0.001" min="0" class="form-input" />
+            </label>
+          </div>
+
+          <div v-if="form.standings.adjustmentMode === 'penaltyGames'" class="settings-subgrid settings-subgrid--single">
+            <label class="form-field">
+              <span class="form-label">Penalty Factor</span>
+              <input v-model.number="form.standings.penaltyFactor" type="number" step="0.001" min="0" class="form-input" />
+            </label>
+          </div>
+        </template>
+
+        <div v-if="form.playerRankingSystem === 'player_rating_based'" class="settings-subgrid">
           <label class="form-field">
-            <span class="form-label">Starting Avg For Pre-Participation Misses</span>
-            <input v-model.number="form.standings.freeGamesBaselineAvg" type="number" step="0.001" min="0" class="form-input" />
+            <span class="form-label">Provisional Games</span>
+            <input v-model.number="form.playerRating.provisionalGames" type="number" step="1" min="1" class="form-input" />
+          </label>
+          <label class="toggle-field">
+            <input v-model="form.playerRating.commanderMMRPointModifier.enabled" type="checkbox" class="toggle-field__input" />
+            <span class="toggle-field__copy">
+              <span class="toggle-field__label">Use commander MMR point modifier</span>
+              <span class="toggle-field__hint">Boost or soften point-based rating components depending on pod commander strength.</span>
+            </span>
           </label>
           <label class="form-field">
-            <span class="form-label">Misses Before Free Games Start</span>
-            <input v-model.number="form.standings.freeGamesGraceMisses" type="number" step="1" min="0" class="form-input" />
-          </label>
-          <label class="form-field">
-            <span class="form-label">Consecutive Miss Reduction</span>
-            <input v-model.number="form.standings.freeGamesConsecutivePenalty" type="number" step="0.001" min="0" class="form-input" />
-          </label>
-          <label class="form-field">
-            <span class="form-label">Minimum Avg Floor</span>
-            <input v-model.number="form.standings.freeGamesMinimumAvg" type="number" step="0.001" min="0" class="form-input" />
-          </label>
-        </div>
-
-        <div v-if="form.standings.adjustmentMode === 'penaltyGames'" class="settings-subgrid settings-subgrid--single">
-          <label class="form-field">
-            <span class="form-label">Penalty Factor</span>
-            <input v-model.number="form.standings.penaltyFactor" type="number" step="0.001" min="0" class="form-input" />
+            <span class="form-label">MMR Point Modifier Cap %</span>
+            <input v-model.number="form.playerRating.commanderMMRPointModifier.maxModifierPercent" type="number" step="1" min="0" class="form-input" />
           </label>
         </div>
       </section>
@@ -246,14 +274,15 @@ import { computed, reactive, ref, watch } from 'vue'
 import {
   getResolvedLeagueSettings,
   type LeagueSettingsDocument,
+  type PlayerRankingSystem,
   type StandingsAdjustmentMode,
 } from '~/utils/leagueSettings'
 import { DEFAULT_MAX_LEVEL, type AchievementDef } from '~/utils/scoringDefaults'
 
 definePageMeta({ middleware: [] })
 
-const { ensureSession, isAdmin } = useAuth()
-await ensureSession()
+const { refreshSession: refreshAuthSession, isAdmin } = useAuth()
+await refreshAuthSession()
 
 if (!isAdmin.value) {
   await navigateTo('/login')
@@ -269,6 +298,14 @@ const playerCounts = [3, 4, 5] as const
 type EditableSettingsState = {
   points: Record<number, Array<{ points: number; lPoints: number }>>
   achievements: Record<string, number>
+  playerRankingSystem: PlayerRankingSystem
+  playerRating: {
+    provisionalGames: number
+    commanderMMRPointModifier: {
+      enabled: boolean
+      maxModifierPercent: number
+    }
+  }
   level: {
     xpPerGame: Record<number, number>
     winBonusXp: Record<number, number>
@@ -345,7 +382,15 @@ async function saveSettings() {
     await refreshLeagueState()
     successMessage.value = 'League settings saved.'
   } catch (error: any) {
-    errorMessage.value = error?.data?.statusMessage ?? 'Failed to save settings.'
+    if (error?.statusCode === 403 || error?.data?.statusCode === 403) {
+      await refreshAuthSession()
+      errorMessage.value = 'Your admin session expired. Please log in again.'
+      if (!isAdmin.value) {
+        await navigateTo('/login')
+      }
+    } else {
+      errorMessage.value = error?.data?.statusMessage ?? 'Failed to save settings.'
+    }
   } finally {
     saving.value = false
   }
@@ -367,7 +412,15 @@ async function clearOverrides() {
     await refreshLeagueState()
     successMessage.value = 'Saved overrides cleared. Utils defaults are active again.'
   } catch (error: any) {
-    errorMessage.value = error?.data?.statusMessage ?? 'Failed to clear saved overrides.'
+    if (error?.statusCode === 403 || error?.data?.statusCode === 403) {
+      await refreshAuthSession()
+      errorMessage.value = 'Your admin session expired. Please log in again.'
+      if (!isAdmin.value) {
+        await navigateTo('/login')
+      }
+    } else {
+      errorMessage.value = error?.data?.statusMessage ?? 'Failed to clear saved overrides.'
+    }
   } finally {
     saving.value = false
   }
@@ -384,6 +437,14 @@ function createEditableSettings(source: ReturnType<typeof getResolvedLeagueSetti
     achievements: Object.fromEntries(
       Object.values(source.achievements).map((achievement) => [achievement.id, achievement.points]),
     ),
+    playerRankingSystem: source.playerRankingSystem,
+    playerRating: {
+      provisionalGames: source.playerRating.provisionalGames,
+      commanderMMRPointModifier: {
+        enabled: source.playerRating.commanderMMRPointModifier.enabled,
+        maxModifierPercent: source.playerRating.commanderMMRPointModifier.maxModifierPercent,
+      },
+    },
     level: {
       xpPerGame: { ...source.level.xpPerGame },
       winBonusXp: { ...source.level.winBonusXp },
@@ -418,6 +479,10 @@ function applyEditableSettings(target: EditableSettingsState, source: ReturnType
   target.achievements = Object.fromEntries(
     Object.values(source.achievements).map((achievement) => [achievement.id, achievement.points]),
   )
+  target.playerRankingSystem = source.playerRankingSystem
+  target.playerRating.provisionalGames = source.playerRating.provisionalGames
+  target.playerRating.commanderMMRPointModifier.enabled = source.playerRating.commanderMMRPointModifier.enabled
+  target.playerRating.commanderMMRPointModifier.maxModifierPercent = source.playerRating.commanderMMRPointModifier.maxModifierPercent
   target.level.xpPerGame = { ...source.level.xpPerGame }
   target.level.winBonusXp = { ...source.level.winBonusXp }
   target.level.thresholds = [...source.level.thresholds]
@@ -450,6 +515,14 @@ function toDocument(source: EditableSettingsState): LeagueSettingsDocument {
     achievements: Object.fromEntries(
       Object.entries(source.achievements).map(([id, value]) => [id, sanitizeNumber(value)]),
     ),
+    playerRankingSystem: source.playerRankingSystem,
+    playerRating: {
+      provisionalGames: sanitizeInteger(source.playerRating.provisionalGames),
+      commanderMMRPointModifier: {
+        enabled: source.playerRating.commanderMMRPointModifier.enabled,
+        maxModifierPercent: sanitizePositiveNumber(source.playerRating.commanderMMRPointModifier.maxModifierPercent),
+      },
+    },
     level: {
       xpPerGame: Object.fromEntries(
         playerCounts.map((playerCount) => [playerCount, sanitizePositiveNumber(source.level.xpPerGame[playerCount])]),

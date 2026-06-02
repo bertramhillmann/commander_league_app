@@ -2,8 +2,8 @@
   <div class="perf-chart">
     <div class="perf-chart__header">
       <div class="perf-chart__title-group">
-        <span class="perf-chart__title">Performance Trends</span>
-        <span class="perf-chart__subtitle">Exponential weighted score — recent games count more (λ=0.1)</span>
+        <span class="perf-chart__title">{{ props.title }}</span>
+        <span v-if="props.subtitle" class="perf-chart__subtitle">{{ props.subtitle }}</span>
       </div>
       <div class="perf-chart__legend">
         <button
@@ -11,8 +11,12 @@
           :key="s.name"
           type="button"
           class="perf-chart__legend-item"
-          :class="{ 'perf-chart__legend-item--hidden': hiddenSet.has(s.name) }"
+          :class="{
+            'perf-chart__legend-item--hidden': hiddenSet.has(s.name),
+            'perf-chart__legend-item--dimmed': soloedSeries !== null && soloedSeries !== s.name,
+          }"
           @click="toggleSeries(s.name, i)"
+          @contextmenu.prevent="soloSeries(s.name)"
         >
           <span class="perf-chart__legend-dot" :style="{ background: s.color }" />
           {{ s.name }}
@@ -23,7 +27,7 @@
     <div v-if="props.series.length > 0" class="perf-chart__frame">
       <canvas ref="canvasRef" class="perf-chart__canvas" />
     </div>
-    <div v-else class="perf-chart__empty">No performance data yet.</div>
+    <div v-else class="perf-chart__empty">{{ props.emptyLabel }}</div>
   </div>
 </template>
 
@@ -34,17 +38,28 @@ export interface PerformancePlayerSeries {
   name: string
   color: string
   data: (number | null)[]
+  tooltipData?: (string | null)[]
 }
 
 const props = withDefaults(defineProps<{
   labels: string[]
   series: PerformancePlayerSeries[]
   filled?: boolean
-}>(), { filled: false })
+  title?: string
+  subtitle?: string
+  emptyLabel?: string
+}>(), {
+  filled: false,
+  title: 'Performance Trends',
+  subtitle: 'Exponential weighted score - recent games count more',
+  emptyLabel: 'No performance data yet.',
+})
 
 const canvasRef = ref<HTMLCanvasElement | null>(null)
 const hiddenSet = ref<Set<string>>(new Set())
+const soloedSeries = ref<string | null>(null)
 let chart: Chart | null = null
+let renderVersion = 0
 
 watch(
   () => [props.labels, props.series],
@@ -53,13 +68,35 @@ watch(
 )
 
 onMounted(async () => { await renderChart() })
-onBeforeUnmount(() => { if (chart) chart.destroy() })
+onBeforeUnmount(() => {
+  renderVersion += 1
+  if (chart) {
+    chart.destroy()
+    chart = null
+  }
+})
 
 async function renderChart() {
-  if (!canvasRef.value || !import.meta.client) return
+  const version = ++renderVersion
+  if (!import.meta.client) return
+  await nextTick()
+  const canvas = canvasRef.value
+  if (!canvas || !canvas.isConnected) return
   const { default: ChartJS } = await import('chart.js/auto')
-  if (chart) chart.destroy()
-  chart = new ChartJS(canvasRef.value, buildConfig())
+  if (version !== renderVersion) return
+  const currentCanvas = canvasRef.value
+  if (!currentCanvas || !currentCanvas.isConnected) return
+  const context = currentCanvas.getContext('2d')
+  if (!context) return
+  if (chart) {
+    chart.destroy()
+    chart = null
+  }
+  chart = new ChartJS(context, buildConfig())
+  if (soloedSeries.value) {
+    applyOpacities()
+    chart.update('none')
+  }
 }
 
 function toggleSeries(name: string, datasetIndex: number) {
@@ -75,6 +112,28 @@ function toggleSeries(name: string, datasetIndex: number) {
   chart.update()
 }
 
+function applyOpacities() {
+  if (!chart) return
+  props.series.forEach((s, i) => {
+    if (!chart) return
+    const ds = chart.data.datasets[i]
+    if (!soloedSeries.value || s.name === soloedSeries.value) {
+      ds.borderColor = s.color
+      ds.borderWidth = 1.8
+    } else {
+      ds.borderColor = withAlpha(s.color, 0.2)
+      ds.borderWidth = 1.4
+    }
+  })
+}
+
+function soloSeries(name: string) {
+  if (!chart) return
+  soloedSeries.value = soloedSeries.value === name ? null : name
+  applyOpacities()
+  chart.update()
+}
+
 function buildConfig(): ChartConfiguration<'line'> {
   return {
     type: 'line',
@@ -84,7 +143,7 @@ function buildConfig(): ChartConfiguration<'line'> {
         label: s.name,
         data: s.data,
         borderColor: s.color,
-        backgroundColor: props.filled ? hexToRgba(s.color, 0.15) : 'transparent',
+        backgroundColor: props.filled ? withAlpha(s.color, 0.15) : 'transparent',
         borderWidth: 1.8,
         tension: 0.3,
         spanGaps: true,
@@ -124,7 +183,10 @@ function buildConfig(): ChartConfiguration<'line'> {
             label(item: TooltipItem<'line'>) {
               const val = item.parsed.y
               if (val === null || val === undefined) return ''
-              return `${item.dataset.label}: ${fmt(val)}`
+              const detail = props.series[item.datasetIndex]?.tooltipData?.[item.dataIndex]
+              return detail
+                ? `${item.dataset.label}: ${fmt(val)} (${detail})`
+                : `${item.dataset.label}: ${fmt(val)}`
             },
           },
           filter(item) {
@@ -162,11 +224,15 @@ function buildConfig(): ChartConfiguration<'line'> {
   }
 }
 
-function hexToRgba(hex: string, alpha: number) {
-  const r = Number.parseInt(hex.slice(1, 3), 16)
-  const g = Number.parseInt(hex.slice(3, 5), 16)
-  const b = Number.parseInt(hex.slice(5, 7), 16)
-  return `rgba(${r}, ${g}, ${b}, ${alpha})`
+function withAlpha(color: string, alpha: number) {
+  if (color.startsWith('#')) {
+    const r = Number.parseInt(color.slice(1, 3), 16)
+    const g = Number.parseInt(color.slice(3, 5), 16)
+    const b = Number.parseInt(color.slice(5, 7), 16)
+    return `rgba(${r}, ${g}, ${b}, ${alpha})`
+  }
+  // hsl(...) / rgb(...) — use CSS4 alpha syntax: hsl(h s l / a)
+  return color.replace(')', ` / ${alpha})`)
 }
 
 function fmt(n: number) {
@@ -177,7 +243,7 @@ function fmt(n: number) {
 
 <style lang="scss" scoped>
 .perf-chart {
-  background: rgba($color-bg-elevated, 0.45);
+  background: rgba(0,0,0,0.5);
   border: 1px solid $border-color;
   border-radius: $border-radius-xl;
   padding: $spacing-4;
@@ -237,6 +303,10 @@ function fmt(n: number) {
 
     &--hidden {
       opacity: 0.35;
+    }
+
+    &--dimmed {
+      opacity: 0.2;
     }
   }
 

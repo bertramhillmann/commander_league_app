@@ -15,7 +15,7 @@
           />
           <div class="player__placement-card player__placement-card--current">
             <span class="player__placement-rank">#{{ currentLeagueRank }}</span>
-            <span class="player__placement-label">League Standing</span>
+            <span class="player__placement-label">{{ leagueStandingLabel }}</span>
             <span class="player__placement-meta">out of {{ standings.length }} players</span>
           </div>
 
@@ -90,21 +90,42 @@
 
       <div class="player__stats">
         <div class="player__stat">
-          <span class="player__stat-val player__stat-val--total" :title="'Points + Achievement Points + XP Points'">
+          <button
+            v-if="playerRankingSystem === 'player_rating_based'"
+            type="button"
+            class="player__stat-val player__stat-val--total player__stat-val--button"
+            title="Click for full rating breakdown"
+            @click="openRatingSidebar"
+          >
+            {{ fmt(totalScore) }}
+          </button>
+          <span v-else class="player__stat-val player__stat-val--total" :title="playerRatingTooltip">
             {{ fmt(totalScore) }}
           </span>
-          <span class="player__stat-lbl">Total Score</span>
+          <span class="player__stat-lbl">{{ totalScoreLabel }}</span>
         </div>
         <div class="player__stat">
           <span class="player__stat-val">{{ fmt(player.totalPoints) }}</span>
           <span class="player__stat-lbl">Points</span>
         </div>
         <div class="player__stat">
-          <span class="player__stat-val player__stat-val--achv">{{ fmt(player.achievementPoints) }}</span>
+          <button
+            type="button"
+            class="player__stat-val player__stat-val--achv player__stat-val--button"
+            @click="openAchievementSidebar"
+          >
+            {{ fmt(player.achievementPoints) }}
+          </button>
           <span class="player__stat-lbl">Achv. Pts</span>
         </div>
         <div class="player__stat">
-          <span class="player__stat-val player__stat-val--xp">{{ fmt(xpPts) }}</span>
+          <button
+            type="button"
+            class="player__stat-val player__stat-val--xp player__stat-val--button"
+            @click="openXpSidebar"
+          >
+            {{ fmt(xpPts) }}
+          </button>
           <span class="player__stat-lbl">XP Pts</span>
         </div>
         <div class="player__stat">
@@ -147,7 +168,7 @@
         </div>
       </div>
 
-      <div v-if="leagueTimeline.length > 0 || playerMatchTimeline.length > 0" class="player__league-panel">
+      <div v-if="leagueTimeline.length > 0 || (playerRatingDetail?.history.length ?? 0) > 0 || playerMatchTimeline.length > 0" class="player__league-panel">
         <div class="player__league-chart">
           <div class="player__league-chart-switcher">
             <button
@@ -156,7 +177,15 @@
               :class="{ 'player__league-chart-switch--active': activePlayerChart === 'league' }"
               @click="activePlayerChart = 'league'"
             >
-              League Placement
+              {{ leagueChartLabel }}
+            </button>
+            <button
+              type="button"
+              class="player__league-chart-switch"
+              :class="{ 'player__league-chart-switch--active': activePlayerChart === 'rating' }"
+              @click="activePlayerChart = 'rating'"
+            >
+              Player Rating
             </button>
             <button
               type="button"
@@ -171,6 +200,10 @@
           <ChartsLeagueRankTimeline
             v-if="activePlayerChart === 'league'"
             :points="leagueTimeline"
+          />
+          <ChartsPlayerRatingTimeline
+            v-else-if="activePlayerChart === 'rating'"
+            :points="playerRatingDetail?.history ?? []"
           />
           <ChartsPlayerMatchTimeline
             v-else
@@ -269,11 +302,11 @@
                 </div>
                 <div class="cmd-row__xp-detail">
                   <span class="cmd-row__xp-current">{{ fmtXp(cmd.currentLevelXP) }} / {{ fmtXp(cmd.levelSpanXP) }} XP</span>
-                  <span v-if="!cmd.isMaxLevel" class="cmd-row__xp-remaining">· {{ cmd.xpToNext }} to next</span>
+                  <span v-if="!cmd.isMaxLevel" class="cmd-row__xp-remaining">· {{ fmtXp(cmd.xpToNext) }} to next</span>
                   <span class="cmd-row__xp-pts" title="Score points contributed by XP levels">+{{ cmd.xpScorePts }} pts</span>
                 </div>
                 <div class="cmd-row__rested-detail">
-                  Rested XP x{{ formatRestedMultiplier(cmd.restedMultiplier) }} · {{ cmd.rested }} rest
+                  Rested x{{ formatRestedMultiplier(cmd.restedMultiplier) }} · {{ fmtXp(cmd.rested) }} rest
                 </div>
               </div>
             </div>
@@ -284,9 +317,9 @@
               <!-- Name + tier -->
               <div class="cmd-row__header">
                 <NuxtLink class="cmd-row__name" :to="`/commanders/${encodeURIComponent(cmd.name)}`">{{ cmd.name }}</NuxtLink>
-                <span class="cmd-row__mmr">{{ formatCommanderMmr(cmd.mmr) }}</span>
+                <span class="cmd-row__mmr"><IconsMmrIcon :size="11" />{{ formatCommanderMmr(cmd.mmr) }}</span>
                 <span class="cmd-row__tier">
-                  <IconsTierIcon :tier="cmd.mmrTier" :size="13" />
+                  <IconsTierIcon :tier="cmd.mmrTier" :size="22" />
                   <span class="cmd-row__tier-label" :class="`tier-text--${cmd.mmrTier}`">{{ cmd.mmrTierLabel }}</span>
                 </span>
                 <div class="cmd-row__title-row">
@@ -519,6 +552,12 @@
       />
     </div>
   </Teleport>
+
+  <Sidebar
+    v-model="ratingSidebarOpen"
+    :player-name="playerId"
+    :mode="detailSidebarMode"
+  />
 
   <Teleport to="body">
     <div
@@ -754,7 +793,7 @@
 </template>
 
 <script setup lang="ts">
-import { compareGamesChronological, getLeagueStandingMetrics, getPlayerCommanderPerformanceEdgeMetrics, getPlayerCommanderMetrics } from '~/composables/useLeagueState'
+import { compareGamesChronological, getPlayerCommanderPerformanceEdgeMetrics, getPlayerCommanderMetrics } from '~/composables/useLeagueState'
 import { useAuth } from '~/composables/useAuth'
 import { fetchCardsByName, getCardImageUrl, type ScryfallCard } from '~/services/scryfallService'
 import { xpToLevel, getCommanderLevelProgress, getRestedXpMultiplier } from '~/utils/commanderExperience'
@@ -763,6 +802,7 @@ import { extractArchidektDeckId } from '~/utils/archidekt'
 import { buildCommanderMMRTimeline, buildCommanderPlacementTimeline, type CommanderMMRTimelinePoint, type PlacementTimelinePoint } from '~/utils/commanderTimeline'
 import { buildPlayerLeagueTimeline } from '~/utils/playerLeagueTimeline'
 import { buildPlayerMatchTimeline } from '~/utils/playerMatchTimeline'
+import { buildPlayerRatingDetail } from '~/composables/usePlayerRating'
 import { buildPlacementPrognosis } from '~/utils/placementPrognosis'
 import { formatPlayerName } from '~/utils/playerNames'
 import { normalizeDeckIdentityKey } from '~/utils/deckLinks'
@@ -793,6 +833,12 @@ const playerPortraits = Object.fromEntries(
   }),
 )
 const playerPortraitUrl = computed(() => playerPortraits[playerId.value.toLowerCase()] ?? '')
+const playerRankingSystem = computed(() => leagueSettings.value.playerRankingSystem)
+const totalScoreLabel = computed(() => playerRankingSystem.value === 'player_rating_based' ? 'Player Rating' : 'Total Score')
+const leagueStandingLabel = computed(() => playerRankingSystem.value === 'player_rating_based' ? 'Rating Standing' : 'League Standing')
+const leagueChartLabel = computed(() => playerRankingSystem.value === 'player_rating_based' ? 'Rating Placement' : 'League Placement')
+const ratingSidebarOpen = ref(false)
+const detailSidebarMode = ref<'rating' | 'achievements' | 'xp'>('rating')
 
 const { games, commanders, players, gameRecords, leagueSnapshots, commanderTitleSelections, standings } = useLeagueState()
 const { preloadCommanderImages, getCachedCommanderImage } = useImageCache()
@@ -801,16 +847,7 @@ const isOwnProfile = computed(() =>
 )
 
 const player = computed(() => players.value[playerId.value] ?? null)
-const playerStanding = computed(() =>
-  player.value
-    ? getLeagueStandingMetrics(
-      player.value,
-      players.value,
-      undefined,
-      { games: chronologicalGames.value, gameRecords: gameRecords.value },
-    )
-    : null,
-)
+const playerStanding = computed(() => standings.value.find((entry) => entry.name === playerId.value) ?? null)
 const chronologicalGames = computed(() => [...games.value].sort(compareGamesChronological))
 const leagueTimeline = computed(() =>
   buildPlayerLeagueTimeline(chronologicalGames.value, gameRecords.value, leagueSnapshots.value, playerId.value),
@@ -818,13 +855,23 @@ const leagueTimeline = computed(() =>
 const playerMatchTimeline = computed(() =>
   buildPlayerMatchTimeline(chronologicalGames.value, gameRecords.value, playerId.value),
 )
+const playerRatingDetail = computed(() => {
+  const playerState = players.value[playerId.value]
+  if (!playerState) return null
+  return buildPlayerRatingDetail({
+    player: playerState,
+    players: players.value,
+    gameRecords: gameRecords.value,
+    games: chronologicalGames.value,
+  })
+})
 const playerArchEnemy = computed(() =>
   getArchEnemySummary(playerId.value, chronologicalGames.value, gameRecords.value),
 )
 const currentLeagueRank = computed(() =>
   standings.value.find((entry) => entry.name === playerId.value)?.rank ?? standings.value.length,
 )
-const activePlayerChart = ref<'league' | 'results'>('league')
+const activePlayerChart = ref<'league' | 'rating' | 'results'>('league')
 const activeCommanderTimeline = ref<"mmr" | "placement">("mmr")
 const placementPrognosis = computed(() =>
   buildPlacementPrognosis(playerId.value, chronologicalGames.value, gameRecords.value, players.value, commanders.value),
@@ -872,6 +919,55 @@ const xpPts = computed(() => xpPoints(playerId.value))
 
 const totalScore = computed(() => {
   return playerStanding.value?.totalScore ?? 0
+})
+
+function openRatingSidebar() {
+  if (playerRankingSystem.value !== 'player_rating_based') return
+  detailSidebarMode.value = 'rating'
+  ratingSidebarOpen.value = true
+}
+
+function openAchievementSidebar() {
+  detailSidebarMode.value = 'achievements'
+  ratingSidebarOpen.value = true
+}
+
+function openXpSidebar() {
+  detailSidebarMode.value = 'xp'
+  ratingSidebarOpen.value = true
+}
+
+const playerRatingTooltip = computed(() => {
+  if (playerRankingSystem.value !== 'player_rating_based') {
+    return 'Points + Achievement Points + XP Points'
+  }
+
+  const breakdown = playerStanding.value?.ratingBreakdown
+  const provisional = playerStanding.value?.provisional
+  const lines = [
+    'Player Rating blends recent form, long-term performance, win rate, commander MMR context, commander points, achievements, clutch play, and commander diversity.',
+    'Recent games matter more than older ones, and low sample sizes reduce confidence.',
+  ]
+
+  if (breakdown) {
+    lines.push('')
+    lines.push('Current weighted factors:')
+    lines.push(`Recent form: ${fmt(breakdown.recentPerformance.weightedContribution)} (${Math.round(breakdown.recentPerformance.weight * 100)}% weight)`)
+    lines.push(`All-time performance: ${fmt(breakdown.allTimePerformance.weightedContribution)} (${Math.round(breakdown.allTimePerformance.weight * 100)}% weight)`)
+    lines.push(`Win rate: ${fmt(breakdown.winRate.weightedContribution)} (${Math.round(breakdown.winRate.weight * 100)}% weight)`)
+    lines.push(`Commander MMR context: ${fmt(breakdown.commanderMMRContext.weightedContribution)} (${Math.round(breakdown.commanderMMRContext.weight * 100)}% weight)`)
+    lines.push(`Total points / activity: ${fmt(breakdown.activityPoints.weightedContribution)} (${Math.round(breakdown.activityPoints.weight * 100)}% weight)`)
+    lines.push(`Achievements: ${fmt(breakdown.achievements.weightedContribution)} (${Math.round(breakdown.achievements.weight * 100)}% weight)`)
+    lines.push(`Clutch: ${fmt(breakdown.clutch.weightedContribution)} (${Math.round(breakdown.clutch.weight * 100)}% weight)`)
+    lines.push(`Diversity: ${fmt(breakdown.commanderDiversity.weightedContribution)} (${Math.round(breakdown.commanderDiversity.weight * 100)}% weight)`)
+  }
+
+  if (provisional) {
+    lines.push('')
+    lines.push('This rating is provisional because the minimum game sample has not been reached yet.')
+  }
+
+  return lines.join('\n')
 })
 
 const winRate = computed(() => {
@@ -2592,15 +2688,15 @@ function getEdgeTooltipText(cmd: CommanderRow) {
   &__card-xp {
     display: flex;
     flex-direction: column;
-    gap: 2px;
-    background: rgba(0, 0, 0, 0.25);
-    border-radius:0 0 $border-radius-md $border-radius-md;
-    border: none;
+    gap: 0;
+    background: linear-gradient(180deg, rgba(0, 0, 0, 0.45) 0%, rgba(14, 7, 0, 0.62) 100%);
+    border-radius: 0 0 $border-radius-md $border-radius-md;
+    border-top: 1px solid rgba(255, 130, 20, 0.2);
 
     &--near-levelup {
       .cmd-row__level-label {
         color: #f5c842;
-        text-shadow: 0 0 10px rgba(245, 200, 66, 0.65);
+        text-shadow: 0 0 12px rgba(245, 200, 66, 0.7);
       }
 
       .cmd-row__level-next {
@@ -2619,13 +2715,13 @@ function getEdgeTooltipText(cmd: CommanderRow) {
     &--max-level {
       .cmd-row__level-label {
         color: #ffd966;
-        text-shadow: 0 0 12px rgba(255, 217, 102, 0.75);
+        text-shadow: 0 0 14px rgba(255, 217, 102, 0.8);
       }
 
       .cmd-row__level-next {
         color: #ffd966;
-        font-weight: $font-weight-semibold;
-        letter-spacing: 0.06em;
+        font-weight: $font-weight-bold;
+        letter-spacing: 0.08em;
       }
 
       .cmd-row__bar-fill {
@@ -2652,12 +2748,15 @@ function getEdgeTooltipText(cmd: CommanderRow) {
 
   &__header {
     display: flex;
-    align-items: baseline;
+    align-items: center;
     gap: $spacing-3;
     flex-wrap: wrap;
   }
 
   &__mmr {
+    display: inline-flex;
+    align-items: center;
+    gap: 3px;
     font-size: $font-size-sm;
     font-weight: $font-weight-bold;
     color: $color-secondary;
@@ -3001,64 +3100,78 @@ function getEdgeTooltipText(cmd: CommanderRow) {
     display: flex;
     align-items: center;
     gap: $spacing-2;
-    padding: $spacing-1 $spacing-3;
+    padding: $spacing-2 $spacing-3 $spacing-1;
   }
 
-  &__level-label,
+  &__level-label {
+    font-size: $font-size-sm;
+    font-weight: $font-weight-bold;
+    color: rgba(255, 175, 60, 0.9);
+    white-space: nowrap;
+    min-width: 36px;
+    letter-spacing: 0.04em;
+    text-shadow: 0 0 8px rgba(255, 140, 20, 0.35);
+  }
+
   &__level-next {
     font-size: $font-size-xs;
-    color: $color-text-muted;
+    font-weight: $font-weight-medium;
+    color: rgba($color-text-muted, 0.7);
     white-space: nowrap;
-    min-width: 32px;
+    min-width: 36px;
+    text-align: right;
   }
-
-  &__level-next { text-align: right; }
 
   &__bar-wrap {
     flex: 1;
-    height: 6px;
-    background: rgba(16,16,16,0.55);
+    height: 8px;
+    background: rgba(10, 5, 0, 0.7);
     border-radius: $border-radius-full;
     overflow: hidden;
-    flex-shrink: 0;
+    border: 1px solid rgba(255, 100, 0, 0.18);
   }
 
   &__bar-fill {
     height: 100%;
-    background: linear-gradient(90deg, #e84800 0%, #ff7a00 55%, #ffb830 100%);
+    background: linear-gradient(90deg, #a83200 0%, #e84800 30%, #ff7a00 65%, #ffb830 100%);
     border-radius: $border-radius-full;
     transition: width $transition-slow;
+    box-shadow: 0 0 6px rgba(255, 110, 0, 0.55);
   }
 
   &__xp-detail {
     display: flex;
     align-items: baseline;
-    gap: 4px;
+    gap: 5px;
     flex-wrap: wrap;
-    padding: 0 $spacing-3 $spacing-2;
+    padding: 2px $spacing-3 $spacing-1;
   }
 
   &__xp-current {
-    font-size: 10px;
-    color: $color-text-muted;
+    font-size: $font-size-xs;
+    color: rgba($color-text-muted, 0.9);
+    font-variant-numeric: tabular-nums;
   }
 
   &__xp-remaining {
     font-size: 10px;
-    color: $color-text-muted;
+    color: rgba($color-text-muted, 0.6);
     flex: 1;
+    font-variant-numeric: tabular-nums;
   }
 
   &__xp-pts {
-    font-size: 10px;
-    font-weight: $font-weight-semibold;
-    color: $color-primary-light;
+    font-size: $font-size-xs;
+    font-weight: $font-weight-bold;
+    color: $color-accent;
+    letter-spacing: 0.04em;
   }
 
   &__rested-detail {
     padding: 0 $spacing-3 $spacing-2;
     font-size: 10px;
-    color: rgba($color-text-muted, 0.92);
+    color: rgba(130, 190, 255, 0.65);
+    letter-spacing: 0.02em;
   }
 
   // ── Achievements ──────────────────────────────────────────────────────────
@@ -3364,6 +3477,22 @@ function getEdgeTooltipText(cmd: CommanderRow) {
   position: absolute;
   z-index: 9999;
   pointer-events: none;
+}
+
+.player__stat-val--button {
+  appearance: none;
+  border: 0;
+  padding: 0;
+  background: transparent;
+  cursor: pointer;
+  text-decoration: underline;
+  text-decoration-color: rgba($color-primary-light, 0.3);
+  text-underline-offset: 0.2em;
+
+  &:hover {
+    color: $color-primary-light;
+    text-decoration-color: rgba($color-primary-light, 0.7);
+  }
 }
 
 .card-preview__img {

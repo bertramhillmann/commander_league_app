@@ -28,6 +28,8 @@ export default defineEventHandler(async (event) => {
         key: 'league',
         points: nextSettings.points ?? undefined,
         achievements: nextSettings.achievements ?? undefined,
+        playerRankingSystem: nextSettings.playerRankingSystem ?? undefined,
+        playerRating: nextSettings.playerRating ?? undefined,
         level: nextSettings.level ?? undefined,
         standings: nextSettings.standings ?? undefined,
         shop: nextSettings.shop ?? undefined,
@@ -42,6 +44,8 @@ export default defineEventHandler(async (event) => {
       ? {
           points: updated.points ?? undefined,
           achievements: updated.achievements ?? undefined,
+          playerRankingSystem: updated.playerRankingSystem ?? undefined,
+          playerRating: updated.playerRating ?? undefined,
           level: updated.level ?? undefined,
           standings: updated.standings ?? undefined,
           shop: updated.shop ?? undefined,
@@ -53,6 +57,10 @@ export default defineEventHandler(async (event) => {
 function isEmptySettings(settings: LeagueSettingsDocument) {
   return Object.keys(settings.points ?? {}).length === 0
     && Object.keys(settings.achievements ?? {}).length === 0
+    && settings.playerRankingSystem === undefined
+    && settings.playerRating?.provisionalGames === undefined
+    && settings.playerRating?.commanderMMRPointModifier?.enabled === undefined
+    && settings.playerRating?.commanderMMRPointModifier?.maxModifierPercent === undefined
     && Object.keys(settings.level?.xpPerGame ?? {}).length === 0
     && Object.keys(settings.level?.winBonusXp ?? {}).length === 0
     && (settings.level?.thresholds?.length ?? 0) === 0

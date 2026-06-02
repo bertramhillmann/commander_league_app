@@ -127,9 +127,9 @@ const userImageUrl = computed(() => {
 const items = [
   { label: 'Dashboard', to: '/dashboard', match: ['/dashboard'] },
   { label: 'Games', to: '/games', match: ['/games', '/gameList'] },
+  { label: 'Matchmaking', to: '/mmr-pod-finder', match: ['/mmr-pod-finder'] },
   { label: 'Players', to: '/players', match: ['/players'] },
-  { label: 'Commanders', to: '/commanders', match: ['/commanders'] },
-  { label: 'Pairings', to: '/commanders/pairings', match: ['/commanders/pairings'] },
+  { label: 'Commanders', to: '/commanders/pairings', match: ['/commanders', '/commanders/pairings'] },
   { label: 'Achievements', to: '/achievements', match: ['/achievements'] },
   { label: 'Shop', to: '/shop', match: ['/shop'] },
 ] as const

@@ -4,6 +4,14 @@ export interface ISettings extends Document {
   key: string
   points?: Record<string, Array<{ points: number; lPoints: number }>>
   achievements?: Record<string, number>
+  playerRankingSystem?: 'classic' | 'player_rating_based'
+  playerRating?: {
+    provisionalGames?: number
+    commanderMMRPointModifier?: {
+      enabled?: boolean
+      maxModifierPercent?: number
+    }
+  }
   level?: {
     xpPerGame?: Record<string, number>
     winBonusXp?: Record<string, number>
@@ -33,6 +41,8 @@ const SettingsSchema = new Schema<ISettings>(
     key: { type: String, required: true, unique: true, index: true, default: 'league' },
     points: { type: Schema.Types.Mixed, default: undefined },
     achievements: { type: Schema.Types.Mixed, default: undefined },
+    playerRankingSystem: { type: String, default: undefined },
+    playerRating: { type: Schema.Types.Mixed, default: undefined },
     level: { type: Schema.Types.Mixed, default: undefined },
     standings: { type: Schema.Types.Mixed, default: undefined },
     shop: { type: Schema.Types.Mixed, default: undefined },

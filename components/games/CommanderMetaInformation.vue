@@ -15,9 +15,9 @@
     <div class="cmd-meta__header">
       <span class="cmd-meta__name">{{ playerName }} × {{ commanderName }}</span>
       <span class="cmd-meta__title">{{ commanderTitle.name }}</span>
-      <span v-if="commanderMmr > 0" class="cmd-meta__mmr">{{ formatCommanderMmr(commanderMmr) }}</span>
+      <span v-if="commanderMmr > 0" class="cmd-meta__mmr"><IconsMmrIcon :size="11" />{{ formatCommanderMmr(commanderMmr) }}</span>
       <span v-if="commanderMmr > 0" class="cmd-meta__tier">
-        <IconsTierIcon :tier="commanderMmrTier" :size="13" />
+        <IconsTierIcon :tier="commanderMmrTier" :size="16" />
         <span class="cmd-meta__tier-label" :class="`tier-text--${commanderMmrTier}`">{{ commanderMmrTierLabel }}</span>
       </span>
     </div>
@@ -241,6 +241,9 @@ function formatCommanderMmr(value: number) {
   }
 
   &__mmr {
+    display: inline-flex;
+    align-items: center;
+    gap: 3px;
     font-size: $font-size-sm;
     font-weight: $font-weight-bold;
     color: $color-secondary;

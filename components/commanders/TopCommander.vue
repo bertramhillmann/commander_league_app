@@ -42,9 +42,9 @@
           <div class="top-commander__metric">
             <span class="top-commander__metric-label">MMR</span>
             <span class="top-commander__metric-value">
-              {{ formatMmr(topEntry.currentMmr) }}
+              <IconsMmrIcon :size="13" />{{ formatMmr(topEntry.currentMmr) }}
               <span class="top-commander__metric-delta top-commander__metric-delta--up">
-                Peak {{ formatMmr(topEntry.peakMmr) }}
+                Peak <IconsMmrIcon :size="11" />{{ formatMmr(topEntry.peakMmr) }}
               </span>
             </span>
           </div>
@@ -107,8 +107,8 @@
         </NuxtLink>
       </div>
       <div class="top-commander__peak-stats">
-        <span class="top-commander__peak-stat--mmr">{{ formatMmr(peakEntry.peakMmr) }} peak MMR</span>
-        <span class="top-commander__peak-stat--mmr">{{ formatMmr(peakEntry.currentMmr) }} current MMR</span>
+        <span class="top-commander__peak-stat--mmr"><IconsMmrIcon :size="11" />{{ formatMmr(peakEntry.peakMmr) }} peak</span>
+        <span class="top-commander__peak-stat--mmr"><IconsMmrIcon :size="11" />{{ formatMmr(peakEntry.currentMmr) }} current</span>
         <span>{{ peakEntry.plays }} games</span>
         <span>{{ pct(peakEntry.winRate) }}% win</span>
       </div>
@@ -164,7 +164,7 @@
         </button>
 
         <div class="top-commander__runner-stats">
-          <span>{{ formatMmr(entry.currentMmr) }} MMR</span>
+          <span><IconsMmrIcon :size="11" />{{ formatMmr(entry.currentMmr) }}</span>
           <span>{{ entry.plays }} games</span>
           <span>{{ pct(entry.winRate) }}% win</span>
           <span>{{ fmt(entry.avgPoints) }} avg pts</span>
@@ -659,6 +659,9 @@ function onTitleLeave() {
   }
 
   &__peak-stat--mmr {
+    display: inline-flex;
+    align-items: center;
+    gap: 3px;
     color: $color-success;
     font-weight: $font-weight-semibold;
   }

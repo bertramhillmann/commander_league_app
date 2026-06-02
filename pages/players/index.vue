@@ -44,7 +44,7 @@
           <div class="player-card__stats">
             <div class="player-card__stat">
               <span class="player-card__stat-val player-card__stat-val--score">{{ fmt(player.totalScore) }}</span>
-              <span class="player-card__stat-lbl">Score</span>
+              <span class="player-card__stat-lbl">{{ scoreLabel }}</span>
             </div>
             <div class="player-card__stat">
               <span class="player-card__stat-val">{{ player.gamesPlayed }}</span>
@@ -83,6 +83,8 @@ import { getFeaturedPlayers, type FeaturedPlayerCandidate } from '~/utils/featur
 import { compareGamesChronological } from '~/composables/useLeagueState'
 
 const { standings, gameRecords, games } = useLeagueState()
+const { settings } = useLeagueSettings()
+const scoreLabel = computed(() => settings.value.playerRankingSystem === 'player_rating_based' ? 'Rating' : 'Score')
 
 // ── Portrait images ────────────────────────────────────────────────────────────
 

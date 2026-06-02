@@ -49,17 +49,17 @@
 
     <div class="game-info__section">
       <div class="game-info__row">
-        <span class="game-info__label">Score before game</span>
+        <span class="game-info__label">{{ rankingValueLabel }} before game</span>
         <span class="game-info__value">{{ fmt(record.ratingBefore) }}</span>
       </div>
       <div class="game-info__row">
-        <span class="game-info__label">Score after game</span>
+        <span class="game-info__label">{{ rankingValueLabel }} after game</span>
         <span class="game-info__value">{{ fmt(record.ratingAfter) }}</span>
       </div>
       <div class="game-info__row game-info__row--stacked">
         <span class="game-info__label">Commander MMR change</span>
         <span class="game-info__value game-info__value--mmr" :class="commanderMmrDeltaClass">
-          {{ fmtSigned(record.commanderMMRDelta) }} ({{ fmt(record.commanderMMRBefore) }} → {{ fmt(record.commanderMMRAfter) }})
+          <IconsMmrIcon :size="11" />{{ fmtSigned(record.commanderMMRDelta) }} ({{ fmt(record.commanderMMRBefore) }} → {{ fmt(record.commanderMMRAfter) }})
         </span>
       </div>
       <div class="game-info__row">
@@ -114,7 +114,6 @@
 import { computed } from 'vue'
 import { getAchievementDefinition } from '~/utils/achievements'
 import { TIER_META, type Tier } from '~/utils/tiers'
-import { getLeagueStandingMetrics } from '~/composables/useLeagueState'
 import { getCommanderTierFromMMR } from '~/composables/useCommanderMMR'
 
 const props = defineProps<{
@@ -122,7 +121,8 @@ const props = defineProps<{
   gameId: string
 }>()
 
-const { games, players, gameRecords, standings } = useLeagueState()
+const { players, gameRecords, standings } = useLeagueState()
+const { settings } = useLeagueSettings()
 
 const record = computed(() => gameRecords.value[props.playerName]?.[props.gameId])
 
@@ -132,16 +132,8 @@ const gameAchievements = computed(() =>
     .filter(Boolean),
 )
 const playerState = computed(() => players.value[props.playerName])
-const playerStanding = computed(() =>
-  playerState.value
-    ? getLeagueStandingMetrics(
-      playerState.value,
-      players.value,
-      undefined,
-      { games: games.value, gameRecords: gameRecords.value },
-    )
-    : null,
-)
+const playerStanding = computed(() => standings.value.find((entry) => entry.name === props.playerName) ?? null)
+const rankingValueLabel = computed(() => settings.value.playerRankingSystem === 'player_rating_based' ? 'Rating' : 'Score')
 
 const currentRating = computed(() => playerStanding.value?.totalScore ?? 0)
 const currentRank = computed(() => {
@@ -311,6 +303,9 @@ function round3(n: number): number {
   }
 
   &__value--mmr {
+    display: inline-flex;
+    align-items: center;
+    gap: 3px;
     font-variant-numeric: tabular-nums;
     white-space: nowrap;
   }

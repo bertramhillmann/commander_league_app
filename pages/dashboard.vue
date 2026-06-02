@@ -23,19 +23,20 @@
             <button
               type="button"
               class="standings__sort-button standings__sort-button--num"
+              :title="totalScoreColumnTitle"
               @click="toggleSort('totalScore')"
             >
-              <span>Total</span>
+              <span>{{ totalScoreColumnLabel }}</span>
               <span class="standings__sort-indicator">{{ sortIndicator('totalScore') }}</span>
             </button>
           </th>
           <th
-            v-if="settings.standings.usePerformanceModifier"
+            v-if="!isPlayerRatingMode && settings.standings.usePerformanceModifier"
             class="standings__th standings__th--num standings__th--mult"
             title="Performance multiplier applied to base score&#10;1.0 = league average · &gt;1.0 = above average · &lt;1.0 = below average"
           >×Mult</th>
-          <th class="standings__th standings__th--num" :title="adjustmentColumnTitle">{{ adjustmentColumnLabel }}</th>
-          <th class="standings__th standings__th--num" :title="adjustedPointsColumnTitle">
+          <th v-if="!isPlayerRatingMode" class="standings__th standings__th--num" :title="adjustmentColumnTitle">{{ adjustmentColumnLabel }}</th>
+          <th v-if="!isPlayerRatingMode" class="standings__th standings__th--num" :title="adjustedPointsColumnTitle">
             <button
               type="button"
               class="standings__sort-button standings__sort-button--num"
@@ -45,7 +46,7 @@
               <span class="standings__sort-indicator">{{ sortIndicator('adjustedTotalPoints') }}</span>
             </button>
           </th>
-          <th class="standings__th standings__th--num">
+          <th v-if="!isPlayerRatingMode" class="standings__th standings__th--num">
             <button
               type="button"
               class="standings__sort-button standings__sort-button--num"
@@ -79,10 +80,10 @@
             <button
               type="button"
               class="standings__sort-button standings__sort-button--num"
-              @click="toggleSort('gamesPlayed')"
+              @click="toggleSort(isPlayerRatingMode ? 'participationRate' : 'gamesPlayed')"
             >
-              <span>Games</span>
-              <span class="standings__sort-indicator">{{ sortIndicator('gamesPlayed') }}</span>
+              <span>{{ isPlayerRatingMode ? 'Participation' : 'Games' }}</span>
+              <span class="standings__sort-indicator">{{ sortIndicator(isPlayerRatingMode ? 'participationRate' : 'gamesPlayed') }}</span>
             </button>
           </th>
           <th class="standings__th standings__th--num">
@@ -133,39 +134,74 @@
               @mouseenter="onPlayerEnter(row, $event)"
               @mousemove="onMouseMove($event)"
               @mouseleave="onPlayerLeave"
+              @contextmenu.prevent="onPlayerContextMenu(row, $event)"
             >{{ row.name }}</NuxtLink>
           </td>
-          <td class="standings__td standings__td--num standings__td--total">{{ fmt(row.totalScore) }}</td>
           <td
-            v-if="settings.standings.usePerformanceModifier"
+            class="standings__td standings__td--num standings__td--total"
+            @mouseenter="onRatingEnter(row, $event)"
+            @mousemove="onMouseMove($event)"
+            @mouseleave="onRatingLeave"
+          >
+            <button
+              v-if="row.rankingSystem === 'player_rating_based'"
+              type="button"
+              class="standings__rating-button"
+              @click="openRatingSidebar(row.name)"
+            >
+              {{ fmt(row.totalScore) }}
+            </button>
+            <template v-else>
+              {{ fmt(row.totalScore) }}
+            </template>
+          </td>
+          <td
+            v-if="!isPlayerRatingMode && settings.standings.usePerformanceModifier"
             class="standings__td standings__td--num standings__td--mult standings__td--hoverable-mult"
             @mouseenter="onMultEnter(row, $event)"
             @mousemove="onMouseMove($event)"
             @mouseleave="onMultLeave"
           >{{ fmt(row.perfMult) }}</td>
           <td
+            v-if="!isPlayerRatingMode"
             class="standings__td standings__td--num standings__td--comp standings__td--hoverable-comp"
             @mouseenter="onCompEnter(row, $event)"
             @mousemove="onMouseMove($event)"
             @mouseleave="onCompLeave"
           >{{ fmt(row.adjustmentDisplayPoints) }}</td>
-          <td class="standings__td standings__td--num">{{ fmt(row.adjustedTotalPoints) }}</td>
-          <td class="standings__td standings__td--num">{{ fmt(row.totalPoints) }}</td>
+          <td v-if="!isPlayerRatingMode" class="standings__td standings__td--num">{{ fmt(row.adjustedTotalPoints) }}</td>
+          <td v-if="!isPlayerRatingMode" class="standings__td standings__td--num">{{ fmt(row.totalPoints) }}</td>
           <td
             v-if="settings.standings.includeAchievementPoints"
             class="standings__td standings__td--num standings__td--achv standings__td--hoverable"
             @mouseenter="onAchvEnter(row.name, $event)"
             @mousemove="onMouseMove($event)"
             @mouseleave="onAchvLeave"
-          >{{ fmt(row.achievementPoints) }}</td>
+          >
+            <button
+              type="button"
+              class="standings__detail-button"
+              @click="openDetailSidebar(row.name, 'achievements')"
+            >
+              {{ fmt(row.achievementPoints) }}
+            </button>
+          </td>
           <td
             v-if="settings.standings.includeCommanderXp"
             class="standings__td standings__td--num standings__td--xp standings__td--hoverable-xp"
             @mouseenter="onXpEnter(row.name, $event)"
             @mousemove="onMouseMove($event)"
             @mouseleave="onXpLeave"
-          >{{ fmt(row.xpPoints) }}</td>
-          <td class="standings__td standings__td--num">{{ row.gamesPlayed }}</td>
+          >
+            <button
+              type="button"
+              class="standings__detail-button"
+              @click="openDetailSidebar(row.name, 'xp')"
+            >
+              {{ fmt(row.xpPoints) }}
+            </button>
+          </td>
+          <td class="standings__td standings__td--num">{{ isPlayerRatingMode ? `${row.participationRate}%` : row.gamesPlayed }}</td>
           <td class="standings__td standings__td--num">{{ row.winRate }}%</td>
           <td class="standings__td standings__td--num">{{ fmt(row.avgPerGame) }}</td>
           <td class="standings__td standings__td--commander">
@@ -180,22 +216,17 @@
               <IconsTierIcon
                 v-if="row.topCommanderTier"
                 :tier="row.topCommanderTier"
-                :size="12"
+                :size="20"
                 :title="row.topCommanderTierLabel ?? undefined"
               />
               {{ row.topCommander }}
-              <span v-if="row.topCommanderMmr" class="standings__commander-mmr">{{ Math.round(row.topCommanderMmr) }} MMR</span>
+              <span v-if="row.topCommanderMmr" class="standings__commander-mmr"><IconsMmrIcon :size="11" />{{ Math.round(row.topCommanderMmr) }}</span>
             </NuxtLink>
             <span v-else class="standings__muted">—</span>
           </td>
         </tr>
       </tbody>
     </table>
-    </div>
-
-    <div class="dashboard__prize-pool">
-      <span class="dashboard__prize-pool-label">Prize Pool</span>
-      <strong class="dashboard__prize-pool-value">{{ fmtEuro(totalPrizePool) }}</strong>
     </div>
 
     <section class="dashboard__looster-section">
@@ -271,6 +302,11 @@
         </table>
       </div>
     </section>
+
+    <div class="dashboard__prize-pool">
+      <span class="dashboard__prize-pool-label">Prize Pool</span>
+      <strong class="dashboard__prize-pool-value">{{ fmtEuro(totalPrizePool) }}</strong>
+    </div>
 
     <section
       v-if="featuredPlayer || loggedInArchEnemy"
@@ -383,6 +419,12 @@
           :class="{ 'dashboard__perf-switch--active': activeChart === 'total' }"
           @click="activeChart = 'total'"
         >Total Points</button>
+        <button
+          type="button"
+          class="dashboard__perf-switch"
+          :class="{ 'dashboard__perf-switch--active': activeChart === 'participation' }"
+          @click="activeChart = 'participation'"
+        >Participation</button>
       </div>
       <ChartsPerformanceTimeline
         v-if="activeChart === 'performance'"
@@ -390,9 +432,14 @@
         :series="performanceChartData.series"
       />
       <ChartsPerformanceTimeline
-        v-else
+        v-else-if="activeChart === 'total'"
         :labels="totalPointsChartData.labels"
         :series="totalPointsChartData.series"
+      />
+      <ChartsPerformanceTimeline
+        v-else
+        :labels="participationChartData.labels"
+        :series="participationChartData.series"
       />
       <div v-if="currentChartStandings.length" class="dashboard__perf-ranking">
         <NuxtLink
@@ -419,6 +466,26 @@
     </section>
 
     <CommandersTopCommander />
+
+    <section v-if="commanderMmrChartData.series.length > 0" class="dashboard__perf-section">
+      <div class="dashboard__mmr-filter">
+        <span class="dashboard__mmr-filter-label">Players</span>
+        <button
+          v-for="row in table"
+          :key="row.name"
+          type="button"
+          class="dashboard__mmr-filter-btn"
+          :class="{ 'dashboard__mmr-filter-btn--hidden': commanderHiddenPlayers.has(row.name) }"
+          @click="toggleCommanderPlayer(row.name)"
+        >{{ row.name }}</button>
+      </div>
+      <ChartsPerformanceTimeline
+        :labels="commanderMmrChartData.labels"
+        :series="filteredCommanderMmrSeries"
+        title="Commander MMR Timeline"
+        subtitle="All commanders in the league, carrying forward their latest recorded MMR after each game."
+      />
+    </section>
     </template>
 
     <Teleport to="body">
@@ -427,47 +494,109 @@
         class="floating-panel mult-tooltip"
         :style="{ top: `${catchupHover.y}px`, left: `${catchupHover.x}px` }"
       >
-        <div class="mult-tooltip__title">Catch-Up</div>
-        <table class="mult-tooltip__table">
-          <tbody>
-          <tr>
-            <td class="mult-tooltip__label">Target</td>
-            <td class="mult-tooltip__op"></td>
-            <td class="mult-tooltip__detail"></td>
-            <td class="mult-tooltip__value">{{ catchupHover.targetName }}</td>
-          </tr>
-          <tr>
-            <td class="mult-tooltip__label">Gap</td>
-            <td class="mult-tooltip__op"></td>
-            <td class="mult-tooltip__detail">their total - your total</td>
-            <td class="mult-tooltip__value">{{ fmt(catchupHover.gap) }}</td>
-          </tr>
-          <tr>
-            <td class="mult-tooltip__label">Your avg</td>
-            <td class="mult-tooltip__op"></td>
-            <td class="mult-tooltip__detail">points per game</td>
-            <td class="mult-tooltip__value">{{ fmt(catchupHover.avgPerGame) }}</td>
-          </tr>
-          <tr>
-            <td class="mult-tooltip__label">Comp swing</td>
-            <td class="mult-tooltip__op"></td>
-            <td class="mult-tooltip__detail">next game vs compensation</td>
-            <td class="mult-tooltip__value">{{ fmt(catchupHover.nextCompDelta) }}</td>
-          </tr>
-          <tr>
-            <td class="mult-tooltip__label">Net gain</td>
-            <td class="mult-tooltip__op"></td>
-            <td class="mult-tooltip__detail">expected total next game</td>
-            <td class="mult-tooltip__value">{{ fmt(catchupHover.nextNetGain) }}</td>
-          </tr>
-          <tr class="mult-tooltip__row--sep">
-            <td class="mult-tooltip__label">Catch up</td>
-            <td class="mult-tooltip__op">=</td>
-            <td class="mult-tooltip__detail">{{ catchupHover.message }}</td>
-            <td class="mult-tooltip__value">{{ catchupHover.gamesNeededLabel }}</td>
-          </tr>
-          </tbody>
-        </table>
+        <template v-if="catchupHover.mode === 'rating_compare'">
+          <div class="mult-tooltip__title">Rating Matchup</div>
+          <div class="mult-tooltip__summary">
+            {{ catchupHover.summary }}
+          </div>
+          <table class="mult-tooltip__table">
+            <tbody>
+            <tr>
+              <td class="mult-tooltip__label">Target</td>
+              <td class="mult-tooltip__op"></td>
+              <td class="mult-tooltip__detail">current rating</td>
+              <td class="mult-tooltip__value">{{ catchupHover.targetName }} · {{ fmt(catchupHover.targetRating) }}</td>
+            </tr>
+            <tr>
+              <td class="mult-tooltip__label">You</td>
+              <td class="mult-tooltip__op"></td>
+              <td class="mult-tooltip__detail">current rating</td>
+              <td class="mult-tooltip__value">{{ catchupHover.viewerName }} · {{ fmt(catchupHover.viewerRating) }}</td>
+            </tr>
+            <tr
+              v-for="entry in catchupHover.strongerFactors"
+              :key="`stronger-${entry.key}`"
+              class="mult-tooltip__row--stronger"
+            >
+              <td class="mult-tooltip__label">They lead</td>
+              <td class="mult-tooltip__op">-</td>
+              <td class="mult-tooltip__detail">
+                <strong>{{ entry.label }} </strong>
+                <span class="mult-tooltip__inline-note"> {{ entry.note }}</span>
+              </td>
+              <td class="mult-tooltip__value">+{{ fmt(entry.delta) }}</td>
+            </tr>
+            <tr
+              v-for="entry in catchupHover.weakerFactors"
+              :key="`weaker-${entry.key}`"
+              class="mult-tooltip__row--weaker"
+            >
+              <td class="mult-tooltip__label">You lead</td>
+              <td class="mult-tooltip__op">+</td>
+              <td class="mult-tooltip__detail">
+                <strong>{{ entry.label }} </strong>
+                <span class="mult-tooltip__inline-note"> {{ entry.note }}</span>
+              </td>
+              <td class="mult-tooltip__value">+{{ fmt(Math.abs(entry.delta)) }}</td>
+            </tr>
+            </tbody>
+          </table>
+          <div v-if="catchupHover.improvementIdeas.length" class="mult-tooltip__ideas">
+            <div class="mult-tooltip__ideas-title">How to improve against this player</div>
+            <ul class="mult-tooltip__ideas-list">
+              <li
+                v-for="idea in catchupHover.improvementIdeas"
+                :key="idea"
+                class="mult-tooltip__ideas-item"
+              >
+                {{ idea }}
+              </li>
+            </ul>
+          </div>
+        </template>
+        <template v-else>
+          <div class="mult-tooltip__title">Catch-Up</div>
+          <table class="mult-tooltip__table">
+            <tbody>
+            <tr>
+              <td class="mult-tooltip__label">Target</td>
+              <td class="mult-tooltip__op"></td>
+              <td class="mult-tooltip__detail"></td>
+              <td class="mult-tooltip__value">{{ catchupHover.targetName }}</td>
+            </tr>
+            <tr>
+              <td class="mult-tooltip__label">Gap</td>
+              <td class="mult-tooltip__op"></td>
+              <td class="mult-tooltip__detail">their total - your total</td>
+              <td class="mult-tooltip__value">{{ fmt(catchupHover.gap) }}</td>
+            </tr>
+            <tr>
+              <td class="mult-tooltip__label">Your avg</td>
+              <td class="mult-tooltip__op"></td>
+              <td class="mult-tooltip__detail">points per game</td>
+              <td class="mult-tooltip__value">{{ fmt(catchupHover.avgPerGame) }}</td>
+            </tr>
+            <tr>
+              <td class="mult-tooltip__label">Comp swing</td>
+              <td class="mult-tooltip__op"></td>
+              <td class="mult-tooltip__detail">next game vs compensation</td>
+              <td class="mult-tooltip__value">{{ fmt(catchupHover.nextCompDelta) }}</td>
+            </tr>
+            <tr>
+              <td class="mult-tooltip__label">Net gain</td>
+              <td class="mult-tooltip__op"></td>
+              <td class="mult-tooltip__detail">expected total next game</td>
+              <td class="mult-tooltip__value">{{ fmt(catchupHover.nextNetGain) }}</td>
+            </tr>
+            <tr class="mult-tooltip__row--sep">
+              <td class="mult-tooltip__label">Catch up</td>
+              <td class="mult-tooltip__op">=</td>
+              <td class="mult-tooltip__detail">{{ catchupHover.message }}</td>
+              <td class="mult-tooltip__value">{{ catchupHover.gamesNeededLabel }}</td>
+            </tr>
+            </tbody>
+          </table>
+        </template>
       </div>
     </Teleport>
 
@@ -504,6 +633,86 @@
         :style="{ top: `${xpHover.y}px`, left: `${xpHover.x}px` }"
       >
         <CommandersCommanderXPList :player-name="xpHover.playerName" />
+      </div>
+    </Teleport>
+
+    <Teleport to="body">
+      <div
+        v-if="ratingHover.visible"
+        class="floating-panel mult-tooltip"
+        :style="{ top: `${ratingHover.y}px`, left: `${ratingHover.x}px` }"
+      >
+        <div class="mult-tooltip__title">Player Rating</div>
+        <table class="mult-tooltip__table">
+          <tbody>
+          <tr>
+            <td class="mult-tooltip__label">Model</td>
+            <td class="mult-tooltip__op"></td>
+            <td class="mult-tooltip__detail">recent form, long-term performance, win rate, MMR context, activity, achievements, clutch, diversity</td>
+            <td class="mult-tooltip__value">{{ ratingHover.playerName }}</td>
+          </tr>
+          <tr>
+            <td class="mult-tooltip__label">Missed games</td>
+            <td class="mult-tooltip__op"></td>
+            <td class="mult-tooltip__detail">free-game points excluded</td>
+            <td class="mult-tooltip__value">off</td>
+          </tr>
+          <tr v-if="ratingHover.breakdown" class="mult-tooltip__row--sep">
+            <td class="mult-tooltip__label">Recent</td>
+            <td class="mult-tooltip__op"></td>
+            <td class="mult-tooltip__detail">weighted contribution</td>
+            <td class="mult-tooltip__value">{{ fmt(ratingHover.breakdown.recentPerformance?.weightedContribution ?? 0) }}</td>
+          </tr>
+          <tr v-if="ratingHover.breakdown">
+            <td class="mult-tooltip__label">All-time</td>
+            <td class="mult-tooltip__op"></td>
+            <td class="mult-tooltip__detail">weighted contribution</td>
+            <td class="mult-tooltip__value">{{ fmt(ratingHover.breakdown.allTimePerformance?.weightedContribution ?? 0) }}</td>
+          </tr>
+          <tr v-if="ratingHover.breakdown">
+            <td class="mult-tooltip__label">Win rate</td>
+            <td class="mult-tooltip__op"></td>
+            <td class="mult-tooltip__detail">weighted contribution</td>
+            <td class="mult-tooltip__value">{{ fmt(ratingHover.breakdown.winRate?.weightedContribution ?? 0) }}</td>
+          </tr>
+          <tr v-if="ratingHover.breakdown">
+            <td class="mult-tooltip__label">MMR context</td>
+            <td class="mult-tooltip__op"></td>
+            <td class="mult-tooltip__detail">weighted contribution</td>
+            <td class="mult-tooltip__value">{{ fmt(ratingHover.breakdown.commanderMMRContext?.weightedContribution ?? 0) }}</td>
+          </tr>
+          <tr v-if="ratingHover.breakdown">
+            <td class="mult-tooltip__label">Activity</td>
+            <td class="mult-tooltip__op"></td>
+            <td class="mult-tooltip__detail">total points as a small signal</td>
+            <td class="mult-tooltip__value">{{ fmt(ratingHover.breakdown.activityPoints?.weightedContribution ?? 0) }}</td>
+          </tr>
+          <tr v-if="ratingHover.breakdown">
+            <td class="mult-tooltip__label">Achv.</td>
+            <td class="mult-tooltip__op"></td>
+            <td class="mult-tooltip__detail">weighted contribution</td>
+            <td class="mult-tooltip__value">{{ fmt(ratingHover.breakdown.achievements?.weightedContribution ?? 0) }}</td>
+          </tr>
+          <tr v-if="ratingHover.breakdown">
+            <td class="mult-tooltip__label">Clutch</td>
+            <td class="mult-tooltip__op"></td>
+            <td class="mult-tooltip__detail">weighted contribution</td>
+            <td class="mult-tooltip__value">{{ fmt(ratingHover.breakdown.clutch?.weightedContribution ?? 0) }}</td>
+          </tr>
+          <tr v-if="ratingHover.breakdown">
+            <td class="mult-tooltip__label">Diversity</td>
+            <td class="mult-tooltip__op"></td>
+            <td class="mult-tooltip__detail">weighted contribution</td>
+            <td class="mult-tooltip__value">{{ fmt(ratingHover.breakdown.commanderDiversity?.weightedContribution ?? 0) }}</td>
+          </tr>
+          <tr v-if="ratingHover.provisional" class="mult-tooltip__row--sep">
+            <td class="mult-tooltip__label">Status</td>
+            <td class="mult-tooltip__op"></td>
+            <td class="mult-tooltip__detail">sample size still stabilizing</td>
+            <td class="mult-tooltip__value">Provisional</td>
+          </tr>
+          </tbody>
+        </table>
       </div>
     </Teleport>
 
@@ -648,6 +857,13 @@
         </table>
       </div>
     </Teleport>
+
+    <Sidebar
+      v-model="ratingSidebarOpen"
+      :player-name="ratingSidebarPlayer"
+      :compare-player-name="ratingSidebarComparePlayer"
+      :mode="detailSidebarMode"
+    />
   </div>
 </template>
 
@@ -664,6 +880,7 @@ import { fetchSetByCode } from '~/services/scryfallService'
 import { getArchEnemySummary } from '~/utils/archEnemy'
 import { getFeaturedPlayers, type FeaturedPlayerCandidate } from '~/utils/featuredPlayer'
 import { getCommanderTierFromMMR, type CommanderMMRTier } from '~/composables/useCommanderMMR'
+import type { PlayerRatingBreakdownKey, RatingBreakdownEntry } from '~/composables/usePlayerRating'
 import { MIN_GAMES_FOR_PENALTY_MODE, type StandingsAdjustmentMode } from '~/utils/leagueSettings'
 import { formatLoosterPoints, roundLoosterPoints } from '~/utils/loosterPoints'
 import { formatPlayerName } from '~/utils/playerNames'
@@ -689,6 +906,7 @@ type SortKey =
   | 'achievementPoints'
   | 'xpPoints'
   | 'gamesPlayed'
+  | 'participationRate'
   | 'totalLosses'
   | 'winRate'
   | 'avgPerGame'
@@ -769,6 +987,9 @@ const loggedInArchEnemy = computed(() => {
 })
 const loggedInPlayerName = computed(() => (user.value ? formatPlayerName(user.value) : ''))
 const adjustmentMode = computed(() => settings.value.standings.adjustmentMode)
+const playerRankingSystem = computed(() => settings.value.playerRankingSystem)
+const isPlayerRatingMode = computed(() => playerRankingSystem.value === 'player_rating_based')
+const totalScoreColumnLabel = computed(() => playerRankingSystem.value === 'player_rating_based' ? 'Rating' : 'Total')
 const adjustmentColumnLabel = computed(() => {
   if (adjustmentMode.value === 'freeGames') return 'Free Games'
   if (adjustmentMode.value === 'penaltyGames') return 'Penalty'
@@ -794,6 +1015,15 @@ const adjustedPointsColumnTitle = computed(() => {
   return 'Base points plus missed-game compensation. Does not include achievements or commander XP.'
 })
 const totalScoreColumnTitle = computed(() => {
+  if (playerRankingSystem.value === 'player_rating_based') {
+    return [
+      'Player Rating combines recent form, long-term performance, win rate, commander MMR context, commander points, achievements, clutch play, and commander diversity.',
+      'Total points only play a small activity role and missed-game compensation is not part of the rating formula.',
+      'Recent games count more than old ones.',
+      'Low sample sizes are confidence-adjusted, so provisional players move more as they build a history.',
+      'Commander MMR context rewards strong results into stronger pods and softens results farmed only in easier ones.',
+    ].join('\n')
+  }
   if (adjustmentMode.value === 'freeGames') {
     return '((Points + Free Games) + Achievement Points + Commander XP Points) × Performance Multiplier'
   }
@@ -802,6 +1032,40 @@ const totalScoreColumnTitle = computed(() => {
   }
   return '((Points + Missed-Game Compensation) + Achievement Points + Commander XP Points) × Performance Multiplier'
 })
+
+function playerRatingTooltip(row: {
+  rankingSystem?: string
+  provisional?: boolean
+  ratingBreakdown?: any
+}) {
+  if (row.rankingSystem !== 'player_rating_based') return totalScoreColumnTitle.value
+
+  const lines = [
+    'Player Rating combines recent form, long-term performance, win rate, commander MMR context, total points as a small activity signal, achievements, clutch play, and commander diversity.',
+    'Missed-game/free-game points are not part of this rating.',
+  ]
+
+  const breakdown = row.ratingBreakdown
+  if (breakdown) {
+    lines.push('')
+    lines.push('Current weighted factors:')
+    lines.push(`Recent form: ${fmt(breakdown.recentPerformance?.weightedContribution ?? 0)}`)
+    lines.push(`All-time performance: ${fmt(breakdown.allTimePerformance?.weightedContribution ?? 0)}`)
+    lines.push(`Win rate: ${fmt(breakdown.winRate?.weightedContribution ?? 0)}`)
+    lines.push(`Commander MMR context: ${fmt(breakdown.commanderMMRContext?.weightedContribution ?? 0)}`)
+    lines.push(`Total points / activity: ${fmt(breakdown.activityPoints?.weightedContribution ?? 0)}`)
+    lines.push(`Achievements: ${fmt(breakdown.achievements?.weightedContribution ?? 0)}`)
+    lines.push(`Clutch: ${fmt(breakdown.clutch?.weightedContribution ?? 0)}`)
+    lines.push(`Diversity: ${fmt(breakdown.commanderDiversity?.weightedContribution ?? 0)}`)
+  }
+
+  if (row.provisional) {
+    lines.push('')
+    lines.push('This rating is provisional until enough games have been played.')
+  }
+
+  return lines.join('\n')
+}
 
 const purchasesByPlayer = computed(() => {
   const grouped = new Map<string, LoosterPurchaseRecord[]>()
@@ -1028,6 +1292,13 @@ function fmtEuro(value: number) {
   }).format(value)
 }
 
+function joinNaturalLanguage(values: string[]) {
+  if (values.length === 0) return ''
+  if (values.length === 1) return values[0]
+  if (values.length === 2) return `${values[0]} and ${values[1]}`
+  return `${values.slice(0, -1).join(', ')}, and ${values[values.length - 1]}`
+}
+
 function topCommanderByMmr(playerName: string) {
   const records = Object.values(gameRecords.value[playerName] ?? {})
   if (records.length === 0) return null
@@ -1125,6 +1396,7 @@ const table = computed(() => {
       { name: player.name, totalPoints: player.totalPoints, gamesPlayed: player.gamesPlayed },
     ]),
   )
+  const standingsMap = new Map(standings.value.map((standing) => [standing.name, standing]))
   const usePerformanceModifier = settings.value.standings.usePerformanceModifier
 
   // League average points per game (used to normalise avgPerGame in the multiplier)
@@ -1146,16 +1418,19 @@ const table = computed(() => {
       settings.value,
       { games: chronologicalGames.value, gameRecords: gameRecords.value },
     )
-    const totalScore = r3(
-      ((player.totalPoints + player.achievementPoints + player.xpPoints) * performance.perfMult) +
-      adjustment.adjustmentPoints,
-    )
-
+    const standing = standingsMap.get(player.name)
     const topCommanderEntry = topCommanderByMmr(player.name)
+    const participationRate = chronologicalGames.value.length > 0
+      ? Math.round((player.gamesPlayed / chronologicalGames.value.length) * 100)
+      : 0
     return {
-      rank: 0,
+      rank: standing?.rank ?? 0,
       name: player.name,
-      totalScore,
+      totalScore: standing?.totalScore ?? 0,
+      rankingSystem: standing?.rankingSystem ?? 'classic',
+      playerRating: standing?.playerRating ?? null,
+      provisional: standing?.provisional ?? false,
+      ratingBreakdown: standing?.ratingBreakdown ?? null,
       adjustmentMode: adjustment.adjustmentMode,
       adjustmentPoints: adjustment.adjustmentPoints,
       adjustmentDisplayPoints: adjustment.adjustmentDisplayPoints,
@@ -1182,6 +1457,7 @@ const table = computed(() => {
       achievementPoints: player.achievementPoints,
       xpPoints: player.xpPoints,
       gamesPlayed: player.gamesPlayed,
+      participationRate,
       winRate: performance.winRate,
       avgPerGame: performance.avgPerGame,
       leagueAvgPerGame: performance.leagueAvgPerGame,
@@ -1201,10 +1477,9 @@ const table = computed(() => {
 
   const rankedRows = [...rows]
     .sort((a, b) => {
-      if (b.totalScore !== a.totalScore) return b.totalScore - a.totalScore
+      if (a.rank !== b.rank) return a.rank - b.rank
       return a.name.localeCompare(b.name)
     })
-    .map((row, index) => ({ ...row, rank: index + 1 }))
 
   return rankedRows.sort((a, b) => {
     const direction = sortDirection.value === 'desc' ? -1 : 1
@@ -1381,10 +1656,26 @@ function computeWeightedScore(records: PlayerGameRecord[]): number {
   return totalWeight > 0 ? r3(weightedSum / totalWeight) : 0
 }
 
-const activeChart = ref<'performance' | 'total'>('performance')
+const activeChart = ref<'performance' | 'total' | 'participation'>('performance')
 
 function fmtGameDate(date: string | Date) {
   return new Date(date).toLocaleDateString('de-DE', { day: '2-digit', month: '2-digit', year: '2-digit' })
+}
+
+function startOfWeekKey(date: string | Date) {
+  const parsed = new Date(date)
+  if (Number.isNaN(parsed.getTime())) return 'unknown'
+  const normalized = new Date(Date.UTC(parsed.getUTCFullYear(), parsed.getUTCMonth(), parsed.getUTCDate()))
+  const day = normalized.getUTCDay()
+  const diff = day === 0 ? -6 : 1 - day
+  normalized.setUTCDate(normalized.getUTCDate() + diff)
+  return normalized.toISOString().slice(0, 10)
+}
+
+function fmtWeekLabel(weekKey: string) {
+  const parsed = new Date(`${weekKey}T00:00:00Z`)
+  if (Number.isNaN(parsed.getTime())) return weekKey
+  return `Week of ${parsed.toLocaleDateString('de-DE', { day: '2-digit', month: '2-digit', year: '2-digit' })}`
 }
 
 const performanceChartData = computed<{ labels: string[], series: PerformancePlayerSeries[] }>(() => {
@@ -1451,10 +1742,133 @@ const totalPointsChartData = computed<{ labels: string[], series: PerformancePla
   return { labels, series }
 })
 
+const participationChartData = computed<{ labels: string[], series: PerformancePlayerSeries[] }>(() => {
+  const games = chronologicalGames.value
+  if (games.length === 0) return { labels: [], series: [] }
+
+  const weekKeys = Array.from(new Set(games.map((game) => startOfWeekKey(game.date))))
+  const labels = weekKeys.map((weekKey) => fmtWeekLabel(weekKey))
+  const playerNames = standings.value.map((s) => s.name)
+
+  const series: PerformancePlayerSeries[] = playerNames
+    .map((playerName, index) => {
+      const weeklyCounts = new Map<string, number>()
+      for (const game of games) {
+        const record = gameRecords.value[playerName]?.[game.gameId]
+        if (!record) continue
+        const weekKey = startOfWeekKey(game.date)
+        weeklyCounts.set(weekKey, (weeklyCounts.get(weekKey) ?? 0) + 1)
+      }
+
+      const data = weekKeys.map((weekKey) => weeklyCounts.get(weekKey) ?? 0)
+      return {
+        name: playerName,
+        color: PERF_CHART_COLORS[index % PERF_CHART_COLORS.length],
+        data,
+      }
+    })
+    .filter((entry) => entry.data.some((value) => value > 0))
+
+  return { labels, series }
+})
+
+const commanderMmrChartData = computed<{ labels: string[], series: PerformancePlayerSeries[] }>(() => {
+  const games = chronologicalGames.value
+  if (games.length === 0) return { labels: [], series: [] }
+
+  const labels = games.map((game) => fmtGameDate(game.date))
+  const latestCommanderMmr = new Map<string, number>()
+
+  for (const game of games) {
+    const aggregateMap = getCommanderMmrAggregateForGame(game.gameId)
+
+    for (const [commanderName, aggregate] of aggregateMap.entries()) {
+      latestCommanderMmr.set(commanderName, aggregate.before + aggregate.delta)
+    }
+  }
+
+  const commanderNames = [...latestCommanderMmr.entries()]
+    .sort((a, b) => {
+      if (b[1] !== a[1]) return b[1] - a[1]
+      return a[0].localeCompare(b[0])
+    })
+    .map(([commanderName]) => commanderName)
+
+  const currentMmrByCommander = new Map<string, number>()
+  const seenCommanders = new Set<string>()
+  const seriesData = new Map<string, (number | null)[]>(
+    commanderNames.map((commanderName) => [commanderName, []]),
+  )
+
+  for (const game of games) {
+    const aggregateMap = getCommanderMmrAggregateForGame(game.gameId)
+
+    for (const [commanderName, aggregate] of aggregateMap.entries()) {
+      currentMmrByCommander.set(commanderName, aggregate.before + aggregate.delta)
+      seenCommanders.add(commanderName)
+    }
+
+    for (const commanderName of commanderNames) {
+      const series = seriesData.get(commanderName)
+      if (!series) continue
+      series.push(
+        seenCommanders.has(commanderName)
+          ? currentMmrByCommander.get(commanderName) ?? null
+          : null,
+      )
+    }
+  }
+
+  const series: PerformancePlayerSeries[] = commanderNames
+    .map((commanderName, index) => ({
+      name: commanderName,
+      color: getCommanderChartColor(index, commanderNames.length),
+      data: seriesData.get(commanderName) ?? [],
+    }))
+    .filter((entry) => entry.data.some((value) => typeof value === 'number'))
+
+  return { labels, series }
+})
+
+const commanderHiddenPlayers = ref<Set<string>>(new Set())
+
+const commandersByPlayer = computed(() => {
+  const map = new Map<string, Set<string>>()
+  for (const [playerName, records] of Object.entries(gameRecords.value)) {
+    const commanders = new Set<string>()
+    for (const record of Object.values(records)) {
+      commanders.add(record.commander)
+    }
+    map.set(playerName, commanders)
+  }
+  return map
+})
+
+const filteredCommanderMmrSeries = computed(() => {
+  const { series } = commanderMmrChartData.value
+  if (commanderHiddenPlayers.value.size === 0) return series
+  const visibleCommanders = new Set<string>()
+  for (const [playerName, commanders] of commandersByPlayer.value.entries()) {
+    if (!commanderHiddenPlayers.value.has(playerName)) {
+      for (const commander of commanders) visibleCommanders.add(commander)
+    }
+  }
+  return series.filter((s) => visibleCommanders.has(s.name))
+})
+
+function toggleCommanderPlayer(playerName: string) {
+  const next = new Set(commanderHiddenPlayers.value)
+  if (next.has(playerName)) next.delete(playerName)
+  else next.add(playerName)
+  commanderHiddenPlayers.value = next
+}
+
 const currentChartStandings = computed<ChartStandingRow[]>(() => {
   const chartData = activeChart.value === 'performance'
     ? performanceChartData.value
-    : totalPointsChartData.value
+    : activeChart.value === 'total'
+      ? totalPointsChartData.value
+      : participationChartData.value
 
   const standingOrder = new Map(
     standings.value.map((player, index) => [player.name, index]),
@@ -1488,6 +1902,33 @@ const currentChartStandings = computed<ChartStandingRow[]>(() => {
 
 function getPlayerPortrait(playerName: string) {
   return playerPortraits[playerName.toLowerCase()] ?? ''
+}
+
+function getCommanderMmrAggregateForGame(gameId: string) {
+  const aggregateMap = new Map<string, { before: number, delta: number }>()
+
+  for (const playerName of Object.keys(gameRecords.value)) {
+    const record = gameRecords.value[playerName]?.[gameId]
+    if (!record?.commander) continue
+
+    const existing = aggregateMap.get(record.commander)
+    if (existing) {
+      existing.before = Math.min(existing.before, record.commanderMMRBefore)
+      existing.delta += record.commanderMMRDelta
+    } else {
+      aggregateMap.set(record.commander, {
+        before: record.commanderMMRBefore,
+        delta: record.commanderMMRDelta,
+      })
+    }
+  }
+
+  return aggregateMap
+}
+
+function getCommanderChartColor(index: number, total: number) {
+  const hue = Math.round((index / Math.max(total, 1)) * 360)
+  return `hsl(${hue} 78% 64%)`
 }
 
 function toggleSort(key: SortKey) {
@@ -1578,6 +2019,11 @@ function onMouseMove(e: MouseEvent) {
     xpHover.x = pos.x
     xpHover.y = pos.y
   }
+  if (ratingHover.visible) {
+    const pos = calcRatingPosition(e)
+    ratingHover.x = pos.x
+    ratingHover.y = pos.y
+  }
   if (multHover.visible) {
     const pos = calcMultPosition(e)
     multHover.x = pos.x
@@ -1601,8 +2047,8 @@ const achvHover = reactive({ visible: false, playerName: '', commanderName: '', 
 function calcAchvPosition(e: MouseEvent) {
   let x = e.clientX + OFFSET_X
   let y = e.clientY + OFFSET_Y
-  if (x + 220 > window.innerWidth) x = e.clientX - 220 - OFFSET_X
-  if (y + 300 > window.innerHeight) y = e.clientY - 300 - OFFSET_Y
+  if (x + 240 > window.innerWidth) x = e.clientX - 240 - OFFSET_X
+  if (y + 260 > window.innerHeight) y = e.clientY - 260 - OFFSET_Y
   return { x: x + window.scrollX, y: y + window.scrollY }
 }
 
@@ -1627,8 +2073,8 @@ const xpHover = reactive({ visible: false, playerName: '', x: 0, y: 0 })
 function calcXpPosition(e: MouseEvent) {
   let x = e.clientX + OFFSET_X
   let y = e.clientY + OFFSET_Y
-  if (x + 260 > window.innerWidth) x = e.clientX - 260 - OFFSET_X
-  if (y + 420 > window.innerHeight) y = e.clientY - 420 - OFFSET_Y
+  if (x + 270 > window.innerWidth) x = e.clientX - 270 - OFFSET_X
+  if (y + 310 > window.innerHeight) y = e.clientY - 310 - OFFSET_Y
   return { x: x + window.scrollX, y: y + window.scrollY }
 }
 
@@ -1642,6 +2088,72 @@ function onXpEnter(playerName: string, e: MouseEvent) {
 
 function onXpLeave() {
   xpHover.visible = false
+}
+
+const ratingHover = reactive<{
+  visible: boolean
+  playerName: string
+  provisional: boolean
+  breakdown: any
+  x: number
+  y: number
+}>({
+  visible: false,
+  playerName: '',
+  provisional: false,
+  breakdown: null,
+  x: 0,
+  y: 0,
+})
+
+const ratingSidebarOpen = ref(false)
+const ratingSidebarPlayer = ref('')
+const ratingSidebarComparePlayer = ref('')
+const detailSidebarMode = ref<'rating' | 'achievements' | 'xp' | 'compare'>('rating')
+
+function calcRatingPosition(e: MouseEvent) {
+  let x = e.clientX + OFFSET_X
+  let y = e.clientY + OFFSET_Y
+  if (x + 420 > window.innerWidth) x = e.clientX - 420 - OFFSET_X
+  if (y + 360 > window.innerHeight) y = e.clientY - 360 - OFFSET_Y
+  return { x: x + window.scrollX, y: y + window.scrollY }
+}
+
+function onRatingEnter(row: { rankingSystem?: string, name: string, provisional?: boolean, ratingBreakdown?: any }, e: MouseEvent) {
+  if (row.rankingSystem !== 'player_rating_based') return
+  ratingHover.playerName = row.name
+  ratingHover.provisional = Boolean(row.provisional)
+  ratingHover.breakdown = row.ratingBreakdown ?? null
+  ratingHover.visible = true
+  const pos = calcRatingPosition(e)
+  ratingHover.x = pos.x
+  ratingHover.y = pos.y
+}
+
+function onRatingLeave() {
+  ratingHover.visible = false
+}
+
+function openRatingSidebar(playerName: string) {
+  if (!isPlayerRatingMode.value) return
+  detailSidebarMode.value = 'rating'
+  ratingSidebarPlayer.value = playerName
+  ratingSidebarComparePlayer.value = ''
+  ratingSidebarOpen.value = true
+}
+
+function openDetailSidebar(playerName: string, mode: 'achievements' | 'xp') {
+  detailSidebarMode.value = mode
+  ratingSidebarPlayer.value = playerName
+  ratingSidebarComparePlayer.value = ''
+  ratingSidebarOpen.value = true
+}
+
+function openCompareSidebar(targetPlayerName: string, comparePlayerName: string) {
+  detailSidebarMode.value = 'compare'
+  ratingSidebarPlayer.value = targetPlayerName
+  ratingSidebarComparePlayer.value = comparePlayerName
+  ratingSidebarOpen.value = true
 }
 
 // ── Mult tooltip ──────────────────────────────────────────────────────────────
@@ -1705,11 +2217,21 @@ type CompensationHoverData = {
 
 type CatchupRow = {
   name: string
+  totalScore: number
   totalPoints: number
   adjustmentPoints: number
   adjustedTotalPoints: number
   gamesPlayed: number
   avgPerGame: number
+  rankingSystem?: string
+  ratingBreakdown?: Record<PlayerRatingBreakdownKey, RatingBreakdownEntry> | null
+}
+
+type PlayerRatingComparisonEntry = {
+  key: PlayerRatingBreakdownKey
+  label: string
+  delta: number
+  note: string
 }
 
 const compHover = reactive<CompensationHoverData>({
@@ -1744,27 +2266,90 @@ type CatchupHoverData = {
   visible: boolean
   x: number
   y: number
+  mode: 'catchup' | 'rating_compare'
   targetName: string
+  viewerName: string
+  targetRating: number
+  viewerRating: number
   gap: number
   avgPerGame: number
   nextCompDelta: number
   nextNetGain: number
   gamesNeededLabel: string
   message: string
+  summary: string
+  strongerFactors: PlayerRatingComparisonEntry[]
+  weakerFactors: PlayerRatingComparisonEntry[]
+  improvementIdeas: string[]
 }
 
 const catchupHover = reactive<CatchupHoverData>({
   visible: false,
   x: 0,
   y: 0,
+  mode: 'catchup',
   targetName: '',
+  viewerName: '',
+  targetRating: 0,
+  viewerRating: 0,
   gap: 0,
   avgPerGame: 0,
   nextCompDelta: 0,
   nextNetGain: 0,
   gamesNeededLabel: '',
   message: '',
+  summary: '',
+  strongerFactors: [],
+  weakerFactors: [],
+  improvementIdeas: [],
 })
+
+const PLAYER_RATING_FACTOR_META: Record<PlayerRatingBreakdownKey, {
+  label: string
+  note: string
+  tip: string
+}> = {
+  recentPerformance: {
+    label: 'Recent Form',
+    note: 'better finishes in recent games',
+    tip: 'Improve recent form by converting your next few pods into podiums instead of spreading results across the middle.',
+  },
+  allTimePerformance: {
+    label: 'Long-Term Performance',
+    note: 'deeper full-history scoring base',
+    tip: 'Raise your long-term score by building a longer stretch of above-average finishes, not just one hot week.',
+  },
+  winRate: {
+    label: 'Win Rate',
+    note: 'more first places per game played',
+    tip: 'Close the win-rate gap by turning top-table appearances into actual wins more often.',
+  },
+  commanderMMRContext: {
+    label: 'MMR Context',
+    note: 'stronger results into stronger commander pods',
+    tip: 'Push this factor by finishing well into stronger commander pools rather than farming only softer pods.',
+  },
+  activityPoints: {
+    label: 'Activity',
+    note: 'more rewarded play volume',
+    tip: 'This is the easiest lever: simply playing more league games will nudge your rating upward here.',
+  },
+  achievements: {
+    label: 'Achievements',
+    note: 'more valuable achievement unlocks',
+    tip: 'Farm a few realistic achievement lines with your main decks to pick up efficient rating value here.',
+  },
+  clutch: {
+    label: 'Clutch',
+    note: 'better conversion of strong spots into wins',
+    tip: 'Your best gain here comes from closing games: wins from podium positions matter more than safe seconds.',
+  },
+  commanderDiversity: {
+    label: 'Diversity',
+    note: 'broader set of viable commanders',
+    tip: 'Add another reliable commander to your rotation so your rating is less concentrated in one lane.',
+  },
+}
 
 function calcMultPosition(e: MouseEvent) {
   let x = e.clientX + OFFSET_X
@@ -1876,21 +2461,115 @@ function estimateCatchup(target: CatchupRow) {
   }
 }
 
+function buildPlayerRatingComparison(target: CatchupRow) {
+  const viewerName = loggedInPlayerName.value
+  if (!viewerName || target.name === viewerName) return null
+  if (target.rankingSystem !== 'player_rating_based') return null
+
+  const viewer = table.value.find((row) => row.name === viewerName)
+  if (!viewer || viewer.rankingSystem !== 'player_rating_based') return null
+  if (!target.ratingBreakdown || !viewer.ratingBreakdown) return null
+
+  const factorEntries = (Object.keys(PLAYER_RATING_FACTOR_META) as PlayerRatingBreakdownKey[])
+    .map((key) => {
+      const targetEntry = target.ratingBreakdown?.[key]
+      const viewerEntry = viewer.ratingBreakdown?.[key]
+      if (!targetEntry || !viewerEntry) return null
+
+      return {
+        key,
+        label: PLAYER_RATING_FACTOR_META[key].label,
+        delta: r3(targetEntry.weightedContribution - viewerEntry.weightedContribution),
+        note: PLAYER_RATING_FACTOR_META[key].note,
+        tip: PLAYER_RATING_FACTOR_META[key].tip,
+      }
+    })
+    .filter((entry): entry is NonNullable<typeof entry> => entry !== null)
+    .sort((left, right) => Math.abs(right.delta) - Math.abs(left.delta))
+
+  const strongerFactors = factorEntries
+    .filter((entry) => entry.delta > 0.01)
+    .slice(0, 3)
+    .map(({ key, label, delta, note }) => ({ key, label, delta, note }))
+
+  const weakerFactors = factorEntries
+    .filter((entry) => entry.delta < -0.01)
+    .slice(0, 2)
+    .map(({ key, label, delta, note }) => ({ key, label, delta, note }))
+
+  const improvementIdeas = factorEntries
+    .filter((entry) => entry.delta > 0.01)
+    .slice(0, 3)
+    .map((entry) => PLAYER_RATING_FACTOR_META[entry.key].tip)
+
+  const strongestLabels = strongerFactors.map((entry) => entry.label)
+  const summary = strongestLabels.length > 0
+    ? `${target.name} currently gains more rating than you from ${joinNaturalLanguage(strongestLabels)}.`
+    : `You already match or exceed ${target.name} across the main Player Rating factors.`
+
+  return {
+    viewerName,
+    viewerRating: viewer.totalScore,
+    targetRating: target.totalScore,
+    strongerFactors,
+    weakerFactors,
+    improvementIdeas,
+    summary,
+  }
+}
+
 function onPlayerEnter(row: CatchupRow, e: MouseEvent) {
+  const ratingComparison = buildPlayerRatingComparison(row)
+  if (ratingComparison) {
+    catchupHover.visible = true
+    catchupHover.mode = 'rating_compare'
+    catchupHover.targetName = row.name
+    catchupHover.viewerName = ratingComparison.viewerName
+    catchupHover.targetRating = ratingComparison.targetRating
+    catchupHover.viewerRating = ratingComparison.viewerRating
+    catchupHover.summary = ratingComparison.summary
+    catchupHover.strongerFactors = ratingComparison.strongerFactors
+    catchupHover.weakerFactors = ratingComparison.weakerFactors
+    catchupHover.improvementIdeas = ratingComparison.improvementIdeas
+    const pos = calcCatchupPosition(e)
+    catchupHover.x = pos.x
+    catchupHover.y = pos.y
+    return
+  }
+
   const estimate = estimateCatchup(row)
   if (!estimate) return
 
   catchupHover.visible = true
+  catchupHover.mode = 'catchup'
   catchupHover.targetName = row.name
+  catchupHover.viewerName = ''
+  catchupHover.targetRating = 0
+  catchupHover.viewerRating = 0
   catchupHover.gap = estimate.gap
   catchupHover.avgPerGame = estimate.avgPerGame
   catchupHover.nextCompDelta = estimate.nextCompDelta
   catchupHover.nextNetGain = estimate.nextNetGain
   catchupHover.gamesNeededLabel = estimate.gamesNeededLabel
   catchupHover.message = estimate.message
+  catchupHover.summary = ''
+  catchupHover.strongerFactors = []
+  catchupHover.weakerFactors = []
+  catchupHover.improvementIdeas = []
   const pos = calcCatchupPosition(e)
   catchupHover.x = pos.x
   catchupHover.y = pos.y
+}
+
+function onPlayerContextMenu(row: CatchupRow, event: MouseEvent) {
+  const viewerName = loggedInPlayerName.value
+  const shouldSkipSidebar =
+    !isPlayerRatingMode.value ||
+    !viewerName ||
+    row.name === viewerName
+
+  if (shouldSkipSidebar) return
+  openCompareSidebar(row.name, viewerName)
 }
 
 function onPlayerLeave() {
@@ -2525,6 +3204,40 @@ function onCompLeave() {
   margin: 0 0 $spacing-8;
 }
 
+.dashboard__mmr-filter {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: $spacing-2;
+}
+
+.dashboard__mmr-filter-label {
+  font-size: $font-size-xs;
+  color: $color-text-muted;
+  text-transform: uppercase;
+  letter-spacing: 0.06em;
+  margin-right: $spacing-1;
+}
+
+.dashboard__mmr-filter-btn {
+  padding: 3px 10px;
+  border-radius: $border-radius-full;
+  border: 1px solid rgba($border-color, 0.6);
+  background: transparent;
+  color: $color-text;
+  font-size: 11px;
+  cursor: pointer;
+  transition: opacity $transition-fast, border-color $transition-fast;
+
+  &:hover {
+    border-color: rgba($color-primary-light, 0.4);
+  }
+
+  &--hidden {
+    opacity: 0.35;
+  }
+}
+
 .dashboard__perf-switcher {
   display: flex;
   gap: $spacing-2;
@@ -2648,10 +3361,8 @@ function onCompLeave() {
     &--num  { text-align: right; }
     &--rank { width: 2.5rem; text-align: center; }
     &--commander {
-      width: 220px;
-      min-width: 220px;
-      white-space: normal;
-      line-height: 1.2;
+      white-space: nowrap;
+      width: 1%;
     }
     &--mult { color: $color-text-muted; font-size: $font-size-xs; }
   }
@@ -2756,7 +3467,8 @@ function onCompLeave() {
     align-items: center;
     gap: 4px;
     cursor: default;
-    flex-wrap: wrap;
+    flex-wrap: nowrap;
+    white-space: nowrap;
 
     &:hover {
       cursor:pointer;
@@ -2766,12 +3478,16 @@ function onCompLeave() {
   }
 
   &__commander-mmr {
+    display: inline-flex;
+    align-items: center;
+    gap: 3px;
     font-size: 10px;
     font-weight: $font-weight-semibold;
     color: $color-secondary;
     letter-spacing: 0.04em;
     width: 100%;
     text-align: left;
+    margin-left:10px;
   }
 
   &__muted {
@@ -2883,20 +3599,71 @@ function onCompLeave() {
   pointer-events: none;
 }
 
+.standings__rating-button {
+  appearance: none;
+  border: 0;
+  padding: 0;
+  background: transparent;
+  color: inherit;
+  font: inherit;
+  cursor: pointer;
+  text-decoration: underline;
+  text-decoration-color: rgba($color-primary-light, 0.3);
+  text-underline-offset: 0.18em;
+
+  &:hover {
+    color: $color-primary-light;
+    text-decoration-color: rgba($color-primary-light, 0.75);
+  }
+}
+
+.standings__detail-button {
+  appearance: none;
+  border: 0;
+  padding: 0;
+  background: transparent;
+  color: inherit;
+  font: inherit;
+  cursor: pointer;
+  text-decoration: underline;
+  text-decoration-color: rgba($color-primary-light, 0.25);
+  text-underline-offset: 0.16em;
+
+  &:hover {
+    color: $color-primary-light;
+    text-decoration-color: rgba($color-primary-light, 0.65);
+  }
+}
+
 .mult-tooltip {
-  background: $color-bg-elevated;
-  border: 1px solid $border-color;
-  border-radius: $border-radius-md;
-  padding: $spacing-3;
-  min-width: 220px;
+  background: linear-gradient(155deg, rgba(18, 12, 30, 0.97), rgba(7, 5, 13, 0.98));
+  border: 1px solid rgba($color-primary-light, 0.3);
+  border-radius: $border-radius-lg;
+  padding: $spacing-4;
+  min-width: 260px;
+  max-width: 500px;
+  box-shadow:
+    0 24px 64px rgba(0, 0, 0, 0.72),
+    0 0 0 1px rgba($color-primary-light, 0.04),
+    inset 0 1px 0 rgba(255, 255, 255, 0.04);
 
   &__title {
-    font-size: $font-size-xs;
+    font-size: 10px;
     font-weight: $font-weight-bold;
-    color: $color-text-muted;
+    color: $color-primary-light;
     text-transform: uppercase;
-    letter-spacing: 0.07em;
-    margin-bottom: $spacing-2;
+    letter-spacing: 0.14em;
+    margin-bottom: $spacing-3;
+    padding-bottom: $spacing-2;
+    border-bottom: 1px solid rgba($color-primary-light, 0.2);
+  }
+
+  &__summary {
+    max-width: 440px;
+    margin-bottom: $spacing-3;
+    font-size: $font-size-xs;
+    line-height: 1.55;
+    color: rgba($color-text, 0.9);
   }
 
   &__table {
@@ -2906,36 +3673,88 @@ function onCompLeave() {
   }
 
   &__label {
-    color: $color-text-muted;
-    padding: 2px 0;
+    color: rgba($color-text-muted, 0.85);
+    padding: 3px 0;
     white-space: nowrap;
+    font-weight: $font-weight-medium;
   }
 
   &__op {
-    color: $color-text-muted;
+    color: rgba($color-primary-light, 0.55);
     text-align: center;
     padding: 0 $spacing-1;
   }
 
   &__detail {
-    color: $color-text-muted;
+    color: rgba($color-text-muted, 0.65);
     padding: 0 $spacing-2;
     font-variant-numeric: tabular-nums;
+    line-height: 1.4;
   }
 
   &__value {
     text-align: right;
     color: $color-text;
     font-variant-numeric: tabular-nums;
-    font-weight: $font-weight-medium;
-    padding-left: $spacing-2;
+    font-weight: $font-weight-semibold;
+    padding-left: $spacing-3;
+    white-space: nowrap;
+  }
+
+  &__inline-note {
+    color: rgba($color-text-muted, 0.7);
   }
 
   &__row--sep td {
-    border-top: 1px solid $border-color;
-    padding-top: $spacing-1;
-    color: $color-text;
+    border-top: 1px solid rgba($color-primary-light, 0.18);
+    padding-top: $spacing-2;
+    color: $color-secondary;
     font-weight: $font-weight-bold;
+  }
+
+  &__row--stronger td {
+    color: rgba(#f0829e, 0.88);
+  }
+
+  &__row--stronger .mult-tooltip__value {
+    color: #f0829e;
+    font-weight: $font-weight-bold;
+  }
+
+  &__row--weaker td {
+    color: rgba($color-success, 0.82);
+  }
+
+  &__row--weaker .mult-tooltip__value {
+    color: $color-success;
+    font-weight: $font-weight-bold;
+  }
+
+  &__ideas {
+    margin-top: $spacing-3;
+    max-width: 440px;
+    border-top: 1px solid rgba($color-primary-light, 0.18);
+    padding-top: $spacing-2;
+  }
+
+  &__ideas-title {
+    font-size: 10px;
+    text-transform: uppercase;
+    letter-spacing: 0.08em;
+    color: rgba($color-primary-light, 0.72);
+    margin-bottom: $spacing-1;
+  }
+
+  &__ideas-list {
+    margin: 0;
+    padding-left: 16px;
+    display: grid;
+    gap: 4px;
+  }
+
+  &__ideas-item {
+    color: rgba($color-text, 0.88);
+    line-height: 1.45;
   }
 
   &__label--clamped {

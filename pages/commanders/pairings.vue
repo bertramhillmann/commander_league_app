@@ -2,12 +2,34 @@
   <div class="page page--pairings">
     <h1 class="pairings__title">Player × Commander Pairings</h1>
 
+    <div class="pairings__head">
+      <div>
+        <p class="pairings__subtitle">Sorted by current commander MMR by default, with optional player filtering.</p>
+      </div>
+
+      <label class="pairings__filter">
+        <span class="pairings__filter-label">Player</span>
+        <select v-model="selectedPlayerFilter" class="pairings__filter-select">
+          <option value="">All Players</option>
+          <option v-for="playerName in availablePlayers" :key="playerName" :value="playerName">
+            {{ playerName }}
+          </option>
+        </select>
+      </label>
+    </div>
+
     <div class="standings-wrap">
       <table class="standings">
         <thead>
           <tr>
             <th class="standings__th standings__th--rank">#</th>
             <th class="standings__th standings__th--name">Player × Commander</th>
+            <th class="standings__th standings__th--num">
+              <button type="button" class="standings__sort-button standings__sort-button--num" @click="toggleSort('commanderMMR')">
+                <span>MMR</span>
+                <span class="standings__sort-indicator">{{ sortIndicator('commanderMMR') }}</span>
+              </button>
+            </th>
             <th class="standings__th standings__th--num">
               <button type="button" class="standings__sort-button standings__sort-button--num" @click="toggleSort('totalScore')">
                 <span>Total</span>
@@ -85,6 +107,13 @@
             <td class="standings__td standings__td--name">
               <div class="standings__pairing-name">
                 <IconsTierIcon v-if="row.commanderTier" :tier="row.commanderTier" :size="12" />
+                <img
+                  v-if="commanderArtUrls.get(row.commanderName)"
+                  :src="commanderArtUrls.get(row.commanderName)"
+                  :alt="row.commanderName"
+                  class="standings__commander-art"
+                >
+                <span v-else class="standings__commander-art standings__commander-art--fallback" />
                 <NuxtLink class="standings__player-link" :to="`/players/${encodeURIComponent(row.playerName)}`">{{ row.playerName }}</NuxtLink>
                 <span class="standings__pairing-separator">×</span>
                 <NuxtLink
@@ -98,6 +127,7 @@
                 </NuxtLink>
               </div>
             </td>
+            <td class="standings__td standings__td--num standings__td--mmr">{{ fmt(row.commanderMMR) }}</td>
             <td class="standings__td standings__td--num standings__td--total">{{ fmt(row.totalScore) }}</td>
             <td
               v-if="settings.standings.usePerformanceModifier"
@@ -214,8 +244,10 @@
 </template>
 
 <script setup lang="ts">
-import { computed, onMounted, reactive, ref } from 'vue'
+import { computed, onMounted, reactive, ref, watch } from 'vue'
+import { useImageCache } from '~/composables/useImageCache'
 import { getPlayerCommanderMetrics } from '~/composables/useLeagueState'
+import { getCommanderTierFromMMR, type CommanderMMRTier } from '~/composables/useCommanderMMR'
 import {
   EXPECTED_WIN_RATE,
   PERF_BASE_WEIGHT,
@@ -225,12 +257,12 @@ import {
   PERF_MULT_MIN,
 } from '~/utils/placements'
 import { formatLoosterPoints } from '~/utils/loosterPoints'
-import { computeGlobalCommanderBaseline, computePlayerCommanderTier, type Tier } from '~/utils/tiers'
 import { formatPlayerName } from '~/utils/playerNames'
 
-const { commanders, gameRecords, players } = useLeagueState()
+const { gameRecords, players } = useLeagueState()
 const { settings } = useLeagueSettings()
 const { user, ensureSession } = useAuth()
+const { preloadCommanderImages, getCachedCommanderImage } = useImageCache()
 const loggedInPlayerName = computed(() => (user.value ? formatPlayerName(user.value) : ''))
 
 onMounted(async () => {
@@ -238,6 +270,7 @@ onMounted(async () => {
 })
 
 type SortKey =
+  | 'commanderMMR'
   | 'totalScore'
   | 'totalPoints'
   | 'achievementPoints'
@@ -248,19 +281,27 @@ type SortKey =
   | 'avgPerGame'
   | 'totalLPoints'
 
-const sortKey = ref<SortKey>('totalScore')
+const sortKey = ref<SortKey>('commanderMMR')
 const sortDirection = ref<'desc' | 'asc'>('desc')
 const currentPage = ref(1)
 const PAGE_SIZE = 15
+const selectedPlayerFilter = ref('')
+const commanderArtUrls = ref(new Map<string, string>())
 
-const globalCommanderBaseline = computed(() => computeGlobalCommanderBaseline(commanders.value))
+const availablePlayers = computed(() =>
+  Object.keys(gameRecords.value)
+    .sort((a, b) => a.localeCompare(b)),
+)
 
-function playerCommanderTier(playerName: string, commanderName: string): Tier | null {
-  const records = Object.values(gameRecords.value[playerName] ?? {}).filter(
-    (record) => record.commander === commanderName,
-  )
-  const { detail } = computePlayerCommanderTier(records, globalCommanderBaseline.value)
-  return detail?.tier ?? null
+function playerCommanderMmr(playerName: string, commanderName: string) {
+  const records = Object.values(gameRecords.value[playerName] ?? {})
+    .filter((record) => record.commander === commanderName)
+  return records.at(-1)?.commanderMMRAfter ?? 0
+}
+
+function playerCommanderTier(playerName: string, commanderName: string): CommanderMMRTier | null {
+  const mmr = playerCommanderMmr(playerName, commanderName)
+  return mmr > 0 ? getCommanderTierFromMMR(mmr) : null
 }
 
 function buildPerformanceMetrics(
@@ -299,6 +340,7 @@ const pairingTable = computed(() => {
   const includeCommanderXp = settings.value.standings.includeCommanderXp
   const includeAchievementPoints = settings.value.standings.includeAchievementPoints
   const rows = Object.entries(gameRecords.value).flatMap(([playerName, recordsMap]) => {
+    if (selectedPlayerFilter.value && playerName !== selectedPlayerFilter.value) return []
     const byCommander = new Set(Object.values(recordsMap).map((record) => record.commander))
 
     return Array.from(byCommander).flatMap((commanderName) => {
@@ -309,6 +351,7 @@ const pairingTable = computed(() => {
         key: `${playerName}::${commanderName}`,
         playerName,
         commanderName,
+        commanderMMR: playerCommanderMmr(playerName, commanderName),
         commanderTier: playerCommanderTier(playerName, commanderName),
         totalPoints: metrics.totalFinalPoints,
         achievementPoints: includeAchievementPoints ? metrics.achievementPoints : 0,
@@ -361,6 +404,30 @@ const pairingTable = computed(() => {
     })
     .map((row, index) => ({ ...row, rank: index + 1 }))
 })
+
+watch(selectedPlayerFilter, () => {
+  currentPage.value = 1
+})
+
+watch(
+  () => pairingTable.value.map((row) => row.commanderName),
+  async (commanders) => {
+    const names = [...new Set(commanders)].filter(Boolean)
+    if (!names.length) {
+      commanderArtUrls.value = new Map()
+      return
+    }
+
+    await preloadCommanderImages(names, ['art_crop'])
+    const next = new Map<string, string>()
+    for (const name of names) {
+      const url = getCachedCommanderImage(name, 'art_crop')
+      if (url) next.set(name, url)
+    }
+    commanderArtUrls.value = next
+  },
+  { immediate: true },
+)
 
 const totalPages = computed(() => Math.max(1, Math.ceil(pairingTable.value.length / PAGE_SIZE)))
 
@@ -562,6 +629,42 @@ function onMouseMove(e: MouseEvent) {
   margin-bottom: $spacing-6;
 }
 
+.pairings__head {
+  display: flex;
+  align-items: flex-end;
+  justify-content: space-between;
+  gap: $spacing-4;
+  flex-wrap: wrap;
+}
+
+.pairings__subtitle {
+  margin: 0;
+  color: $color-text-muted;
+  font-size: $font-size-sm;
+}
+
+.pairings__filter {
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+  min-width: 220px;
+}
+
+.pairings__filter-label {
+  font-size: 10px;
+  text-transform: uppercase;
+  letter-spacing: 0.08em;
+  color: $color-text-muted;
+}
+
+.pairings__filter-select {
+  padding: 10px 12px;
+  border-radius: $border-radius-md;
+  border: 1px solid rgba($border-color, 0.8);
+  background: rgba($color-bg-elevated, 0.9);
+  color: $color-text;
+}
+
 .standings-wrap {
   overflow-x: auto;
   -webkit-overflow-scrolling: touch;
@@ -688,6 +791,20 @@ function onMouseMove(e: MouseEvent) {
     align-items: center;
     gap: 6px;
     flex-wrap: wrap;
+  }
+
+  &__commander-art {
+    width: 24px;
+    height: 24px;
+    border-radius: 50%;
+    object-fit: cover;
+    border: 1px solid rgba($border-color, 0.7);
+    box-shadow: 0 0 0 1px rgba($color-bg, 0.45);
+
+    &--fallback {
+      display: inline-block;
+      background: rgba($color-bg-elevated, 0.8);
+    }
   }
 
   &__pairing-separator { color: $color-text-muted; }

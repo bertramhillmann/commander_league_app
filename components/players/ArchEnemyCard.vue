@@ -22,13 +22,7 @@
           </div>
 
           <div class="arch-enemy-card__wounds">
-            {{ formatMmr(summary.mmrLost) }} MMR lost
-          <!--<span
-              class="arch-enemy-card__card-name"
-              @mouseenter="onCardEnter($event)"
-              @mousemove="onCardMove($event)"
-              @mouseleave="onCardLeave"
-            >{{ randomCard }}</span>-->
+            <IconsMmrIcon :size="11" />{{ formatMmr(summary.mmrLost) }} MMR lost
           </div>
         </div>
       </div>
@@ -38,31 +32,11 @@
       <span class="arch-enemy-card__none">No arch enemy yet</span>
     </template>
   </div>
-
-  <Teleport to="body">
-    <div
-      v-if="cardPreview.visible && cardImageUrl"
-      class="ae-card-preview"
-      :style="{ top: `${cardPreview.y}px`, left: `${cardPreview.x}px` }"
-    >
-      <img :src="cardImageUrl" :alt="randomCard" class="ae-card-preview__img" />
-    </div>
-  </Teleport>
 </template>
 
 <script setup lang="ts">
-import { fetchCardByName, getCardImageUrl } from '~/services/scryfallService'
 import { formatPlayerName } from '~/utils/playerNames'
 import type { ArchEnemySummary } from '~/utils/archEnemy'
-
-const BAD_CARDS = [
-  'Lava Axe', 'Thermal Blast', 'Tendrils of Agony', 'Frazzle',
-  'Cradle to Grave', 'Ember Shot', "Hisoka's Defiance", 'Break Open',
-  'Scorching Spear', 'Ichor Explosion', 'Aether Tide', 'Moonlace',
-  'Taste of Blood', 'Waste Away', "Kamahl's Sledge", 'Dematerialize',
-]
-
-const OFFSET = 18
 
 const props = defineProps<{
   summary: ArchEnemySummary
@@ -80,55 +54,9 @@ const enemyImageUrl = computed(() => {
   return playerImages[key] ?? null
 })
 
-const randomCard = computed(() => {
-  if (!props.summary.enemyName) return ''
-  const seed = props.summary.playerName + props.summary.enemyName
-  let hash = 0
-  for (let i = 0; i < seed.length; i++) {
-    hash = (hash * 31 + seed.charCodeAt(i)) >>> 0
-  }
-  return BAD_CARDS[hash % BAD_CARDS.length]
-})
-
 function formatMmr(value: number | null | undefined) {
   if (!Number.isFinite(value)) return '0'
   return (Math.round((value ?? 0) * 100) / 100).toFixed(2).replace(/\.?0+$/, '')
-}
-
-const cardImageUrl = ref<string | null>(null)
-const cardPreview = reactive({ visible: false, x: 0, y: 0 })
-
-onMounted(async () => {
-  if (!randomCard.value) return
-  const card = await fetchCardByName(randomCard.value)
-  if (card) cardImageUrl.value = getCardImageUrl(card, 'normal')
-})
-
-function calcPos(e: MouseEvent) {
-  const W = 260, H = 364
-  let x = e.clientX + OFFSET
-  let y = e.clientY + OFFSET
-  if (x + W > window.innerWidth) x = e.clientX - W - OFFSET
-  if (y + H > window.innerHeight) y = e.clientY - H - OFFSET
-  return { x, y }
-}
-
-function onCardEnter(e: MouseEvent) {
-  const pos = calcPos(e)
-  cardPreview.x = pos.x
-  cardPreview.y = pos.y
-  cardPreview.visible = true
-}
-
-function onCardMove(e: MouseEvent) {
-  if (!cardPreview.visible) return
-  const pos = calcPos(e)
-  cardPreview.x = pos.x
-  cardPreview.y = pos.y
-}
-
-function onCardLeave() {
-  cardPreview.visible = false
 }
 </script>
 
@@ -202,39 +130,19 @@ function onCardLeave() {
   }
 
   &__wounds {
+    display: inline-flex;
+    align-items: center;
+    gap: 3px;
     font-size: $font-size-xs;
     color: rgba($color-danger, 0.55);
     font-style: italic;
     letter-spacing: 0.02em;
   }
 
-  &__card-name {
-    color: rgba($color-danger, 0.8);
-    font-style: normal;
-    font-weight: $font-weight-semibold;
-    cursor: help;
-    border-bottom: 1px dotted rgba($color-danger, 0.4);
-  }
-
   &__none {
     font-size: $font-size-sm;
     color: $color-text-muted;
     font-style: italic;
-  }
-}
-</style>
-
-<style lang="scss">
-.ae-card-preview {
-  position: fixed;
-  z-index: 9999;
-  pointer-events: none;
-
-  &__img {
-    width: 260px;
-    border-radius: 14px;
-    display: block;
-    box-shadow: 0 18px 48px rgba(0, 0, 0, 0.55);
   }
 }
 </style>

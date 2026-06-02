@@ -429,7 +429,8 @@ async function submitGame() {
 // ── Players grid (2 columns) ─────────────────────────────────────────────────
 .players-grid {
   display: grid;
-  grid-template-columns: 1fr 1fr;
+  grid-auto-flow: column;
+  grid-template-rows: repeat(2, auto);
   gap: $spacing-6;
 }
 
@@ -466,10 +467,12 @@ async function submitGame() {
 
   &--left {
     flex-direction: row; // art | fields
+    order:0;
   }
 
   &--right {
     flex-direction: row; // fields | art handled by template order
+    order:1;
   }
 
   &__body {
@@ -528,11 +531,12 @@ async function submitGame() {
 
   &--left {
     border-left: 1px solid rgba($border-color, 0.4);
+    order:0;
   }
 
   &--right {
     border-right: 1px solid rgba($border-color, 0.4);
-    order:1;
+    order:0;
   }
 
   &__img {
