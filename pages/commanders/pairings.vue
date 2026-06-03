@@ -127,7 +127,12 @@
                 </NuxtLink>
               </div>
             </td>
-            <td class="standings__td standings__td--num standings__td--mmr">{{ fmt(row.commanderMMR) }}</td>
+            <td class="standings__td standings__td--num standings__td--mmr">
+              <span class="standings__mmr-cell">
+                <IconsMmrIcon :size="11" />
+                {{ fmt(row.commanderMMR) }}
+              </span>
+            </td>
             <td class="standings__td standings__td--num standings__td--total">{{ fmt(row.totalScore) }}</td>
             <td
               v-if="settings.standings.usePerformanceModifier"
@@ -635,6 +640,7 @@ function onMouseMove(e: MouseEvent) {
   justify-content: space-between;
   gap: $spacing-4;
   flex-wrap: wrap;
+  margin-bottom: $spacing-6;
 }
 
 .pairings__subtitle {
@@ -668,24 +674,29 @@ function onMouseMove(e: MouseEvent) {
 .standings-wrap {
   overflow-x: auto;
   -webkit-overflow-scrolling: touch;
+  border: 1px solid rgba($border-color, 0.7);
+  border-radius: $border-radius-lg;
+  overflow: hidden;
+  overflow-x: auto;
 }
 
 .standings {
   width: 100%;
-  background: rgba(0, 0, 0, 0.25);
+  background: rgba(0, 0, 0, 0.52);
   border-collapse: collapse;
   font-size: $font-size-sm;
 
   &__th {
     text-align: left;
-    padding: $spacing-2 $spacing-3;
+    padding: $spacing-3 $spacing-3;
     color: $color-text-muted;
     font-size: $font-size-xs;
     text-transform: uppercase;
     letter-spacing: 0.07em;
     font-weight: $font-weight-medium;
-    border-bottom: 1px solid $border-color;
+    border-bottom: 2px solid rgba($border-color, 0.9);
     white-space: nowrap;
+    background: rgba(0, 0, 0, 0.2);
 
     &--num  { text-align: right; }
     &--rank { width: 2.5rem; text-align: center; }
@@ -720,12 +731,11 @@ function onMouseMove(e: MouseEvent) {
   }
 
   &__row {
-    border-bottom: 1px solid rgba($border-color, 0.5);
+    border-bottom: 1px solid rgba($border-color, 0.35);
     transition: background $transition-fast;
 
     &:hover {
-      background: rgba(16, 16, 16, 0.35);
-      backdrop-filter: blur(3px);
+      background: rgba(255, 255, 255, 0.04);
     }
 
     &--top3 { background: rgba($color-primary, 0.05); }
@@ -745,6 +755,7 @@ function onMouseMove(e: MouseEvent) {
 
     &--num  { text-align: right; font-variant-numeric: tabular-nums; }
     &--rank { text-align: center; }
+    &--mmr   { color: $color-secondary; }
     &--total { font-weight: $font-weight-bold; color: $color-secondary; }
     &--achv  { color: $color-accent; }
     &--hoverable { cursor: default; text-decoration: underline dotted $color-accent; }
@@ -805,6 +816,15 @@ function onMouseMove(e: MouseEvent) {
       display: inline-block;
       background: rgba($color-bg-elevated, 0.8);
     }
+  }
+
+  &__mmr-cell {
+    display: inline-flex;
+    align-items: center;
+    justify-content: flex-end;
+    gap: 4px;
+    font-weight: $font-weight-semibold;
+    font-variant-numeric: tabular-nums;
   }
 
   &__pairing-separator { color: $color-text-muted; }

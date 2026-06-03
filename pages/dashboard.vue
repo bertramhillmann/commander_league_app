@@ -149,7 +149,7 @@
               class="standings__rating-button"
               @click="openRatingSidebar(row.name)"
             >
-              {{ fmt(row.totalScore) }}
+              <IconsPlayerRatingIcon :size="20" style="margin-right: 3px" />{{ fmt(row.totalScore) }}
             </button>
             <template v-else>
               {{ fmt(row.totalScore) }}
@@ -286,13 +286,17 @@
               </td>
               <td
                 class="looster-table__td looster-table__td--num looster-table__td--hoverable"
-                :title="row.gameLoosterPointsTitle"
+                @mouseenter="onLoosterEnter(row, 'games', $event)"
+                @mousemove="onMouseMove($event)"
+                @mouseleave="onLoosterLeave"
               >
                 {{ fmtLooster(row.gameLoosterPoints) }}
               </td>
               <td
                 class="looster-table__td looster-table__td--num looster-table__td--hoverable"
-                :title="row.missedGameLoosterPointsTitle"
+                @mouseenter="onLoosterEnter(row, 'missed', $event)"
+                @mousemove="onMouseMove($event)"
+                @mouseleave="onLoosterLeave"
               >
                 {{ fmtLooster(row.missedGameLoosterPoints) }}
               </td>
@@ -603,6 +607,33 @@
             </tbody>
           </table>
         </template>
+      </div>
+    </Teleport>
+
+    <Teleport to="body">
+      <div
+        v-if="loosterHover.visible"
+        class="floating-panel mult-tooltip looster-tooltip"
+        :style="{ top: `${loosterHover.y}px`, left: `${loosterHover.x}px` }"
+      >
+        <div class="mult-tooltip__title">{{ loosterHover.title }}</div>
+        <div class="mult-tooltip__summary">{{ loosterHover.playerName }}</div>
+        <table class="mult-tooltip__table">
+          <tbody>
+            <tr v-for="entry in loosterHover.entries" :key="entry.label">
+              <td class="mult-tooltip__label">{{ entry.label }}</td>
+              <td class="mult-tooltip__op"></td>
+              <td class="mult-tooltip__detail">{{ entry.detail }}</td>
+              <td class="mult-tooltip__value">{{ entry.value }}</td>
+            </tr>
+            <tr class="mult-tooltip__row--sep">
+              <td class="mult-tooltip__label">Total</td>
+              <td class="mult-tooltip__op">=</td>
+              <td class="mult-tooltip__detail">{{ loosterHover.totalLabel }}</td>
+              <td class="mult-tooltip__value">{{ loosterHover.totalValue }}</td>
+            </tr>
+          </tbody>
+        </table>
       </div>
     </Teleport>
 
@@ -948,13 +979,19 @@ type LoosterTableRow = {
   availableLoosters: number
   currentLoosterPoints: number
   gameLoosterPoints: number
-  gameLoosterPointsTitle: string
+  gameLoosterPointsEntries: LoosterTooltipEntry[]
   spentLoosterPoints: number
   boughtLoosters: number
   mostBoughtSet: string
   missedGameLoosterPoints: number
-  missedGameLoosterPointsTitle: string
+  missedGameLoosterPointsEntries: LoosterTooltipEntry[]
   totalLoosterPoints: number
+}
+
+type LoosterTooltipEntry = {
+  label: string
+  detail: string
+  value: string
 }
 
 type DashboardSetMeta = {
@@ -1145,8 +1182,9 @@ const loosterTable = computed<LoosterTableRow[]>(() =>
     const player = players.value[playerName]
     const playerPurchases = purchasesByPlayer.value.get(playerName) ?? []
     const playerRecords = Object.values(gameRecords.value[playerName] ?? {})
+    const loosterAwardRecords = playerRecords.filter((record) => record.placement > 1 && record.lPoints > 0)
     const gameLoosterPoints = roundLoosterPoints(
-      playerRecords.reduce((sum, record) => sum + record.lPoints, 0),
+      loosterAwardRecords.reduce((sum, record) => sum + record.lPoints, 0),
     )
     const spentLoosterPoints = roundLoosterPoints(
       playerPurchases.reduce((sum, purchase) => sum + Number(purchase.cost ?? 0), 0),
@@ -1168,55 +1206,58 @@ const loosterTable = computed<LoosterTableRow[]>(() =>
     const mostBoughtSet = [...setCounts.entries()]
       .sort((left, right) => right[1] - left[1] || left[0].localeCompare(right[0]))[0]?.[0] ?? ''
 
-    const placementCounts = playerRecords.reduce((counts, record) => {
-      counts.set(record.placement, (counts.get(record.placement) ?? 0) + 1)
+    const placementCounts = loosterAwardRecords.reduce((counts, record) => {
+      const key = `${record.placement}-${record.playerCount}`
+      counts.set(key, (counts.get(key) ?? 0) + 1)
       return counts
-    }, new Map<number, number>())
-    const placementTotals = playerRecords.reduce((totals, record) => {
-      totals.set(record.placement, roundLoosterPoints((totals.get(record.placement) ?? 0) + record.lPoints))
+    }, new Map<string, number>())
+    const placementTotals = loosterAwardRecords.reduce((totals, record) => {
+      const key = `${record.placement}-${record.playerCount}`
+      totals.set(key, roundLoosterPoints((totals.get(key) ?? 0) + record.lPoints))
       return totals
-    }, new Map<number, number>())
-    const gameLoosterPointsTitle = playerRecords.length > 0
-      ? [
-          'L-Points over games',
-          ...[...placementCounts.entries()]
-            .sort((left, right) => left[0] - right[0])
-            .map(([placement, count]) =>
-              `${placementLabel(placement)}: ${count}x -> ${fmtLooster(placementTotals.get(placement) ?? 0)} LP`,
-            ),
-          `Total: ${fmtLooster(gameLoosterPoints)} LP`,
-        ].join('\n')
-      : 'No L-Points earned over played games yet.'
+    }, new Map<string, number>())
+    const gameLoosterPointsEntries = [...placementCounts.entries()]
+      .sort((left, right) => {
+        const [leftPlacement, leftPlayerCount] = left[0].split('-').map(Number)
+        const [rightPlacement, rightPlayerCount] = right[0].split('-').map(Number)
+        return leftPlacement - rightPlacement || leftPlayerCount - rightPlayerCount
+      })
+      .map(([key, count]) => {
+        const [placement, playerCount] = key.split('-').map(Number)
+        return {
+          label: placementOfPodLabel(placement, playerCount),
+          detail: `${count} game${count === 1 ? '' : 's'}`,
+          value: fmtLooster(placementTotals.get(key) ?? 0),
+        }
+      })
 
     const missedBreakdown = missedLoosterBreakdownByPlayer.value.get(playerName) ?? {
       counts: { 3: 0, 4: 0, 5: 0 },
       total: 0,
     }
-    const missedGameLoosterPointsTitle = missedBreakdown.total > 0
-      ? [
-          'L-Points over missed games',
-          ...(Object.entries(missedBreakdown.counts) as [string, number][])
-            .filter(([, count]) => count > 0)
-            .map(([playerCount, count]) => {
-              const numericPlayerCount = Number(playerCount) as 3 | 4 | 5
-              const total = roundLoosterPoints(count * getMissedGameLoosterPoints(numericPlayerCount))
-              return `${playerCount}-player missed: ${count}x -> ${fmtLooster(total)} LP`
-            }),
-          `Total: ${fmtLooster(missedGameLoosterPoints)} LP`,
-        ].join('\n')
-      : 'No L-Points earned over missed games yet.'
+    const missedGameLoosterPointsEntries = (Object.entries(missedBreakdown.counts) as [string, number][])
+      .filter(([, count]) => count > 0)
+      .map(([playerCount, count]) => {
+        const numericPlayerCount = Number(playerCount) as 3 | 4 | 5
+        const total = roundLoosterPoints(count * getMissedGameLoosterPoints(numericPlayerCount))
+        return {
+          label: `Missed ${playerCount}-player pod`,
+          detail: `${count} game${count === 1 ? '' : 's'}`,
+          value: fmtLooster(total),
+        }
+      })
 
     return {
       name: playerName,
       availableLoosters,
       currentLoosterPoints,
       gameLoosterPoints,
-      gameLoosterPointsTitle,
+      gameLoosterPointsEntries,
       spentLoosterPoints,
       boughtLoosters: playerPurchases.length,
       mostBoughtSet,
       missedGameLoosterPoints,
-      missedGameLoosterPointsTitle,
+      missedGameLoosterPointsEntries,
       totalLoosterPoints,
     }
   }),
@@ -2056,6 +2097,11 @@ function placementLabel(placement: number): string {
   return `${placement}${suffix} place`
 }
 
+function placementOfPodLabel(placement: number, playerCount: number): string {
+  const suffix = placement === 1 ? 'st' : placement === 2 ? 'nd' : placement === 3 ? 'rd' : 'th'
+  return `${placement}${suffix} of ${playerCount}`
+}
+
 function pct(n: number): string {
   return `${(n * 100).toFixed(1).replace(/\.0$/, '')}%`
 }
@@ -2066,6 +2112,16 @@ const OFFSET_X = 16
 const OFFSET_Y = 16
 
 const hover = reactive({ visible: false, playerName: '', commanderName: '', x: 0, y: 0 })
+const loosterHover = reactive({
+  visible: false,
+  playerName: '',
+  title: '',
+  totalLabel: '',
+  totalValue: '',
+  entries: [] as LoosterTooltipEntry[],
+  x: 0,
+  y: 0,
+})
 
 function calcPosition(e: MouseEvent) {
   let x = e.clientX + OFFSET_X
@@ -2094,6 +2150,11 @@ function onMouseMove(e: MouseEvent) {
     const pos = calcPosition(e)
     hover.x = pos.x
     hover.y = pos.y
+  }
+  if (loosterHover.visible) {
+    const pos = calcMultPosition(e)
+    loosterHover.x = pos.x
+    loosterHover.y = pos.y
   }
   if (achvHover.visible) {
     const pos = calcAchvPosition(e)
@@ -2124,6 +2185,27 @@ function onMouseMove(e: MouseEvent) {
 
 function onCommanderLeave() {
   hover.visible = false
+}
+
+function onLoosterEnter(row: LoosterTableRow, mode: 'games' | 'missed', e: MouseEvent) {
+  loosterHover.playerName = row.name
+  loosterHover.title = mode === 'games' ? 'L-Points Over Games' : 'L-Points Over Missed Games'
+  loosterHover.totalLabel = mode === 'games' ? 'earned in played games' : 'earned from missed games'
+  loosterHover.totalValue = mode === 'games'
+    ? fmtLooster(row.gameLoosterPoints)
+    : fmtLooster(row.missedGameLoosterPoints)
+  loosterHover.entries = mode === 'games'
+    ? row.gameLoosterPointsEntries
+    : row.missedGameLoosterPointsEntries
+  loosterHover.visible = true
+  const pos = calcMultPosition(e)
+  loosterHover.x = pos.x
+  loosterHover.y = pos.y
+}
+
+function onLoosterLeave() {
+  loosterHover.visible = false
+  loosterHover.entries = []
 }
 
 // ── Achievement tooltip ───────────────────────────────────────────────────────
@@ -2858,13 +2940,24 @@ function onCompLeave() {
     border-bottom: none;
   }
 
+  &__row {
+    transition: background $transition-fast;
+
+    &:hover {
+      background: rgba(16, 16, 16, 0.35);
+      backdrop-filter: blur(3px);
+    }
+  }
+
   &__td {
     color: $color-text;
     font-size: $font-size-sm;
   }
 
   &__td--hoverable {
-    cursor: help;
+    cursor: default;
+    text-decoration: underline dotted rgba($color-primary-light, 0.45);
+    text-underline-offset: 0.16em;
   }
 
   &__th--num,
@@ -3698,6 +3791,8 @@ function onCompLeave() {
   color: inherit;
   font: inherit;
   cursor: pointer;
+  display: inline-flex;
+  align-items: center;
   text-decoration: underline;
   text-decoration-color: rgba($color-primary-light, 0.3);
   text-underline-offset: 0.18em;
@@ -3850,6 +3945,18 @@ function onCompLeave() {
 
   &__label--clamped {
     color: $color-accent;
+  }
+}
+
+.looster-tooltip {
+  min-width: 320px;
+
+  .mult-tooltip__summary {
+    margin-bottom: $spacing-2;
+    color: $color-text-muted;
+    font-size: $font-size-xs;
+    text-transform: uppercase;
+    letter-spacing: 0.08em;
   }
 }
 </style>

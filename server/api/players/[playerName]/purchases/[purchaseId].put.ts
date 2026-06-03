@@ -35,7 +35,7 @@ export default defineEventHandler(async (event) => {
   const type = (body.type ?? 'looster').trim() || 'looster'
   const set = (body.set ?? '').trim()
   const setName = (body.set_name ?? '').trim()
-  const cards = await validateAndCanonicalizeOptionalCards(body.cards)
+  const cards = await validateAndCanonicalizeOptionalCards(body.cards, set)
   const date = parsePurchaseDate(body.date)
   const priceEuro = normalizeEuroPrice(body.priceEuro)
 

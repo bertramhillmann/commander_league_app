@@ -54,7 +54,6 @@
         <div class="shop-floor__grid">
           <article
             class="shop-item"
-            :class="{ 'shop-item--locked': selectedRemainingBalance < loosterCost }"
             role="button"
             tabindex="0"
             @click="openPurchaseModal"
@@ -77,10 +76,9 @@
               <div class="shop-item__type-row">
                 <span class="shop-item__type">Booster Pack</span>
                 <span
-                  class="shop-item__badge"
-                  :class="selectedRemainingBalance < loosterCost ? 'shop-item__badge--locked' : 'shop-item__badge--available'"
+                  class="shop-item__badge shop-item__badge--available"
                 >
-                  {{ selectedRemainingBalance < loosterCost ? 'Locked' : 'Available' }}
+                  Available
                 </span>
               </div>
               <h3 class="shop-item__name">Looster</h3>
@@ -98,10 +96,9 @@
               <button
                 type="button"
                 class="shop-item__buy-btn"
-                :disabled="selectedRemainingBalance < loosterCost"
                 @click.stop="openPurchaseModal"
               >
-                {{ selectedRemainingBalance < loosterCost ? 'Insufficient Funds' : 'Purchase' }}
+                Purchase
               </button>
             </div>
           </article>
@@ -146,6 +143,15 @@
         <div v-if="loadingPurchases" class="shop-empty">Loading purchases...</div>
         <div v-else-if="purchases.length === 0" class="shop-empty">No purchases saved yet.</div>
         <div v-else class="purchase-list">
+          <div v-if="loadingPurchaseCardImages" class="shop-sync">
+            <div class="shop-sync__meta">
+              <strong>Loading {{ scryfallCardProgress.loaded }}/{{ scryfallCardProgress.total }} cards from Scryfall</strong>
+              <span>{{ scryfallCardProgressLabel }}</span>
+            </div>
+            <div class="shop-sync__bar" aria-hidden="true">
+              <span class="shop-sync__bar-fill" :style="{ width: `${scryfallCardProgressPercent}%` }" />
+            </div>
+          </div>
           <article v-for="purchase in purchases" :key="purchase.id" class="purchase-card">
             <template v-if="editingPurchaseId === purchase.id">
               <div class="purchase-card__edit-grid">
@@ -250,13 +256,13 @@
                   v-for="card in getSortedPurchaseCards(purchase)"
                   :key="`${purchase.id}-${card}`"
                   class="purchase-card__chip"
-                  :href="purchaseCardImages[card]?.scryfallUrl || undefined"
-                  :target="purchaseCardImages[card]?.scryfallUrl ? '_blank' : undefined"
-                  :rel="purchaseCardImages[card]?.scryfallUrl ? 'noopener noreferrer' : undefined"
+                  :href="purchaseCardImages[getPurchaseCardLookupKey(purchase, card)]?.scryfallUrl || undefined"
+                  :target="purchaseCardImages[getPurchaseCardLookupKey(purchase, card)]?.scryfallUrl ? '_blank' : undefined"
+                  :rel="purchaseCardImages[getPurchaseCardLookupKey(purchase, card)]?.scryfallUrl ? 'noopener noreferrer' : undefined"
                 >
                   <img
-                    v-if="purchaseCardImages[card]?.smallUrl"
-                    :src="purchaseCardImages[card].smallUrl"
+                    v-if="purchaseCardImages[getPurchaseCardLookupKey(purchase, card)]?.smallUrl"
+                    :src="purchaseCardImages[getPurchaseCardLookupKey(purchase, card)].smallUrl"
                     :alt="card"
                     class="purchase-card__chip-image"
                     loading="lazy"
@@ -264,8 +270,8 @@
                   <span v-else class="purchase-card__chip-fallback">{{ card }}</span>
                   <span class="purchase-card__chip-preview">
                     <img
-                      v-if="purchaseCardImages[card]?.hoverUrl"
-                      :src="purchaseCardImages[card].hoverUrl"
+                      v-if="purchaseCardImages[getPurchaseCardLookupKey(purchase, card)]?.hoverUrl"
+                      :src="purchaseCardImages[getPurchaseCardLookupKey(purchase, card)].hoverUrl"
                       :alt="card"
                       class="purchase-card__chip-preview-image"
                       loading="lazy"
@@ -331,7 +337,7 @@
 
                 <label class="form-field">
                   <span class="form-label">Set Code</span>
-                  <input v-model="form.set" type="text" class="form-input" placeholder="e.g. DMU" required />
+                  <input v-model="form.set" type="text" class="form-input" placeholder="e.g. DMU" spellcheck="false" required />
                 </label>
 
                 <label class="form-field">
@@ -392,8 +398,8 @@
 </template>
 
 <script setup lang="ts">
-import { computed, reactive, ref, watch } from 'vue'
-import { fetchCardsByName, fetchSetByCode, getCardImageUrl } from '~/services/scryfallService'
+import { computed, onMounted, reactive, ref, watch } from 'vue'
+import { fetchCardsByIdentifiers, fetchSetByCode, getCardImageUrl } from '~/services/scryfallService'
 import { formatPlayerName } from '~/utils/playerNames'
 import type { LoosterPurchaseRecord } from '~/utils/loosterPurchases'
 import type { ScryfallCard } from '~/services/scryfallService'
@@ -423,6 +429,11 @@ type PurchaseSetImage = {
   scryfallUrl: string
 }
 
+type PurchaseFormAutofillState = {
+  setName: string
+  priceEuro: number | null
+}
+
 const today = new Date().toISOString().slice(0, 10)
 
 const { user, isAdmin, ensureSession } = useAuth()
@@ -446,6 +457,7 @@ const purchaseCardImages = ref<Record<string, PurchaseCardImage>>({})
 const purchaseCardSortMeta = ref<Record<string, PurchaseCardSortMeta>>({})
 const purchaseSetImages = ref<Record<string, PurchaseSetImage>>({})
 const loadingPurchases = ref(false)
+const loadingPurchaseCardImages = ref(false)
 const savingPurchase = ref(false)
 const savingEdit = ref(false)
 const importingPurchases = ref(false)
@@ -456,6 +468,10 @@ const editingPurchaseId = ref('')
 const importFile = ref<File | null>(null)
 const importFileName = ref('')
 const importFileInput = ref<HTMLInputElement | null>(null)
+const formAutofill = reactive<PurchaseFormAutofillState>({
+  setName: '',
+  priceEuro: null,
+})
 
 const form = reactive<PurchaseFormState>({
   playerName: '',
@@ -486,6 +502,20 @@ const selectablePlayers = computed(() => {
 })
 
 const loosterCost = computed(() => settings.value.shop.loosterCost)
+const scryfallCardProgress = reactive({
+  loaded: 0,
+  total: 0,
+})
+const scryfallCardProgressPercent = computed(() => {
+  if (scryfallCardProgress.total === 0) return 0
+  return Math.round((scryfallCardProgress.loaded / scryfallCardProgress.total) * 100)
+})
+const scryfallCardProgressLabel = computed(() => {
+  if (scryfallCardProgress.total === 0) return 'Preparing Scryfall sync...'
+  return `${scryfallCardProgressPercent.value}% complete`
+})
+let purchaseAssetsPromise: Promise<void> | null = null
+let setAutofillRequestId = 0
 
 watch(
   [currentPlayerName, selectablePlayers, isAdmin],
@@ -527,7 +557,34 @@ const selectedSpentBalance = computed(() => spentByPlayer.value.get(form.playerN
 const selectedRemainingBalance = computed(() => round3(selectedEarnedBalance.value - selectedSpentBalance.value))
 const projectedRemainingBalance = computed(() => round3(selectedRemainingBalance.value - loosterCost.value))
 
-await loadPurchases()
+watch(
+  viewMode,
+  (mode) => {
+    if (mode === 'history') {
+      void ensurePurchaseAssetsLoaded()
+    }
+  },
+  { immediate: true },
+)
+
+watch(purchases, () => {
+  if (viewMode.value === 'history') {
+    void ensurePurchaseAssetsLoaded()
+  }
+})
+
+watch(
+  () => form.set,
+  (nextSet) => {
+    const normalizedSetCode = normalizeSetCode(nextSet)
+    form.set = nextSet.trim().toUpperCase()
+    void syncFormSetDetails(normalizedSetCode)
+  },
+)
+
+onMounted(() => {
+  void loadPurchases()
+})
 
 function openPurchaseModal() {
   successMessage.value = ''
@@ -552,7 +609,10 @@ async function loadPurchases() {
   try {
     const response = await $fetch<{ purchases: LoosterPurchaseRecord[] }>('/api/purchases')
     purchases.value = response.purchases ?? []
-    await Promise.all([loadPurchaseCardImages(), loadPurchaseSetImages()])
+
+    if (viewMode.value === 'history') {
+      void ensurePurchaseAssetsLoaded()
+    }
   } catch (error: any) {
     errorMessage.value = error?.data?.statusMessage ?? 'Failed to load purchases.'
   } finally {
@@ -560,42 +620,84 @@ async function loadPurchases() {
   }
 }
 
+async function ensurePurchaseAssetsLoaded() {
+  if (purchaseAssetsPromise) return purchaseAssetsPromise
+
+  purchaseAssetsPromise = Promise.all([
+    loadPurchaseCardImages(),
+    loadPurchaseSetImages(),
+  ]).then(() => undefined).finally(() => {
+    purchaseAssetsPromise = null
+  })
+
+  return purchaseAssetsPromise
+}
+
 async function loadPurchaseCardImages() {
-  const uniqueCards = [...new Set(
-    purchases.value.flatMap((purchase) => purchase.cards).filter(Boolean),
-  )]
+  const uniqueCards = [...new Map(
+    purchases.value
+      .flatMap((purchase) => purchase.cards.map((card) => ({
+        card,
+        setCode: purchase.set,
+      })))
+      .filter((entry) => entry.card)
+      .map((entry) => [getPurchaseCardLookupKeyByValues(entry.setCode, entry.card), entry] as const),
+  ).values()]
 
   if (uniqueCards.length === 0) {
-    purchaseCardImages.value = {}
+    loadingPurchaseCardImages.value = false
+    scryfallCardProgress.loaded = 0
+    scryfallCardProgress.total = 0
     return
   }
 
-  const cardsByName = await fetchCardsByName(uniqueCards)
-  const nextImages: Record<string, PurchaseCardImage> = {}
-  const nextSortMeta: Record<string, PurchaseCardSortMeta> = {}
+  loadingPurchaseCardImages.value = true
+  scryfallCardProgress.loaded = 0
+  scryfallCardProgress.total = uniqueCards.length
 
-  for (const cardName of uniqueCards) {
-    const card = cardsByName.get(cardName)
-    if (!card) continue
-
-    const smallUrl = getCardImageUrl(card, 'small')
-    const hoverUrl = getCardImageUrl(card, 'normal') ?? getCardImageUrl(card, 'large')
-    if (!smallUrl && !hoverUrl) continue
-
-    nextImages[cardName] = {
-      smallUrl: smallUrl ?? hoverUrl ?? '',
-      hoverUrl: hoverUrl ?? smallUrl ?? '',
-      scryfallUrl: card.scryfall_uri ?? '',
+  try {
+    const cardsByKey = await fetchCardsByIdentifiers(uniqueCards.map((entry) => ({
+      name: entry.card,
+      setCode: entry.setCode,
+    })), {
+      onProgress(loaded, total) {
+        scryfallCardProgress.loaded = loaded
+        scryfallCardProgress.total = total
+      },
+    })
+    const nextImages: Record<string, PurchaseCardImage> = {
+      ...purchaseCardImages.value,
+    }
+    const nextSortMeta: Record<string, PurchaseCardSortMeta> = {
+      ...purchaseCardSortMeta.value,
     }
 
-    nextSortMeta[cardName] = {
-      rarity: card.rarity ?? '',
-      colors: getCardSortColors(card),
+    for (const entry of uniqueCards) {
+      const lookupKey = getPurchaseCardLookupKeyByValues(entry.setCode, entry.card)
+      const card = cardsByKey.get(lookupKey)
+      if (!card) continue
+
+      const smallUrl = getCardImageUrl(card, 'small')
+      const hoverUrl = getCardImageUrl(card, 'normal') ?? getCardImageUrl(card, 'large')
+      if (!smallUrl && !hoverUrl) continue
+
+      nextImages[lookupKey] = {
+        smallUrl: smallUrl ?? hoverUrl ?? '',
+        hoverUrl: hoverUrl ?? smallUrl ?? '',
+        scryfallUrl: card.scryfall_uri ?? '',
+      }
+
+      nextSortMeta[lookupKey] = {
+        rarity: card.rarity ?? '',
+        colors: getCardSortColors(card),
+      }
     }
+
+    purchaseCardImages.value = nextImages
+    purchaseCardSortMeta.value = nextSortMeta
+  } finally {
+    loadingPurchaseCardImages.value = false
   }
-
-  purchaseCardImages.value = nextImages
-  purchaseCardSortMeta.value = nextSortMeta
 }
 
 async function loadPurchaseSetImages() {
@@ -604,7 +706,6 @@ async function loadPurchaseSetImages() {
   )] as string[]
 
   if (uniqueSetCodes.length === 0) {
-    purchaseSetImages.value = {}
     return
   }
 
@@ -613,7 +714,9 @@ async function loadPurchaseSetImages() {
     return [setCode, set] as const
   }))
 
-  const nextImages: Record<string, PurchaseSetImage> = {}
+  const nextImages: Record<string, PurchaseSetImage> = {
+    ...purchaseSetImages.value,
+  }
 
   for (const [setCode, set] of resolvedSets) {
     if (!set?.icon_svg_uri || !set?.scryfall_uri) continue
@@ -628,12 +731,12 @@ async function loadPurchaseSetImages() {
 }
 
 function getSortedPurchaseCards(purchase: LoosterPurchaseRecord) {
-  return [...purchase.cards].sort((left, right) => comparePurchaseCards(left, right))
+  return [...purchase.cards].sort((left, right) => comparePurchaseCards(left, right, purchase))
 }
 
-function comparePurchaseCards(left: string, right: string) {
-  const leftMeta = purchaseCardSortMeta.value[left]
-  const rightMeta = purchaseCardSortMeta.value[right]
+function comparePurchaseCards(left: string, right: string, purchase?: LoosterPurchaseRecord) {
+  const leftMeta = purchaseCardSortMeta.value[getPurchaseCardLookupKey(purchase, left)]
+  const rightMeta = purchaseCardSortMeta.value[getPurchaseCardLookupKey(purchase, right)]
 
   const rarityDiff = getRarityRank(leftMeta?.rarity) - getRarityRank(rightMeta?.rarity)
   if (rarityDiff !== 0) return rarityDiff
@@ -719,11 +822,6 @@ async function submitPurchase() {
     return
   }
 
-  if (projectedRemainingBalance.value < 0) {
-    errorMessage.value = 'This player does not have enough L-Points for a Looster.'
-    return
-  }
-
   savingPurchase.value = true
 
   try {
@@ -741,9 +839,7 @@ async function submitPurchase() {
     })
 
     successMessage.value = 'Purchase saved.'
-    form.set = ''
-    form.setName = ''
-    form.priceEuro = null
+    resetPurchaseFormSetFields()
     form.cardsText = ''
     form.date = today
     await loadPurchases()
@@ -900,6 +996,59 @@ function fmtEuro(value: number) {
 
 function round3(value: number) {
   return Math.round(value * 1000) / 1000
+}
+
+function normalizeSetCode(value: string) {
+  return value.trim().toLowerCase()
+}
+
+function getPurchaseCardLookupKeyByValues(setCode: string, cardName: string) {
+  return `${normalizeSetCode(setCode)}::${cardName.trim().toLowerCase()}`
+}
+
+function getPurchaseCardLookupKey(purchase: LoosterPurchaseRecord | undefined, cardName: string) {
+  return getPurchaseCardLookupKeyByValues(purchase?.set ?? '', cardName)
+}
+
+function getMostRecentPriceForSet(setCode: string) {
+  const normalizedSetCode = normalizeSetCode(setCode)
+  const match = purchases.value.find((purchase) => normalizeSetCode(purchase.set) === normalizedSetCode)
+  return match?.priceEuro ?? null
+}
+
+function resetPurchaseFormSetFields() {
+  form.set = ''
+  form.setName = ''
+  form.priceEuro = null
+  formAutofill.setName = ''
+  formAutofill.priceEuro = null
+}
+
+async function syncFormSetDetails(setCode: string) {
+  const requestId = ++setAutofillRequestId
+
+  if (!setCode) {
+    if (form.setName === formAutofill.setName) form.setName = ''
+    if (form.priceEuro === formAutofill.priceEuro) form.priceEuro = null
+    formAutofill.setName = ''
+    formAutofill.priceEuro = null
+    return
+  }
+
+  const recentPrice = getMostRecentPriceForSet(setCode)
+  if (form.priceEuro == null || form.priceEuro === formAutofill.priceEuro) {
+    form.priceEuro = recentPrice
+    formAutofill.priceEuro = recentPrice
+  }
+
+  const set = await fetchSetByCode(setCode)
+  if (requestId !== setAutofillRequestId) return
+
+  const nextSetName = set?.name ?? ''
+  if (!form.setName || form.setName === formAutofill.setName) {
+    form.setName = nextSetName
+    formAutofill.setName = nextSetName
+  }
 }
 </script>
 
@@ -1431,6 +1580,47 @@ function round3(value: number) {
   border: 1px solid rgba($color-primary-light, 0.1);
   text-align: center;
   font-size: $font-size-sm;
+}
+
+.shop-sync {
+  margin-bottom: $spacing-4;
+  padding: $spacing-4;
+  border-radius: $border-radius-lg;
+  border: 1px solid rgba($color-primary-light, 0.18);
+  background:
+    radial-gradient(circle at top right, rgba($color-primary, 0.18), transparent 45%),
+    linear-gradient(180deg, rgba(255, 255, 255, 0.04), rgba(255, 255, 255, 0.01));
+
+  &__meta {
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    gap: $spacing-3;
+    margin-bottom: $spacing-3;
+    font-size: $font-size-sm;
+    color: $color-text-muted;
+
+    strong {
+      color: $color-text;
+      font-weight: $font-weight-semibold;
+    }
+  }
+
+  &__bar {
+    overflow: hidden;
+    height: 10px;
+    border-radius: $border-radius-full;
+    background: rgba(255, 255, 255, 0.08);
+    border: 1px solid rgba($color-primary-light, 0.12);
+  }
+
+  &__bar-fill {
+    display: block;
+    height: 100%;
+    border-radius: inherit;
+    background: linear-gradient(90deg, rgba($color-primary, 0.75), rgba($color-primary-light, 0.95));
+    transition: width 0.2s ease;
+  }
 }
 
 .shop-import {

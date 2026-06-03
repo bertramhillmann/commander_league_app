@@ -62,7 +62,7 @@ export default defineEventHandler(async (event) => {
 
     const date = parsePurchaseDate(entry.date)
     const priceEuro = normalizeEuroPrice(entry.priceEuro)
-    const cards = await validateAndCanonicalizeOptionalCards(entry.cards)
+    const cards = await validateAndCanonicalizeOptionalCards(entry.cards, set)
 
     await ensurePlayerExists(playerName)
     await Player.updateOne(

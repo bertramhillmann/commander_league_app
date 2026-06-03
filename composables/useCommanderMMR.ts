@@ -80,9 +80,9 @@ export const COMMANDER_MMR_CONFIG = {
     enabled: true,
   },
   tiers: [
-    { tier: "god", minMMR: 2800, label: "God" },
-    { tier: "legend", minMMR: 2400, label: "Legend" },
-    { tier: "diamond", minMMR: 2100, label: "Diamond" },
+    { tier: "god", minMMR: 2600, label: "God" },
+    { tier: "legend", minMMR: 2300, label: "Legend" },
+    { tier: "diamond", minMMR: 2050, label: "Diamond" },
     { tier: "platinum", minMMR: 1850, label: "Platinum" },
     { tier: "gold", minMMR: 1600, label: "Gold" },
     { tier: "silver", minMMR: 1400, label: "Silver" },

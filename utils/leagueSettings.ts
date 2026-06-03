@@ -23,6 +23,7 @@ export const DEFAULT_PLAYER_RATING_MIN = 0
 export const DEFAULT_PLAYER_RATING_MAX = 4000
 export const DEFAULT_PLAYER_RATING_PROVISIONAL_GAMES = 10
 export const DEFAULT_PLAYER_RATING_MMR_POINT_MODIFIER_MAX = 50
+export const DEFAULT_PLAYER_RATING_LPOINT_MMR_MODIFIER_ENABLED = false
 
 export interface PlayerRatingWeights {
   recentPerformance: number
@@ -40,6 +41,9 @@ export interface PlayerRatingConfig {
   minRating: number
   maxRating: number
   provisionalGames: number
+  lPointMmrModifier: {
+    enabled: boolean
+  }
   commanderMMRPointModifier: {
     enabled: boolean
     maxModifierPercent: number
@@ -67,6 +71,9 @@ export interface LeagueSettingsDocument {
     minRating?: number
     maxRating?: number
     provisionalGames?: number
+    lPointMmrModifier?: {
+      enabled?: boolean
+    }
     commanderMMRPointModifier?: {
       enabled?: boolean
       maxModifierPercent?: number
@@ -150,6 +157,9 @@ export function getResolvedLeagueSettings(settings?: LeagueSettingsDocument | nu
         source?.playerRating?.provisionalGames,
         DEFAULT_PLAYER_RATING_PROVISIONAL_GAMES,
       ))),
+      lPointMmrModifier: {
+        enabled: source?.playerRating?.lPointMmrModifier?.enabled ?? DEFAULT_PLAYER_RATING_LPOINT_MMR_MODIFIER_ENABLED,
+      },
       commanderMMRPointModifier: {
         enabled: source?.playerRating?.commanderMMRPointModifier?.enabled ?? true,
         maxModifierPercent: Math.max(0, toNumberOr(

@@ -28,11 +28,11 @@
           <section class="rating-sidebar__overview">
             <div class="rating-sidebar__stats">
               <div class="rating-sidebar__stat">
-                <span class="rating-sidebar__stat-value">{{ fmt(comparisonDetail.target.rating) }}</span>
+                <span class="rating-sidebar__stat-value"><IconsPlayerRatingIcon :size="13" />{{ fmt(comparisonDetail.target.rating) }}</span>
                 <span class="rating-sidebar__stat-label">{{ comparisonDetail.target.playerName }} Rating</span>
               </div>
               <div class="rating-sidebar__stat">
-                <span class="rating-sidebar__stat-value">{{ fmt(comparisonDetail.viewer.rating) }}</span>
+                <span class="rating-sidebar__stat-value"><IconsPlayerRatingIcon :size="13" />{{ fmt(comparisonDetail.viewer.rating) }}</span>
                 <span class="rating-sidebar__stat-label">{{ comparisonDetail.viewer.playerName }} Rating</span>
               </div>
               <div class="rating-sidebar__stat">
@@ -114,7 +114,7 @@
           <section class="rating-sidebar__overview">
             <div class="rating-sidebar__stats">
               <div class="rating-sidebar__stat">
-                <span class="rating-sidebar__stat-value">{{ fmt(detail.rating) }}</span>
+                <span class="rating-sidebar__stat-value"><IconsPlayerRatingIcon :size="13" />{{ fmt(detail?.rating ?? 0) }}</span>
                 <span class="rating-sidebar__stat-label">Current Rating</span>
               </div>
               <div class="rating-sidebar__stat">
@@ -361,6 +361,7 @@ import type {
 import { buildPlayerRatingDetail } from '~/composables/usePlayerRating'
 import { useLeagueSettings } from '~/composables/useLeagueSettings'
 import { getCommanderLevelProgress } from '~/utils/commanderExperience'
+import { buildAveragePlayerRatingSeries } from '~/utils/playerRatingTimeline'
 import { useImageCache } from '~/composables/useImageCache'
 
 const props = defineProps<{
@@ -422,6 +423,20 @@ const compareDetail = computed<PlayerRatingDetail | null>(() => {
   })
 })
 
+const allPlayerRatingDetails = computed<PlayerRatingDetail[]>(() => {
+  if (!isPlayerRatingMode.value) return []
+
+  return Object.values(players.value)
+    .filter((player) => player.gamesPlayed > 0)
+    .map((player) => buildPlayerRatingDetail({
+      player,
+      players: players.value,
+      gameRecords: gameRecords.value,
+      games: chronologicalGames.value,
+      settings: settings.value,
+    }))
+})
+
 const leagueTimeline = computed(() =>
   chronologicalGames.value.map((game, index) => ({
     gameId: game.gameId,
@@ -432,13 +447,32 @@ const leagueTimeline = computed(() =>
 
 const historyLabels = computed(() => leagueTimeline.value.map((entry) => entry.label))
 
-const overallSeries = computed(() => [
-  {
-    name: 'Rating',
-    color: '#f59e0b',
-    data: buildAlignedRatingSeries(detail.value?.history ?? [], (entry) => entry.rating).data,
-  },
-])
+const averagePlayerRatingSeries = computed(() =>
+  buildAveragePlayerRatingSeries(
+    allPlayerRatingDetails.value,
+    leagueTimeline.value.map((entry) => entry.gameId),
+  ),
+)
+
+const overallSeries = computed(() => {
+  const series = [
+    {
+      name: 'Rating',
+      color: '#f59e0b',
+      data: buildAlignedRatingSeries(detail.value?.history ?? [], (entry) => entry.rating).data,
+    },
+  ]
+
+  if (averagePlayerRatingSeries.value.some((value) => value !== null)) {
+    series.push({
+      name: 'League Avg',
+      color: 'rgba(148, 163, 184, 0.3)',
+      data: averagePlayerRatingSeries.value,
+    })
+  }
+
+  return series
+})
 
 const factorKeys: PlayerRatingBreakdownKey[] = [
   'recentPerformance',
@@ -767,9 +801,13 @@ const playerRecords = computed(() =>
     )),
 )
 
+function getEarnedAchievementPoints(achievement: { id: string, points?: number | null }) {
+  return achievement.points ?? achievementDefs.value[achievement.id]?.points ?? 0
+}
+
 const achievementSummary = computed(() => {
   const achievements = playerRecords.value.flatMap((record) => record.achievements)
-  const totalPoints = achievements.reduce((sum, achievement) => sum + achievement.points, 0)
+  const totalPoints = achievements.reduce((sum, achievement) => sum + getEarnedAchievementPoints(achievement), 0)
   const uniqueAchievements = new Set(achievements.map((achievement) => achievement.id)).size
   const counts = new Map<string, number>()
   for (const achievement of achievements) {
@@ -790,7 +828,7 @@ const achievementTimeline = computed(() => {
   for (const record of playerRecords.value) {
     const gameDate = games.value.find((game) => game.gameId === record.gameId)?.date
     const week = getCalendarWeek(gameDate)
-    const earnedPoints = record.achievements.reduce((sum, achievement) => sum + achievement.points, 0)
+    const earnedPoints = record.achievements.reduce((sum, achievement) => sum + getEarnedAchievementPoints(achievement), 0)
     if (earnedPoints <= 0) continue
 
     const current = weeklyTotals.get(week.key) ?? {

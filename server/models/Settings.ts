@@ -7,6 +7,9 @@ export interface ISettings extends Document {
   playerRankingSystem?: 'classic' | 'player_rating_based'
   playerRating?: {
     provisionalGames?: number
+    lPointMmrModifier?: {
+      enabled?: boolean
+    }
     commanderMMRPointModifier?: {
       enabled?: boolean
       maxModifierPercent?: number

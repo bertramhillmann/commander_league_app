@@ -72,6 +72,7 @@ export interface PlayerGameRecord {
   placement: number
   basePoints: number
   lPoints: number
+  lPointModifier?: LPointModifierResult | null
   modifiers: ModifierResult[]
   finalPoints: number
   ratingBefore: number
@@ -88,6 +89,20 @@ export interface PlayerGameRecord {
   playerCount: number
   /** Achievements earned in this specific game */
   achievements: EarnedAchievement[]
+}
+
+export interface LPointModifierResult {
+  enabled: boolean
+  baseLPoints: number
+  adjustedLPoints: number
+  multiplier: number
+  percent: number
+  playerRatingBefore: number
+  podAveragePlayerRating: number
+  commanderMmrBefore: number
+  podAverageCommanderMmr: number
+  combinedRatio: number
+  reason: 'stronger_pod' | 'weaker_pod' | 'neutral_pod'
 }
 
 export interface PlayerState {
@@ -212,6 +227,52 @@ function createEmptyPlayerState(name: string): PlayerState {
     commanderTiers: {},
     earnedAchievements: [],
     achievementPoints: 0,
+  }
+}
+
+function calculateLPointModifier(
+  placement: number,
+  baseLPoints: number,
+  playerRatingBefore: number,
+  podAveragePlayerRating: number,
+  commanderMmrBefore: number,
+  podAverageCommanderMmr: number,
+  enabled: boolean,
+): LPointModifierResult | null {
+  if (!enabled || placement <= 1 || baseLPoints <= 0) return null
+
+  const safePlayerAverage = podAveragePlayerRating > 0 ? podAveragePlayerRating : 1
+  const safeCommanderAverage = podAverageCommanderMmr > 0 ? podAverageCommanderMmr : 1
+  const playerRatio = playerRatingBefore / safePlayerAverage
+  const commanderRatio = commanderMmrBefore / safeCommanderAverage
+  const combinedRatio = round3((playerRatio + commanderRatio) / 2)
+
+  let percent = 0
+  let reason: LPointModifierResult['reason'] = 'neutral_pod'
+
+  if (combinedRatio < 1) {
+    percent = Math.min(100, ((1 - combinedRatio) / 0.5) * 100)
+    reason = 'stronger_pod'
+  } else if (combinedRatio > 1) {
+    percent = -Math.min(100, ((combinedRatio - 1) / 1) * 100)
+    reason = 'weaker_pod'
+  }
+
+  const multiplier = round3(Math.max(0, 1 + (percent / 100)))
+  const adjustedLPoints = roundLoosterPoints(baseLPoints * multiplier)
+
+  return {
+    enabled,
+    baseLPoints,
+    adjustedLPoints,
+    multiplier,
+    percent: round3(percent),
+    playerRatingBefore: round3(playerRatingBefore),
+    podAveragePlayerRating: round3(podAveragePlayerRating),
+    commanderMmrBefore: round3(commanderMmrBefore),
+    podAverageCommanderMmr: round3(podAverageCommanderMmr),
+    combinedRatio,
+    reason,
   }
 }
 
@@ -1055,6 +1116,7 @@ export function useLeagueState() {
       const playerCommanderLastPlaceStreak: Record<string, Record<string, number>> = {}
       // Per-player per-commander: track 5 misses after a win without reaching top 2 (wither)
       const playerCommanderWitherData: Record<string, Record<string, { failures: number; active: boolean }>> = {}
+      const resolvedLeagueSettings = getResolvedLeagueSettings(rawSettings.value)
 
       // ── Game loop ───────────────────────────────────────────────────────────
 
@@ -1134,6 +1196,12 @@ export function useLeagueState() {
           rankBeforeMap[p.name] = entry?.rank ?? (rankBeforeList.length + 1)
           scoreBeforeMap[p.name] = entry?.totalScore ?? 0
         }
+        const podAveragePlayerRating = game.players.length > 0
+          ? round3(game.players.reduce((sum, player) => sum + (scoreBeforeMap[player.name] ?? 0), 0) / game.players.length)
+          : 0
+        const podAverageCommanderMmr = commanderMMRParticipants.length > 0
+          ? round3(commanderMMRParticipants.reduce((sum, participant) => sum + participant.currentMMR, 0) / commanderMMRParticipants.length)
+          : 0
 
         for (const [playerIndex, p] of computed.entries()) {
           const isWinner = p.placement === 1
@@ -1158,6 +1226,21 @@ export function useLeagueState() {
           const commanderMMRChange = commanderMMRParticipantId
             ? commanderMMRChangeMap[commanderMMRParticipantId]
             : undefined
+          const lPointModifier = calculateLPointModifier(
+            p.placement,
+            p.lPoints,
+            scoreBeforeMap[p.name] ?? 0,
+            podAveragePlayerRating,
+            commanderMMRChange?.oldMMR ?? getInitialCommanderMMR(),
+            podAverageCommanderMmr,
+            resolvedLeagueSettings.playerRankingSystem === 'player_rating_based'
+              && resolvedLeagueSettings.playerRating.lPointMmrModifier.enabled,
+          )
+          const adjustedLPoints = lPointModifier?.adjustedLPoints ?? p.lPoints
+          computed[playerIndex] = {
+            ...p,
+            lPoints: adjustedLPoints,
+          }
 
           if (!playerMap[p.name]) playerMap[p.name] = createEmptyPlayerState(p.name)
 
@@ -1183,7 +1266,8 @@ export function useLeagueState() {
             commander: p.commander,
             placement: p.placement,
             basePoints: p.points,
-            lPoints: p.lPoints,
+            lPoints: adjustedLPoints,
+            lPointModifier,
             modifiers,
             finalPoints,
             ratingBefore: scoreBeforeMap[p.name] ?? 0,
@@ -1439,7 +1523,7 @@ export function useLeagueState() {
           // Update player totals
           const ps = playerMap[p.name]
           ps.totalPoints = round3(ps.totalPoints + finalPoints)
-          ps.totalLPoints = roundLoosterPoints(ps.totalLPoints + p.lPoints)
+          ps.totalLPoints = roundLoosterPoints(ps.totalLPoints + adjustedLPoints)
           ps.totalBasePoints = round3(ps.totalBasePoints + p.points)
           if (p.placement === 1) ps.baseWins++
           ps.gamesPlayed++
@@ -1450,7 +1534,7 @@ export function useLeagueState() {
           const cs = commanderMap[p.commander]
           cs.totalPoints = round3(cs.totalPoints + finalPoints)
           cs.totalBasePoints = round3(cs.totalBasePoints + p.points)
-          cs.totalLPoints = roundLoosterPoints(cs.totalLPoints + p.lPoints)
+          cs.totalLPoints = roundLoosterPoints(cs.totalLPoints + adjustedLPoints)
           cs.gamesPlayed++
           if (isWinner) cs.wins++
           if (!cs.uniquePlayers.includes(p.name)) cs.uniquePlayers.push(p.name)
@@ -1718,7 +1802,7 @@ export function useLeagueState() {
   const standings = computed(() => buildLeagueStandings(
     players.value,
     rawSettings.value,
-    { games: games.value, gameRecords: gameRecords.value },
+    { games: [...games.value].sort(compareGamesChronological), gameRecords: gameRecords.value },
   ))
 
   async function refresh() {
@@ -1771,8 +1855,11 @@ function buildLeagueStandings(
 ): LeagueStanding[] {
   const resolvedSettings = getResolvedLeagueSettings(settings)
   const allPlayers = Object.values(playerMap)
+  const playerRatingStates = resolvedSettings.playerRankingSystem === 'player_rating_based' && context
+    ? buildPlayerRatingStatesFromRecords(playerMap, context.gameRecords)
+    : null
   const playerRatings = resolvedSettings.playerRankingSystem === 'player_rating_based' && context
-    ? calculatePlayerRatings(playerMap, context.gameRecords, context.games, settings)
+    ? calculatePlayerRatings(playerRatingStates ?? playerMap, context.gameRecords, context.games, settings)
     : null
 
   return allPlayers
@@ -1812,6 +1899,34 @@ function buildLeagueStandings(
       return a.name.localeCompare(b.name)
     })
     .map((player, index) => ({ ...player, rank: index + 1 }))
+}
+
+function buildPlayerRatingStatesFromRecords(
+  playerMap: Record<string, PlayerState>,
+  gameRecords: Record<string, Record<string, PlayerGameRecord>>,
+) {
+  return Object.fromEntries(
+    Object.keys(playerMap).map((playerName) => {
+      const records = Object.values(gameRecords[playerName] ?? {})
+      const earnedAchievements = records.flatMap((record) => record.achievements ?? [])
+
+      return [playerName, {
+        name: playerName,
+        gamesPlayed: records.length,
+        baseWins: records.filter((record) => record.placement === 1).length,
+        totalPoints: round3(records.reduce((sum, record) => sum + record.finalPoints, 0)),
+        achievementPoints: round3(earnedAchievements.reduce((sum, achievement) => sum + achievement.points, 0)),
+        earnedAchievements,
+      }]
+    }),
+  ) as Record<string, {
+    name: string
+    gamesPlayed: number
+    baseWins: number
+    totalPoints: number
+    achievementPoints: number
+    earnedAchievements: EarnedAchievement[]
+  }>
 }
 
 function extractGameIdNumber(gameId: string) {

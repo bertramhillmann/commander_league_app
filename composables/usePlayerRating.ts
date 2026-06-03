@@ -313,7 +313,7 @@ export function calculateRecentPerformanceScore(
         return context?.adjustedBaselinePoints ?? record.basePoints
       }),
   )
-  const rawValue = last10Average * 0.6 + last25Average * 0.3 + seasonAverage * 0.1
+  const rawValue = last10Average * 0.3 + last25Average * 0.6 + seasonAverage * 0.1
   return {
     rawValue,
     normalizedScore: normalizeScore(rawValue, 0, 1.8),
@@ -474,7 +474,7 @@ function buildFactorDetails(
         `last 10 avg: ${round3(factors.recentPerformance.last10Average ?? 0)}`,
         `last 25 avg: ${round3(factors.recentPerformance.last25Average ?? 0)}`,
         `current season avg: ${round3(factors.recentPerformance.seasonAverage ?? 0)}`,
-        'raw = last10*0.6 + last25*0.3 + season*0.1',
+        'raw = last10*0.3 + last25*0.6 + season*0.1',
       ],
     ),
     allTimePerformance: buildFactorDetail(
@@ -632,7 +632,7 @@ const FACTOR_META: Record<PlayerRatingBreakdownKey, { label: string, description
   recentPerformance: {
     label: 'Recent Form',
     description: 'Recent games matter most, with current-season form still contributing.',
-    formula: 'Normalize(last10*0.6 + last25*0.3 + season*0.1) × weight',
+    formula: 'Normalize(last10*0.3 + last25*0.6 + season*0.1) × weight',
   },
   allTimePerformance: {
     label: 'All-Time Performance',

@@ -21,8 +21,10 @@ import type { PlayerRatingSnapshot } from '~/composables/usePlayerRating'
 
 const props = withDefaults(defineProps<{
   points: PlayerRatingSnapshot[]
+  averageRatings?: Array<number | null>
   title?: string
 }>(), {
+  averageRatings: () => [],
   title: 'Player Rating Over Time',
 })
 
@@ -30,8 +32,11 @@ const canvasRef = ref<HTMLCanvasElement | null>(null)
 let chart: Chart | null = null
 
 const ratingBounds = computed(() => {
-  if (props.points.length === 0) return { min: 1400, max: 1600 }
-  const values = props.points.map((p) => p.rating)
+  const values = [
+    ...props.points.map((p) => p.rating),
+    ...props.averageRatings.filter((value): value is number => value !== null),
+  ]
+  if (values.length === 0) return { min: 1400, max: 1600 }
   const min = Math.min(...values)
   const max = Math.max(...values)
   if (min === max) return { min: min - 50, max: max + 50 }
@@ -39,7 +44,7 @@ const ratingBounds = computed(() => {
   return { min: min - pad, max: max + pad }
 })
 
-watch(() => props.points, async () => { await renderChart() }, { deep: true })
+watch(() => [props.points, props.averageRatings], async () => { await renderChart() }, { deep: true })
 onMounted(async () => { await renderChart() })
 onBeforeUnmount(() => { if (chart) chart.destroy() })
 
@@ -54,12 +59,30 @@ function buildConfig(): ChartConfiguration<'line'> {
   const labels = props.points.map((p, i) => `G${i + 1} · ${p.date}`)
   const ratings = props.points.map((p) => p.rating)
   const bounds = ratingBounds.value
+  const hasAverageComparison = props.averageRatings.length === props.points.length
+    && props.averageRatings.some((value) => value !== null)
 
   return {
     type: 'line',
     data: {
       labels,
       datasets: [
+        ...(hasAverageComparison
+          ? [{
+              label: 'League Avg Rating',
+              data: props.averageRatings,
+              borderColor: 'rgba(148, 163, 184, 0.3)',
+              backgroundColor: 'transparent',
+              tension: 0.28,
+              borderWidth: 1.7,
+              pointRadius: 0,
+              pointHoverRadius: 3,
+              pointHoverBackgroundColor: 'rgba(148, 163, 184, 0.45)',
+              pointHoverBorderColor: '#242438',
+              pointHoverBorderWidth: 0.8,
+              fill: false,
+            }]
+          : []),
         {
           label: 'Player Rating',
           data: ratings,
@@ -100,6 +123,9 @@ function buildConfig(): ChartConfiguration<'line'> {
               return point?.date ?? item.label
             },
             label(item: TooltipItem<'line'>) {
+              if (item.dataset.label === 'League Avg Rating') {
+                return `League Avg Rating ${fmt(item.parsed.y)}`
+              }
               const point = props.points[item.dataIndex]
               if (!point) return ''
               const bits = [`Rating ${fmt(point.rating)}`]

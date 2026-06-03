@@ -113,6 +113,13 @@
             <input v-model.number="form.playerRating.provisionalGames" type="number" step="1" min="1" class="form-input" />
           </label>
           <label class="toggle-field">
+            <input v-model="form.playerRating.lPointMmrModifier.enabled" type="checkbox" class="toggle-field__input" />
+            <span class="toggle-field__copy">
+              <span class="toggle-field__label">Use MMR-based L-Points modifier</span>
+              <span class="toggle-field__hint">For non-winning finishes, compare 50% player rating and 50% commander MMR against the pod average and adjust L-Points between -100% and +100%.</span>
+            </span>
+          </label>
+          <label class="toggle-field">
             <input v-model="form.playerRating.commanderMMRPointModifier.enabled" type="checkbox" class="toggle-field__input" />
             <span class="toggle-field__copy">
               <span class="toggle-field__label">Use commander MMR point modifier</span>
@@ -338,6 +345,9 @@ type EditableSettingsState = {
   playerRankingSystem: PlayerRankingSystem
   playerRating: {
     provisionalGames: number
+    lPointMmrModifier: {
+      enabled: boolean
+    }
     commanderMMRPointModifier: {
       enabled: boolean
       maxModifierPercent: number
@@ -505,6 +515,9 @@ function createEditableSettings(source: ReturnType<typeof getResolvedLeagueSetti
     playerRankingSystem: source.playerRankingSystem,
     playerRating: {
       provisionalGames: source.playerRating.provisionalGames,
+      lPointMmrModifier: {
+        enabled: source.playerRating.lPointMmrModifier.enabled,
+      },
       commanderMMRPointModifier: {
         enabled: source.playerRating.commanderMMRPointModifier.enabled,
         maxModifierPercent: source.playerRating.commanderMMRPointModifier.maxModifierPercent,
@@ -557,6 +570,7 @@ function applyEditableSettings(target: EditableSettingsState, source: ReturnType
   )
   target.playerRankingSystem = source.playerRankingSystem
   target.playerRating.provisionalGames = source.playerRating.provisionalGames
+  target.playerRating.lPointMmrModifier.enabled = source.playerRating.lPointMmrModifier.enabled
   target.playerRating.commanderMMRPointModifier.enabled = source.playerRating.commanderMMRPointModifier.enabled
   target.playerRating.commanderMMRPointModifier.maxModifierPercent = source.playerRating.commanderMMRPointModifier.maxModifierPercent
   target.playerRating.weights.recentPerformance = source.playerRating.weights.recentPerformance * 100
@@ -603,6 +617,9 @@ function toDocument(source: EditableSettingsState): LeagueSettingsDocument {
     playerRankingSystem: source.playerRankingSystem,
     playerRating: {
       provisionalGames: sanitizeInteger(source.playerRating.provisionalGames),
+      lPointMmrModifier: {
+        enabled: source.playerRating.lPointMmrModifier.enabled,
+      },
       commanderMMRPointModifier: {
         enabled: source.playerRating.commanderMMRPointModifier.enabled,
         maxModifierPercent: sanitizePositiveNumber(source.playerRating.commanderMMRPointModifier.maxModifierPercent),

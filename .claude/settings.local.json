@@ -14,7 +14,8 @@
       "Bash(Select-Object -Last 300)",
       "Bash(Out-String)",
       "Bash(Get-ChildItem -Path \"c:\\\\Users\\\\bertr\\\\Desktop\\\\Work\\\\cmd_app\\\\assets\\\\img\\\\icons\" -File)",
-      "Bash(Select-Object -ExpandProperty Name)"
+      "Bash(Select-Object -ExpandProperty Name)",
+      "Bash(Copy-Item \"c:\\\\Users\\\\bertr\\\\Desktop\\\\Work\\\\cmd_app\\\\assets\\\\img\\\\icons\\\\favicon.png\" -Destination \"c:\\\\Users\\\\bertr\\\\Desktop\\\\Work\\\\cmd_app\\\\public\\\\favicon.png\" -Force)"
     ]
   }
 }

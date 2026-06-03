@@ -26,6 +26,11 @@
           :class="record.lPoints > 0 ? 'game-info__value--lp' : 'game-info__value--muted'"
         >{{ fmt(record.lPoints) }}</span>
       </div>
+      <div v-if="lPointModifierSummary" class="game-info__row game-info__row--stacked">
+        <span class="game-info__label">L-Points modifier</span>
+        <span class="game-info__value" :class="lPointModifierClass">{{ lPointModifierSummary }}</span>
+        <span class="game-info__subvalue">{{ lPointModifierDetail }}</span>
+      </div>
     </div>
 
     <div class="game-info__section">
@@ -159,6 +164,27 @@ const commanderTier = computed((): Tier | null => {
   return getCommanderTierFromMMR(record.value.commanderMMRAfter) as Tier
 })
 
+const lPointModifierSummary = computed(() => {
+  const modifier = record.value?.lPointModifier
+  if (!modifier?.enabled) return ''
+
+  const percentLabel = modifier.percent > 0 ? `+${fmt(modifier.percent)}` : fmt(modifier.percent)
+  return `${percentLabel}% (${fmt(modifier.baseLPoints)} -> ${fmt(modifier.adjustedLPoints)})`
+})
+
+const lPointModifierDetail = computed(() => {
+  const modifier = record.value?.lPointModifier
+  if (!modifier?.enabled) return ''
+
+  const reasonLabel = modifier.reason === 'stronger_pod'
+    ? 'Tougher pod bonus'
+    : modifier.reason === 'weaker_pod'
+      ? 'Softer pod reduction'
+      : 'Neutral pod'
+
+  return `${reasonLabel}: player ${fmt(modifier.playerRatingBefore)} vs ${fmt(modifier.podAveragePlayerRating)} avg, commander ${fmt(modifier.commanderMmrBefore)} vs ${fmt(modifier.podAverageCommanderMmr)} avg`
+})
+
 // ── Rank change ───────────────────────────────────────────────────────────────
 
 // positive = rose (lower number = better rank), negative = dropped
@@ -183,6 +209,13 @@ const commanderMmrDeltaClass = computed(() => {
   if (!record.value) return 'game-info__value--muted'
   if (record.value.commanderMMRDelta > 0) return 'game-info__mmr--up'
   if (record.value.commanderMMRDelta < 0) return 'game-info__mmr--down'
+  return 'game-info__value--muted'
+})
+
+const lPointModifierClass = computed(() => {
+  const percent = record.value?.lPointModifier?.percent ?? 0
+  if (percent > 0) return 'game-info__value--lp-mod-up'
+  if (percent < 0) return 'game-info__value--lp-mod-down'
   return 'game-info__value--muted'
 })
 
@@ -322,7 +355,15 @@ function round3(n: number): number {
 
     &--pts { color: $color-secondary; }
     &--lp  { color: $color-danger; }
+    &--lp-mod-up { color: rgba($color-success, 0.9); }
+    &--lp-mod-down { color: rgba($color-danger, 0.9); }
     &--muted { color: $color-text-muted; }
+  }
+
+  &__subvalue {
+    color: rgba($color-text-muted, 0.82);
+    font-size: 10px;
+    line-height: 1.35;
   }
 
   &__modifier-val {

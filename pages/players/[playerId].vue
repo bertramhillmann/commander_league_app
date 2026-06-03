@@ -97,10 +97,10 @@
             title="Click for full rating breakdown"
             @click="openRatingSidebar"
           >
-            {{ fmt(totalScore) }}
+            <IconsPlayerRatingIcon :size="28" style="margin-right: 3px" />{{ fmt(totalScore) }}
           </button>
           <span v-else class="player__stat-val player__stat-val--total" :title="playerRatingTooltip">
-            {{ fmt(totalScore) }}
+            <IconsPlayerRatingIcon :size="28" style="margin-right: 3px" />{{ fmt(totalScore) }}
           </span>
           <span class="player__stat-lbl">{{ totalScoreLabel }}</span>
         </div>
@@ -204,6 +204,7 @@
           <ChartsPlayerRatingTimeline
             v-else-if="activePlayerChart === 'rating'"
             :points="playerRatingDetail?.history ?? []"
+            :average-ratings="playerAverageRatingComparison"
           />
           <ChartsPlayerMatchTimeline
             v-else
@@ -803,6 +804,7 @@ import { buildCommanderMMRTimeline, buildCommanderPlacementTimeline, type Comman
 import { buildPlayerLeagueTimeline } from '~/utils/playerLeagueTimeline'
 import { buildPlayerMatchTimeline } from '~/utils/playerMatchTimeline'
 import { buildPlayerRatingDetail } from '~/composables/usePlayerRating'
+import { buildAveragePlayerRatingSeries } from '~/utils/playerRatingTimeline'
 import { buildPlacementPrognosis } from '~/utils/placementPrognosis'
 import { formatPlayerName } from '~/utils/playerNames'
 import { normalizeDeckIdentityKey } from '~/utils/deckLinks'
@@ -864,6 +866,33 @@ const playerRatingDetail = computed(() => {
     gameRecords: gameRecords.value,
     games: chronologicalGames.value,
   })
+})
+
+const allPlayerRatingDetails = computed(() => {
+  if (playerRankingSystem.value !== 'player_rating_based') return []
+
+  return Object.values(players.value)
+    .filter((playerState) => playerState.gamesPlayed > 0)
+    .map((playerState) => buildPlayerRatingDetail({
+      player: playerState,
+      players: players.value,
+      gameRecords: gameRecords.value,
+      games: chronologicalGames.value,
+      settings: leagueSettings.value,
+    }))
+})
+
+const playerAverageRatingComparison = computed(() => {
+  if (playerRankingSystem.value !== 'player_rating_based') return []
+
+  const playerHistory = playerRatingDetail.value?.history ?? []
+  if (playerHistory.length === 0) return []
+
+  const timelineGameIds = chronologicalGames.value.map((game) => game.gameId)
+  const averageSeries = buildAveragePlayerRatingSeries(allPlayerRatingDetails.value, timelineGameIds)
+  const averageByGameId = new Map(timelineGameIds.map((gameId, index) => [gameId, averageSeries[index] ?? null]))
+
+  return playerHistory.map((snapshot) => averageByGameId.get(snapshot.gameId) ?? null)
 })
 const playerArchEnemy = computed(() =>
   getArchEnemySummary(playerId.value, chronologicalGames.value, gameRecords.value),
@@ -2210,6 +2239,8 @@ function getEdgeTooltipText(cmd: CommanderRow) {
   }
 
   &__stat-val {
+    display: inline-flex;
+    align-items: center;
     font-size: $font-size-xl;
     font-weight: $font-weight-bold;
     color: $color-text;
@@ -3485,6 +3516,8 @@ function getEdgeTooltipText(cmd: CommanderRow) {
   padding: 0;
   background: transparent;
   cursor: pointer;
+  display: inline-flex;
+  align-items: center;
   text-decoration: underline;
   text-decoration-color: rgba($color-primary-light, 0.3);
   text-underline-offset: 0.2em;

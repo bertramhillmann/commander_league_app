@@ -14,18 +14,20 @@ export function parseCardListInput(cards: string[] | string | undefined) {
     .filter(Boolean)
 }
 
-export async function validateAndCanonicalizeCards(cards: string[] | string | undefined) {
+export async function validateAndCanonicalizeCards(cards: string[] | string | undefined, setCode?: string) {
   const requestedCards = normalizeCardNames(parseCardListInput(cards))
   if (requestedCards.length === 0) {
     throw createError({ statusCode: 400, statusMessage: 'At least one card is required' })
   }
 
-  const lookup = await fetchCardsByName(requestedCards)
+  const lookup = await fetchCardsByName(requestedCards, { setCode })
   const invalidCards = requestedCards.filter((card) => !lookup.get(card))
   if (invalidCards.length > 0) {
     throw createError({
       statusCode: 400,
-      statusMessage: `Unknown card names: ${invalidCards.join(', ')}`,
+      statusMessage: setCode
+        ? `Unknown card names for set ${setCode}: ${invalidCards.join(', ')}`
+        : `Unknown card names: ${invalidCards.join(', ')}`,
     })
   }
 
@@ -34,16 +36,18 @@ export async function validateAndCanonicalizeCards(cards: string[] | string | un
   )
 }
 
-export async function validateAndCanonicalizeOptionalCards(cards: string[] | string | undefined) {
+export async function validateAndCanonicalizeOptionalCards(cards: string[] | string | undefined, setCode?: string) {
   const requestedCards = normalizeCardNames(parseCardListInput(cards))
   if (requestedCards.length === 0) return []
 
-  const lookup = await fetchCardsByName(requestedCards)
+  const lookup = await fetchCardsByName(requestedCards, { setCode })
   const invalidCards = requestedCards.filter((card) => !lookup.get(card))
   if (invalidCards.length > 0) {
     throw createError({
       statusCode: 400,
-      statusMessage: `Unknown card names: ${invalidCards.join(', ')}`,
+      statusMessage: setCode
+        ? `Unknown card names for set ${setCode}: ${invalidCards.join(', ')}`
+        : `Unknown card names: ${invalidCards.join(', ')}`,
     })
   }
 

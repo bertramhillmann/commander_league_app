@@ -1,5 +1,7 @@
 const BASE_URL = 'https://api.scryfall.com'
 const COLLECTION_CHUNK_SIZE = 75
+const CARD_STORAGE_KEY = 'scryfall-card-cache:v1'
+const SET_STORAGE_KEY = 'scryfall-set-cache:v1'
 
 export interface ScryfallCard {
   id: string
@@ -33,6 +35,20 @@ interface ScryfallCollectionResponse {
   data: ScryfallCard[]
 }
 
+interface ScryfallSearchResponse {
+  data: ScryfallCard[]
+}
+
+interface FetchCardsByNameOptions {
+  onProgress?: (loaded: number, total: number) => void
+  setCode?: string
+}
+
+export interface ScryfallCardIdentifier {
+  name: string
+  setCode?: string
+}
+
 export interface ScryfallSet {
   code: string
   name: string
@@ -44,9 +60,103 @@ export interface ScryfallSet {
 // Module-level cache persists for the lifetime of the page.
 const cache = new Map<string, ScryfallCard | null>()
 const setCache = new Map<string, ScryfallSet | null>()
+const pendingCardRequests = new Map<string, Promise<ScryfallCard | null>>()
+const pendingSetRequests = new Map<string, Promise<ScryfallSet | null>>()
+let browserCacheHydrated = false
 
 function normalizeCardName(name: string) {
   return name.trim().toLowerCase()
+}
+
+function normalizeSetCode(code: string) {
+  return code.trim().toLowerCase()
+}
+
+function getCardCacheKey(name: string, setCode?: string) {
+  const normalizedName = normalizeCardName(name)
+  const normalizedSetCode = normalizeSetCode(setCode ?? '')
+  return normalizedSetCode ? `${normalizedSetCode}::${normalizedName}` : normalizedName
+}
+
+function escapeScryfallQueryValue(value: string) {
+  return value.replace(/\\/g, '\\\\').replace(/"/g, '\\"')
+}
+
+function loadBrowserCache() {
+  if (browserCacheHydrated || !import.meta.client) return
+
+  browserCacheHydrated = true
+
+  try {
+    const storedCards = localStorage.getItem(CARD_STORAGE_KEY)
+    if (storedCards) {
+      const parsedCards = JSON.parse(storedCards) as Record<string, ScryfallCard | null>
+      for (const [name, card] of Object.entries(parsedCards)) {
+        cache.set(name, card)
+      }
+    }
+  } catch {
+    localStorage.removeItem(CARD_STORAGE_KEY)
+  }
+
+  try {
+    const storedSets = localStorage.getItem(SET_STORAGE_KEY)
+    if (storedSets) {
+      const parsedSets = JSON.parse(storedSets) as Record<string, ScryfallSet | null>
+      for (const [code, set] of Object.entries(parsedSets)) {
+        setCache.set(code, set)
+      }
+    }
+  } catch {
+    localStorage.removeItem(SET_STORAGE_KEY)
+  }
+}
+
+function persistBrowserCardCache() {
+  if (!import.meta.client) return
+
+  try {
+    localStorage.setItem(CARD_STORAGE_KEY, JSON.stringify(Object.fromEntries(cache.entries())))
+  } catch {
+    // Ignore storage quota issues and continue with the in-memory cache.
+  }
+}
+
+function persistBrowserSetCache() {
+  if (!import.meta.client) return
+
+  try {
+    localStorage.setItem(SET_STORAGE_KEY, JSON.stringify(Object.fromEntries(setCache.entries())))
+  } catch {
+    // Ignore storage quota issues and continue with the in-memory cache.
+  }
+}
+
+function setCardCache(cacheKey: string, card: ScryfallCard | null, persist = true) {
+  loadBrowserCache()
+  cache.set(cacheKey, card)
+  if (persist) persistBrowserCardCache()
+}
+
+function getCachedCard(name: string) {
+  loadBrowserCache()
+  return cache.get(getCardCacheKey(name))
+}
+
+function getCachedCardBySet(name: string, setCode?: string) {
+  loadBrowserCache()
+  return cache.get(getCardCacheKey(name, setCode))
+}
+
+function setSetCacheEntry(code: string, set: ScryfallSet | null, persist = true) {
+  loadBrowserCache()
+  setCache.set(normalizeSetCode(code), set)
+  if (persist) persistBrowserSetCache()
+}
+
+function getCachedSet(code: string) {
+  loadBrowserCache()
+  return setCache.get(normalizeSetCode(code))
 }
 
 function chunk<T>(items: T[], size: number) {
@@ -59,71 +169,199 @@ function chunk<T>(items: T[], size: number) {
   return chunks
 }
 
+async function requestCardByName(name: string, setCode?: string) {
+  if (setCode) {
+    const normalizedSetCode = normalizeSetCode(setCode)
+
+    try {
+      const response = await $fetch<ScryfallCollectionResponse>(`${BASE_URL}/cards/collection`, {
+        method: 'POST',
+        body: {
+          identifiers: [{ name, set: normalizedSetCode }],
+        },
+      })
+
+      const match = response.data.find((card) => (
+        normalizeCardName(card.name) === normalizeCardName(name)
+        && normalizeSetCode(card.set) === normalizedSetCode
+      )) ?? null
+
+      if (match) return match
+    } catch {
+      // Fall back to a set-scoped search below.
+    }
+
+    try {
+      const response = await $fetch<ScryfallSearchResponse>(`${BASE_URL}/cards/search`, {
+        params: {
+          q: `!"${escapeScryfallQueryValue(name)}" set:${normalizedSetCode}`,
+        },
+      })
+
+      const match = response.data.find((card) => (
+        normalizeCardName(card.name) === normalizeCardName(name)
+        && normalizeSetCode(card.set) === normalizedSetCode
+      )) ?? null
+
+      return match
+    } catch {
+      return null
+    }
+  }
+
+  try {
+    return await $fetch<ScryfallCard>(`${BASE_URL}/cards/named`, {
+      params: { fuzzy: name },
+    })
+  } catch {
+    return null
+  }
+}
+
 /**
  * Fetch a card by exact or fuzzy name match.
  * Returns null when the card is not found.
  */
-export async function fetchCardByName(name: string): Promise<ScryfallCard | null> {
-  if (cache.has(name)) return cache.get(name)!
+export async function fetchCardByName(name: string, setCode?: string): Promise<ScryfallCard | null> {
+  const cacheKey = getCardCacheKey(name, setCode)
+  const cachedCard = getCachedCardBySet(name, setCode)
+  if (cachedCard !== undefined) return cachedCard
 
-  try {
-    const data = await $fetch<ScryfallCard>(`${BASE_URL}/cards/named`, {
-      params: { fuzzy: name },
+  const existingRequest = pendingCardRequests.get(cacheKey)
+  if (existingRequest) return existingRequest
+
+  const request = requestCardByName(name, setCode)
+    .then((data) => {
+      setCardCache(cacheKey, data)
+      return data
     })
-    cache.set(name, data)
-    return data
-  } catch {
-    cache.set(name, null)
-    return null
+    .finally(() => {
+      pendingCardRequests.delete(cacheKey)
+    })
+
+  pendingCardRequests.set(cacheKey, request)
+  return request
+}
+
+export async function fetchCardsByIdentifiers(
+  identifiers: ScryfallCardIdentifier[],
+  options: Pick<FetchCardsByNameOptions, 'onProgress'> = {},
+): Promise<Map<string, ScryfallCard | null>> {
+  const uniqueIdentifiers = [...new Map(
+    identifiers
+      .map((identifier) => ({
+        name: identifier.name.trim(),
+        setCode: normalizeSetCode(identifier.setCode ?? ''),
+      }))
+      .filter((identifier) => identifier.name)
+      .map((identifier) => [getCardCacheKey(identifier.name, identifier.setCode), identifier] as const),
+  ).values()]
+  const results = new Map<string, ScryfallCard | null>()
+  let loaded = 0
+
+  const reportProgress = () => {
+    options.onProgress?.(loaded, uniqueIdentifiers.length)
   }
+
+  if (uniqueIdentifiers.length === 0) return results
+
+  loadBrowserCache()
+
+  const uncachedIdentifiers = uniqueIdentifiers.filter((identifier) => {
+    const cachedCard = getCachedCardBySet(identifier.name, identifier.setCode)
+
+    if (cachedCard !== undefined) {
+      results.set(getCardCacheKey(identifier.name, identifier.setCode), cachedCard)
+      loaded += 1
+      return false
+    }
+
+    return true
+  })
+
+  reportProgress()
+
+  for (const identifiersChunk of chunk(uncachedIdentifiers, COLLECTION_CHUNK_SIZE)) {
+    try {
+      const response = await $fetch<ScryfallCollectionResponse>(`${BASE_URL}/cards/collection`, {
+        method: 'POST',
+        body: {
+          identifiers: identifiersChunk.map((identifier) => (
+            identifier.setCode
+              ? { name: identifier.name, set: identifier.setCode }
+              : { name: identifier.name }
+          )),
+        },
+      })
+
+      for (const identifier of identifiersChunk) {
+        const match = response.data.find((card) => (
+          normalizeCardName(card.name) === normalizeCardName(identifier.name)
+          && (!identifier.setCode || normalizeSetCode(card.set) === identifier.setCode)
+        )) ?? null
+        const cacheKey = getCardCacheKey(identifier.name, identifier.setCode)
+
+        if (match) {
+          setCardCache(cacheKey, match, false)
+          results.set(cacheKey, match)
+          loaded += 1
+          continue
+        }
+
+        if (pendingCardRequests.has(cacheKey)) {
+          const card = await pendingCardRequests.get(cacheKey)!
+          results.set(cacheKey, card)
+          loaded += 1
+          continue
+        }
+
+        const card = await fetchCardByName(identifier.name, identifier.setCode)
+        results.set(cacheKey, card)
+        loaded += 1
+      }
+
+      persistBrowserCardCache()
+      reportProgress()
+    } catch {
+      const chunkResults = await Promise.all(identifiersChunk.map(async (identifier) => {
+        const card = await fetchCardByName(identifier.name, identifier.setCode)
+        loaded += 1
+        reportProgress()
+        return [getCardCacheKey(identifier.name, identifier.setCode), card] as const
+      }))
+
+      for (const [cacheKey, card] of chunkResults) {
+        results.set(cacheKey, card)
+      }
+    }
+  }
+
+  for (const identifier of uniqueIdentifiers) {
+    const cacheKey = getCardCacheKey(identifier.name, identifier.setCode)
+    if (results.has(cacheKey)) continue
+    results.set(cacheKey, getCachedCardBySet(identifier.name, identifier.setCode) ?? null)
+  }
+
+  return results
 }
 
 /**
  * Fetch many cards at once through Scryfall's collection endpoint.
  * Falls back to fuzzy single-card lookups for any unresolved chunk.
  */
-export async function fetchCardsByName(names: string[]): Promise<Map<string, ScryfallCard | null>> {
+export async function fetchCardsByName(
+  names: string[],
+  options: FetchCardsByNameOptions = {},
+): Promise<Map<string, ScryfallCard | null>> {
   const uniqueNames = [...new Set(names.map((name) => name.trim()).filter(Boolean))]
+  const identifierResults = await fetchCardsByIdentifiers(
+    uniqueNames.map((name) => ({ name, setCode: options.setCode })),
+    { onProgress: options.onProgress },
+  )
   const results = new Map<string, ScryfallCard | null>()
 
-  if (uniqueNames.length === 0) return results
-
-  const uncachedNames = uniqueNames.filter((name) => !cache.has(name))
-
-  for (const namesChunk of chunk(uncachedNames, COLLECTION_CHUNK_SIZE)) {
-    try {
-      const response = await $fetch<ScryfallCollectionResponse>(`${BASE_URL}/cards/collection`, {
-        method: 'POST',
-        body: {
-          identifiers: namesChunk.map((name) => ({ name })),
-        },
-      })
-
-      const cardsByName = new Map(
-        response.data.map((card) => [normalizeCardName(card.name), card] as const),
-      )
-
-      for (const requestedName of namesChunk) {
-        const match = cardsByName.get(normalizeCardName(requestedName)) ?? null
-
-        if (match) {
-          cache.set(requestedName, match)
-          continue
-        }
-
-        await fetchCardByName(requestedName)
-      }
-    } catch {
-      await Promise.all(namesChunk.map(async (name) => {
-        if (!cache.has(name)) {
-          await fetchCardByName(name)
-        }
-      }))
-    }
-  }
-
   for (const name of uniqueNames) {
-    results.set(name, cache.get(name) ?? null)
+    results.set(name, identifierResults.get(getCardCacheKey(name, options.setCode)) ?? null)
   }
 
   return results
@@ -134,19 +372,30 @@ export async function fetchCardsByName(names: string[]): Promise<Map<string, Scr
  * Returns null when the set is not found.
  */
 export async function fetchSetByCode(code: string): Promise<ScryfallSet | null> {
-  const normalizedCode = code.trim().toLowerCase()
+  const normalizedCode = normalizeSetCode(code)
 
   if (!normalizedCode) return null
-  if (setCache.has(normalizedCode)) return setCache.get(normalizedCode)!
+  const cachedSet = getCachedSet(code)
+  if (cachedSet !== undefined) return cachedSet
 
-  try {
-    const data = await $fetch<ScryfallSet>(`${BASE_URL}/sets/${normalizedCode}`)
-    setCache.set(normalizedCode, data)
-    return data
-  } catch {
-    setCache.set(normalizedCode, null)
-    return null
-  }
+  const existingRequest = pendingSetRequests.get(normalizedCode)
+  if (existingRequest) return existingRequest
+
+  const request = $fetch<ScryfallSet>(`${BASE_URL}/sets/${normalizedCode}`)
+    .then((data) => {
+      setSetCacheEntry(normalizedCode, data)
+      return data
+    })
+    .catch(() => {
+      setSetCacheEntry(normalizedCode, null)
+      return null
+    })
+    .finally(() => {
+      pendingSetRequests.delete(normalizedCode)
+    })
+
+  pendingSetRequests.set(normalizedCode, request)
+  return request
 }
 
 /**
