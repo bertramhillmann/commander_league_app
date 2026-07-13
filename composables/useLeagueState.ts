@@ -16,7 +16,9 @@ import { getArchEnemySummary } from '~/utils/archEnemy'
 import { getFeaturedPlayerName } from '~/utils/featuredPlayer'
 import { normalizeDeckIdentityKey } from '~/utils/deckLinks'
 import {
+  buildLeagueSeasonRanges,
   getResolvedLeagueSettings,
+  hasActiveSeasonalRanking,
   MIN_GAMES_FOR_PENALTY_MODE,
   type LeagueSettingsDocument,
   type PlayerRankingSystem,
@@ -156,6 +158,8 @@ export interface LeagueStanding {
   baseWins: number
   avgPerGame: number
   totalLPoints: number
+  seasonScores?: Array<number | null>
+  playedSeasonCount?: number
 }
 
 export interface LeagueSnapshotEntry {
@@ -290,6 +294,73 @@ export function compareGamesChronological(
   const dateDiff = gameDayValue(a.date) - gameDayValue(b.date)
   if (dateDiff !== 0) return dateDiff
   return compareGameIdsAscending(a.gameId, b.gameId)
+}
+
+export function calculatePlayerSeasonAverages(
+  playerName: string,
+  games: ProcessedGame[],
+  gameRecords: Record<string, Record<string, PlayerGameRecord>>,
+  settings?: LeagueSettingsDocument | null,
+  referenceDate = new Date(),
+) {
+  const seasonalRanking = getResolvedLeagueSettings(settings).standings.seasonalRanking
+  if (!hasActiveSeasonalRanking(seasonalRanking)) {
+    return {
+      enabled: false,
+      totalAverage: 0,
+      playedSeasonCount: 0,
+      seasonScores: [] as Array<number | null>,
+      seasons: [] as Array<{ label: string; startDate: string; endDate: string; started: boolean; score: number | null }>,
+    }
+  }
+
+  const seasons = buildLeagueSeasonRanges(seasonalRanking)
+  const referenceMs = referenceDate.getTime()
+  const playerRecords = gameRecords[playerName] ?? {}
+  const timestampByGameId = new Map(
+    games.map((game) => {
+      const timestamp = new Date(game.date).getTime()
+      return [game.gameId, Number.isNaN(timestamp) ? null : timestamp] as const
+    }),
+  )
+
+  const seasonEntries = seasons.map((season) => {
+    const started = season.startMs <= referenceMs
+    if (!started) {
+      return { ...season, started, score: null as number | null }
+    }
+
+    const seasonRecords = Object.values(playerRecords).filter((record) => {
+      const timestamp = timestampByGameId.get(record.gameId)
+      return timestamp !== null && timestamp !== undefined && timestamp >= season.startMs && timestamp <= season.endMs
+    })
+    const score = seasonRecords.length > 0
+      ? round3(seasonRecords.reduce((sum, record) => sum + record.finalPoints, 0) / seasonRecords.length)
+      : 0
+
+    return { ...season, started, score }
+  })
+
+  const playedSeasonScores = seasonEntries
+    .filter((season) => season.started)
+    .map((season) => season.score ?? 0)
+  const totalAverage = playedSeasonScores.length > 0
+    ? round3(playedSeasonScores.reduce((sum, score) => sum + score, 0) / playedSeasonScores.length)
+    : 0
+
+  return {
+    enabled: true,
+    totalAverage,
+    playedSeasonCount: playedSeasonScores.length,
+    seasonScores: seasonEntries.map((season) => season.score),
+    seasons: seasonEntries.map((season) => ({
+      label: season.label,
+      startDate: season.startDate,
+      endDate: season.endDate,
+      started: season.started,
+      score: season.score,
+    })),
+  }
 }
 
 export function compareGamesForDisplay(
@@ -1234,6 +1305,7 @@ export function useLeagueState() {
             commanderMMRChange?.oldMMR ?? getInitialCommanderMMR(),
             podAverageCommanderMmr,
             resolvedLeagueSettings.playerRankingSystem === 'player_rating_based'
+              && !resolvedLeagueSettings.playerRating.simpleMmr.enabled
               && resolvedLeagueSettings.playerRating.lPointMmrModifier.enabled,
           )
           const adjustedLPoints = lPointModifier?.adjustedLPoints ?? p.lPoints
@@ -1866,8 +1938,13 @@ function buildLeagueStandings(
     .map((player) => {
       const classicMetrics = getLeagueStandingMetrics(player, playerMap, settings, context)
       const ratingResult = playerRatings?.[player.name]
+      const seasonAverages = context
+        ? calculatePlayerSeasonAverages(player.name, context.games, context.gameRecords, settings)
+        : null
       const totalScore = resolvedSettings.playerRankingSystem === 'player_rating_based'
         ? ratingResult?.rating ?? 0
+        : seasonAverages?.enabled
+          ? seasonAverages.totalAverage
         : classicMetrics.totalScore
 
       return {
@@ -1892,6 +1969,8 @@ function buildLeagueStandings(
         baseWins: classicMetrics.baseWins,
         avgPerGame: classicMetrics.avgPerGame,
         totalLPoints: classicMetrics.totalLPoints,
+        seasonScores: seasonAverages?.seasonScores ?? [],
+        playedSeasonCount: seasonAverages?.playedSeasonCount ?? 0,
       }
     })
     .sort((a, b) => {

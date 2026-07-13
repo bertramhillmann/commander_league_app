@@ -24,10 +24,32 @@ export const DEFAULT_PLAYER_RATING_MAX = 4000
 export const DEFAULT_PLAYER_RATING_PROVISIONAL_GAMES = 10
 export const DEFAULT_PLAYER_RATING_MMR_POINT_MODIFIER_MAX = 50
 export const DEFAULT_PLAYER_RATING_LPOINT_MMR_MODIFIER_ENABLED = false
+export const DEFAULT_PLAYER_RATING_SIMPLE_MMR_ENABLED = false
+export const DEFAULT_PLAYER_RATING_TOP_COMMANDERS_FOR_AVERAGE_MMR = 3
+export const DEFAULT_PLAYER_RATING_MIN_GAMES_FOR_AVERAGE_COMMANDER_MMR = 10
+export const DEFAULT_PLAYER_RATING_MISSING_COMMANDER_MMR = 0
+export const DEFAULT_STANDINGS_SEASON_COUNT = 4
+
+export interface StandingsSeasonalRankingConfig {
+  enabled: boolean
+  leagueStartDate: string
+  leagueEndDate: string
+  seasonCount: number
+}
+
+export interface LeagueSeasonRange {
+  index: number
+  label: string
+  startDate: string
+  endDate: string
+  startMs: number
+  endMs: number
+}
 
 export interface PlayerRatingWeights {
   recentPerformance: number
   allTimePerformance: number
+  seasonPoints: number
   winRate: number
   commanderMMRContext: number
   averageCommanderMMR: number
@@ -41,6 +63,13 @@ export interface PlayerRatingConfig {
   minRating: number
   maxRating: number
   provisionalGames: number
+  topCommandersForAverageMmr: number
+  minimumGamesForAverageCommanderMmr: number
+  missingCommanderMmr: number
+  usePeakCommanderMmrForAverage: boolean
+  simpleMmr: {
+    enabled: boolean
+  }
   lPointMmrModifier: {
     enabled: boolean
   }
@@ -54,6 +83,7 @@ export interface PlayerRatingConfig {
 const DEFAULT_PLAYER_RATING_WEIGHTS: PlayerRatingWeights = {
   recentPerformance: 0.28,
   allTimePerformance: 0.17,
+  seasonPoints: 0,
   winRate: 0.12,
   commanderMMRContext: 0.10,
   averageCommanderMMR: 0.08,
@@ -71,6 +101,13 @@ export interface LeagueSettingsDocument {
     minRating?: number
     maxRating?: number
     provisionalGames?: number
+    topCommandersForAverageMmr?: number
+    minimumGamesForAverageCommanderMmr?: number
+    missingCommanderMmr?: number
+    usePeakCommanderMmrForAverage?: boolean
+    simpleMmr?: {
+      enabled?: boolean
+    }
     lPointMmrModifier?: {
       enabled?: boolean
     }
@@ -78,7 +115,7 @@ export interface LeagueSettingsDocument {
       enabled?: boolean
       maxModifierPercent?: number
     }
-    weights?: Partial<PlayerRatingWeights>
+      weights?: Partial<PlayerRatingWeights>
   }
   level?: {
     xpPerGame?: Partial<Record<number, number>>
@@ -96,6 +133,12 @@ export interface LeagueSettingsDocument {
     freeGamesMinimumAvg?: number
     freeGamesGraceMisses?: number
     penaltyFactor?: number
+    seasonalRanking?: {
+      enabled?: boolean
+      leagueStartDate?: string
+      leagueEndDate?: string
+      seasonCount?: number
+    }
   }
   shop?: {
     loosterCost?: number
@@ -124,6 +167,7 @@ export interface ResolvedLeagueSettings {
     freeGamesMinimumAvg: number
     freeGamesGraceMisses: number
     penaltyFactor: number
+    seasonalRanking: StandingsSeasonalRankingConfig
   }
   shop: {
     loosterCost: number
@@ -157,6 +201,22 @@ export function getResolvedLeagueSettings(settings?: LeagueSettingsDocument | nu
         source?.playerRating?.provisionalGames,
         DEFAULT_PLAYER_RATING_PROVISIONAL_GAMES,
       ))),
+      topCommandersForAverageMmr: Math.max(1, Math.round(toNumberOr(
+        source?.playerRating?.topCommandersForAverageMmr,
+        DEFAULT_PLAYER_RATING_TOP_COMMANDERS_FOR_AVERAGE_MMR,
+      ))),
+      minimumGamesForAverageCommanderMmr: Math.max(1, Math.round(toNumberOr(
+        source?.playerRating?.minimumGamesForAverageCommanderMmr,
+        DEFAULT_PLAYER_RATING_MIN_GAMES_FOR_AVERAGE_COMMANDER_MMR,
+      ))),
+      missingCommanderMmr: toNumberOr(
+        source?.playerRating?.missingCommanderMmr,
+        DEFAULT_PLAYER_RATING_MISSING_COMMANDER_MMR,
+      ),
+      usePeakCommanderMmrForAverage: source?.playerRating?.usePeakCommanderMmrForAverage ?? false,
+      simpleMmr: {
+        enabled: source?.playerRating?.simpleMmr?.enabled ?? DEFAULT_PLAYER_RATING_SIMPLE_MMR_ENABLED,
+      },
       lPointMmrModifier: {
         enabled: source?.playerRating?.lPointMmrModifier?.enabled ?? DEFAULT_PLAYER_RATING_LPOINT_MMR_MODIFIER_ENABLED,
       },
@@ -175,6 +235,10 @@ export function getResolvedLeagueSettings(settings?: LeagueSettingsDocument | nu
         allTimePerformance: toNumberOr(
           source?.playerRating?.weights?.allTimePerformance,
           DEFAULT_PLAYER_RATING_WEIGHTS.allTimePerformance,
+        ),
+        seasonPoints: toNumberOr(
+          source?.playerRating?.weights?.seasonPoints,
+          DEFAULT_PLAYER_RATING_WEIGHTS.seasonPoints,
         ),
         winRate: toNumberOr(
           source?.playerRating?.weights?.winRate,
@@ -223,6 +287,15 @@ export function getResolvedLeagueSettings(settings?: LeagueSettingsDocument | nu
       freeGamesMinimumAvg: toNumberOr(source?.standings?.freeGamesMinimumAvg, DEFAULT_FREE_GAMES_MIN_AVG),
       freeGamesGraceMisses: Math.max(0, Math.round(toNumberOr(source?.standings?.freeGamesGraceMisses, DEFAULT_FREE_GAMES_GRACE_MISSES))),
       penaltyFactor: toNumberOr(source?.standings?.penaltyFactor, DEFAULT_PENALTY_FACTOR),
+      seasonalRanking: {
+        enabled: source?.standings?.seasonalRanking?.enabled ?? false,
+        leagueStartDate: normalizeDateInput(source?.standings?.seasonalRanking?.leagueStartDate),
+        leagueEndDate: normalizeDateInput(source?.standings?.seasonalRanking?.leagueEndDate),
+        seasonCount: Math.max(1, Math.round(toNumberOr(
+          source?.standings?.seasonalRanking?.seasonCount,
+          DEFAULT_STANDINGS_SEASON_COUNT,
+        ))),
+      },
     },
     shop: {
       loosterCost: toNumberOr(source?.shop?.loosterCost, DEFAULT_LOOSTER_COST),
@@ -236,6 +309,37 @@ export function getResolvedAchievementDefinitions(settings?: LeagueSettingsDocum
 
 export function getResolvedAchievementDefinition(id: string, settings?: LeagueSettingsDocument | null) {
   return getResolvedAchievementDefinitions(settings)[id]
+}
+
+export function buildLeagueSeasonRanges(config?: Partial<StandingsSeasonalRankingConfig> | null): LeagueSeasonRange[] {
+  const seasonCount = Math.max(1, Math.round(toNumberOr(config?.seasonCount, DEFAULT_STANDINGS_SEASON_COUNT)))
+  const start = parseDateInput(config?.leagueStartDate)
+  const end = parseDateInput(config?.leagueEndDate)
+  if (!start || !end || end.getTime() < start.getTime()) return []
+
+  const dayMs = 86_400_000
+  const totalDays = Math.floor((end.getTime() - start.getTime()) / dayMs) + 1
+  if (totalDays <= 0) return []
+
+  return Array.from({ length: seasonCount }, (_unused, index) => {
+    const startOffset = Math.floor((index * totalDays) / seasonCount)
+    const nextStartOffset = Math.floor(((index + 1) * totalDays) / seasonCount)
+    const seasonStart = new Date(start.getTime() + startOffset * dayMs)
+    const seasonEnd = new Date(start.getTime() + Math.max(startOffset, nextStartOffset - 1) * dayMs)
+
+    return {
+      index,
+      label: `Season ${index + 1}`,
+      startDate: formatDateInput(seasonStart),
+      endDate: formatDateInput(seasonEnd),
+      startMs: seasonStart.getTime(),
+      endMs: seasonEnd.getTime() + dayMs - 1,
+    }
+  })
+}
+
+export function hasActiveSeasonalRanking(config?: Partial<StandingsSeasonalRankingConfig> | null) {
+  return Boolean(config?.enabled) && buildLeagueSeasonRanges(config).length > 0
 }
 
 function resolvePoints(raw?: Partial<Record<number, PlacementRating[]>>) {
@@ -252,6 +356,37 @@ function resolvePoints(raw?: Partial<Record<number, PlacementRating[]>>) {
   }
 
   return resolved
+}
+
+function parseDateInput(value?: string | null) {
+  if (!value) return null
+  const match = /^(\d{4})-(\d{2})-(\d{2})$/.exec(value.trim())
+  if (!match) return null
+  const year = Number(match[1])
+  const month = Number(match[2])
+  const day = Number(match[3])
+  const date = new Date(Date.UTC(year, month - 1, day))
+  if (
+    Number.isNaN(date.getTime())
+    || date.getUTCFullYear() !== year
+    || date.getUTCMonth() !== month - 1
+    || date.getUTCDate() !== day
+  ) {
+    return null
+  }
+  return date
+}
+
+function formatDateInput(date: Date) {
+  const year = date.getUTCFullYear()
+  const month = `${date.getUTCMonth() + 1}`.padStart(2, '0')
+  const day = `${date.getUTCDate()}`.padStart(2, '0')
+  return `${year}-${month}-${day}`
+}
+
+function normalizeDateInput(value?: string | null) {
+  const parsed = parseDateInput(value)
+  return parsed ? formatDateInput(parsed) : ''
 }
 
 function resolveAchievements(raw?: Record<string, number>) {

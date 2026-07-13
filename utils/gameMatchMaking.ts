@@ -1,5 +1,6 @@
 import { type PlayerGameRecord, type PlayerState, type ProcessedGame, compareGamesChronological } from '~/composables/useLeagueState'
 import { calculateCommanderMMRChanges, getCommanderTierFromMMR, type CommanderMMRTier } from '~/composables/useCommanderMMR'
+import { calculateSimplePlayerMmrRatings, calculateSimplePlayerMmrUpdates } from '~/composables/usePlayerRating'
 
 const MIN_PLAYERS = 3
 const MAX_PLAYERS = 5
@@ -30,6 +31,8 @@ export interface MatchmakingPlacementOutcome {
   newMMR: number
   tier: CommanderMMRTier
   tierLabel: string
+  playerMmrDelta?: number | null
+  playerMmrAfter?: number | null
 }
 
 export interface MatchmakingCommanderSuggestion {
@@ -100,6 +103,7 @@ export function buildFairMatchmakingResult(
   selectedCommanders: Record<string, string>,
   games: ProcessedGame[],
   gameRecords: Record<string, Record<string, PlayerGameRecord>>,
+  includePlayerMmrPreview = false,
 ): MatchmakingResult | null {
   if (selectedPlayers.length < MIN_PLAYERS || selectedPlayers.length > MAX_PLAYERS) return null
 
@@ -142,8 +146,12 @@ export function buildFairMatchmakingResult(
     }
   })
 
+  const currentPlayerMmrRatings = includePlayerMmrPreview
+    ? calculateSimplePlayerMmrRatings(gameRecords, orderedGames)
+    : null
+
   const suggestions = selectedProfiles.map((player) => {
-    const placementOutcomes = buildPlacementOutcomes(player.playerName, selectedProfiles)
+    const placementOutcomes = buildPlacementOutcomes(player.playerName, selectedProfiles, currentPlayerMmrRatings)
 
     return {
       playerName: player.playerName,
@@ -224,6 +232,7 @@ function buildPlacementOutcomes(
     playerName: string
     selected: CommanderProfile
   }>,
+  currentPlayerMmrRatings: Record<string, number> | null = null,
 ): MatchmakingPlacementOutcome[] {
   const podSize = selectedProfiles.length
   if (podSize < MIN_PLAYERS) return []
@@ -270,6 +279,16 @@ function buildPlacementOutcomes(
     const targetChange = changes.find((entry) => entry.commanderId === `${target.playerName}::${target.selected.commander}`)
     if (!targetChange) continue
 
+    const playerMmrUpdate = currentPlayerMmrRatings
+      ? calculateSimplePlayerMmrUpdates(
+          currentPlayerMmrRatings,
+          podResults.map((result) => ({
+            playerName: String(result.commanderId).split('::')[0] ?? '',
+            placement: result.placement,
+          })),
+        ).find((entry) => entry.playerName === targetPlayerName)
+      : null
+
     const tier = getCommanderTierFromMMR(targetChange.newMMR)
     outcomes.push({
       placement,
@@ -277,6 +296,8 @@ function buildPlacementOutcomes(
       newMMR: round2(targetChange.newMMR),
       tier,
       tierLabel: tierLabel(tier),
+      playerMmrDelta: playerMmrUpdate ? round2(playerMmrUpdate.delta) : null,
+      playerMmrAfter: playerMmrUpdate ? round2(playerMmrUpdate.newRating) : null,
     })
   }
 

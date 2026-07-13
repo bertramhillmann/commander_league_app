@@ -31,6 +31,12 @@
               </button>
             </th>
             <th class="standings__th standings__th--num">
+              <button type="button" class="standings__sort-button standings__sort-button--num" @click="toggleSort('peakCommanderMMR')">
+                <span>Peak MMR</span>
+                <span class="standings__sort-indicator">{{ sortIndicator('peakCommanderMMR') }}</span>
+              </button>
+            </th>
+            <th class="standings__th standings__th--num">
               <button type="button" class="standings__sort-button standings__sort-button--num" @click="toggleSort('totalScore')">
                 <span>Total</span>
                 <span class="standings__sort-indicator">{{ sortIndicator('totalScore') }}</span>
@@ -131,6 +137,12 @@
               <span class="standings__mmr-cell">
                 <IconsMmrIcon :size="11" />
                 {{ fmt(row.commanderMMR) }}
+              </span>
+            </td>
+            <td class="standings__td standings__td--num standings__td--mmr">
+              <span class="standings__mmr-cell">
+                <IconsMmrIcon :size="11" />
+                {{ fmt(row.peakCommanderMMR) }}
               </span>
             </td>
             <td class="standings__td standings__td--num standings__td--total">{{ fmt(row.totalScore) }}</td>
@@ -276,6 +288,7 @@ onMounted(async () => {
 
 type SortKey =
   | 'commanderMMR'
+  | 'peakCommanderMMR'
   | 'totalScore'
   | 'totalPoints'
   | 'achievementPoints'
@@ -302,6 +315,15 @@ function playerCommanderMmr(playerName: string, commanderName: string) {
   const records = Object.values(gameRecords.value[playerName] ?? {})
     .filter((record) => record.commander === commanderName)
   return records.at(-1)?.commanderMMRAfter ?? 0
+}
+
+function playerCommanderPeakMmr(playerName: string, commanderName: string) {
+  const records = Object.values(gameRecords.value[playerName] ?? {})
+    .filter((record) => record.commander === commanderName)
+
+  return records.reduce((peak, record) =>
+    Math.max(peak, record.commanderMMRBefore ?? 0, record.commanderMMRAfter ?? 0),
+  0)
 }
 
 function playerCommanderTier(playerName: string, commanderName: string): CommanderMMRTier | null {
@@ -357,6 +379,7 @@ const pairingTable = computed(() => {
         playerName,
         commanderName,
         commanderMMR: playerCommanderMmr(playerName, commanderName),
+        peakCommanderMMR: playerCommanderPeakMmr(playerName, commanderName),
         commanderTier: playerCommanderTier(playerName, commanderName),
         totalPoints: metrics.totalFinalPoints,
         achievementPoints: includeAchievementPoints ? metrics.achievementPoints : 0,

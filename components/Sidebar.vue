@@ -21,6 +21,9 @@
         <div v-if="mode === 'compare' && !isPlayerRatingMode" class="rating-sidebar__state">
           Player Rating mode is not active in league settings.
         </div>
+        <div v-else-if="mode === 'compare' && simplePlayerMmrMode" class="rating-sidebar__state">
+          Compare view is only available for the weighted Player Rating formula.
+        </div>
         <div v-else-if="mode === 'compare' && !comparisonDetail" class="rating-sidebar__state">
           No comparison data available for these players yet.
         </div>
@@ -115,24 +118,36 @@
             <div class="rating-sidebar__stats">
               <div class="rating-sidebar__stat">
                 <span class="rating-sidebar__stat-value"><IconsPlayerRatingIcon :size="13" />{{ fmt(detail?.rating ?? 0) }}</span>
-                <span class="rating-sidebar__stat-label">Current Rating</span>
+                <span class="rating-sidebar__stat-label">{{ detail?.system === 'simple_mmr' ? 'Current MMR' : 'Current Rating' }}</span>
               </div>
               <div class="rating-sidebar__stat">
-                <span class="rating-sidebar__stat-value">{{ fmt(detail.weightedScore) }}</span>
-                <span class="rating-sidebar__stat-label">Weighted Score</span>
+                <span class="rating-sidebar__stat-value">{{ detail?.system === 'simple_mmr' ? detail.gamesPlayed : fmt(detail.weightedScore) }}</span>
+                <span class="rating-sidebar__stat-label">{{ detail?.system === 'simple_mmr' ? 'Games Counted' : 'Weighted Score' }}</span>
               </div>
               <div class="rating-sidebar__stat">
                 <span class="rating-sidebar__stat-value">{{ Math.round(detail.confidenceMultiplier * 100) }}%</span>
-                <span class="rating-sidebar__stat-label">Confidence</span>
+                <span class="rating-sidebar__stat-label">{{ detail?.system === 'simple_mmr' ? 'Provisional Progress' : 'Confidence' }}</span>
               </div>
               <div class="rating-sidebar__stat">
-                <span class="rating-sidebar__stat-value">{{ detail.gamesPlayed }}</span>
-                <span class="rating-sidebar__stat-label">Games Counted</span>
+                <span class="rating-sidebar__stat-value">{{ detail?.system === 'simple_mmr' ? detail.provisionalGames : detail.gamesPlayed }}</span>
+                <span class="rating-sidebar__stat-label">{{ detail?.system === 'simple_mmr' ? 'Provisional Target' : 'Games Counted' }}</span>
               </div>
             </div>
 
             <div class="rating-sidebar__formula">
               <div class="rating-sidebar__formula-title">How the final rating is formed</div>
+              <template v-if="detail.system === 'simple_mmr'">
+                <div class="rating-sidebar__formula-line">
+                  Each pod is treated as a set of simple head-to-head MMR results against the other players in that game.
+                </div>
+                <div class="rating-sidebar__formula-line">
+                  Finishing ahead of stronger-rated players gains more MMR, and finishing behind lower-rated players loses more.
+                </div>
+                <div class="rating-sidebar__formula-line">
+                  No weighted subfactors, achievements, XP, or commander-context adjustments are included.
+                </div>
+              </template>
+              <template v-else>
               <div class="rating-sidebar__formula-line">
                 1. Each factor becomes a normalized 0-100 score.
               </div>
@@ -154,6 +169,7 @@
                 to produce
                 <strong>{{ fmt(detail.rating) }}</strong>.
               </div>
+              </template>
               <div v-if="detail.provisional" class="rating-sidebar__formula-note">
                 Provisional until {{ detail.provisionalGames }} games are reached.
               </div>
@@ -162,13 +178,13 @@
             <ChartsPerformanceTimeline
               :labels="historyLabels"
               :series="overallSeries"
-              title="Player Rating Over Time"
-              subtitle="The final rating across the shared league timeline."
+              :title="detail.system === 'simple_mmr' ? 'Player MMR Over Time' : 'Player Rating Over Time'"
+              :subtitle="detail.system === 'simple_mmr' ? 'The simple results-only MMR across the shared league timeline.' : 'The final rating across the shared league timeline.'"
               class="rating-sidebar__chart"
             />
           </section>
 
-          <section class="rating-sidebar__factors">
+          <section v-if="detail.system !== 'simple_mmr'" class="rating-sidebar__factors">
             <article
               v-for="factor in factorPanels"
               :key="factor.key"
@@ -393,6 +409,7 @@ const sidebarMeta = computed(() => {
 })
 
 const isPlayerRatingMode = computed(() => settings.value.playerRankingSystem === 'player_rating_based')
+const simplePlayerMmrMode = computed(() => settings.value.playerRating.simpleMmr.enabled)
 const chronologicalGames = computed(() => [...games.value].sort(compareGamesChronological))
 const playerState = computed(() => players.value[props.playerName] ?? null)
 const comparePlayerState = computed(() =>

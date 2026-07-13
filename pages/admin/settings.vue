@@ -107,10 +107,82 @@
           </div>
         </template>
 
+        <label class="toggle-field">
+          <input v-model="form.standings.seasonalRanking.enabled" type="checkbox" class="toggle-field__input" />
+          <span class="toggle-field__copy">
+            <span class="toggle-field__label">Use season settings</span>
+            <span class="toggle-field__hint">Splits the league into equal seasons. In classic standings this drives season-based ranking, and in Player Rating it defines the current season window for recent form.</span>
+          </span>
+        </label>
+
+        <div v-if="form.standings.seasonalRanking.enabled" class="settings-subgrid">
+          <label class="form-field">
+            <span class="form-label">League Start</span>
+            <input v-model="form.standings.seasonalRanking.leagueStartDate" type="date" class="form-input" />
+          </label>
+          <label class="form-field">
+            <span class="form-label">League End</span>
+            <input v-model="form.standings.seasonalRanking.leagueEndDate" type="date" class="form-input" />
+          </label>
+          <label class="form-field">
+            <span class="form-label">Number Of Seasons</span>
+            <input v-model.number="form.standings.seasonalRanking.seasonCount" type="number" step="1" min="1" class="form-input" />
+            <span class="form-help">The league window is split into equal-length seasons automatically.</span>
+          </label>
+        </div>
+
+        <div v-if="form.standings.seasonalRanking.enabled && generatedSeasonRanges.length" class="settings-subgrid">
+          <label
+            v-for="season in generatedSeasonRanges"
+            :key="season.label"
+            class="form-field"
+          >
+            <span class="form-label">{{ season.label }}</span>
+            <input
+              :value="`${season.startDate} - ${season.endDate}`"
+              type="text"
+              class="form-input"
+              readonly
+            />
+          </label>
+        </div>
+
         <div v-if="form.playerRankingSystem === 'player_rating_based'" class="settings-subgrid">
+          <label class="toggle-field">
+            <input v-model="form.playerRating.simpleMmr.enabled" type="checkbox" class="toggle-field__input" />
+            <span class="toggle-field__copy">
+              <span class="toggle-field__label">Use simple player MMR</span>
+              <span class="toggle-field__hint">Replaces the weighted Player Rating formula with a straightforward results-only player MMR ladder.</span>
+            </span>
+          </label>
+        </div>
+
+        <div v-if="form.playerRankingSystem === 'player_rating_based' && !form.playerRating.simpleMmr.enabled" class="settings-subgrid">
           <label class="form-field">
             <span class="form-label">Provisional Games</span>
             <input v-model.number="form.playerRating.provisionalGames" type="number" step="1" min="1" class="form-input" />
+          </label>
+          <label class="form-field">
+            <span class="form-label">Top Commanders Counted For Avg MMR</span>
+            <input v-model.number="form.playerRating.topCommandersForAverageMmr" type="number" step="1" min="1" class="form-input" />
+            <span class="form-help">Only the best N eligible commander MMRs count for the Average Commander MMR factor.</span>
+          </label>
+          <label class="form-field">
+            <span class="form-label">Min Games For Commander To Count</span>
+            <input v-model.number="form.playerRating.minimumGamesForAverageCommanderMmr" type="number" step="1" min="1" class="form-input" />
+            <span class="form-help">Only commanders with at least this many games are eligible for the Average Commander MMR factor.</span>
+          </label>
+          <label class="form-field">
+            <span class="form-label">Fallback MMR For Missing Commanders</span>
+            <input v-model.number="form.playerRating.missingCommanderMmr" type="number" step="1" class="form-input" />
+            <span class="form-help">If fewer than the target number of eligible commanders exist, the missing slots use this MMR value.</span>
+          </label>
+          <label class="toggle-field">
+            <input v-model="form.playerRating.usePeakCommanderMmrForAverage" type="checkbox" class="toggle-field__input" />
+            <span class="toggle-field__copy">
+              <span class="toggle-field__label">Use peak commander MMR for average</span>
+              <span class="toggle-field__hint">When on, the Average Commander MMR factor uses each commander's highest-ever MMR instead of its current MMR.</span>
+            </span>
           </label>
           <label class="toggle-field">
             <input v-model="form.playerRating.lPointMmrModifier.enabled" type="checkbox" class="toggle-field__input" />
@@ -132,7 +204,10 @@
           </label>
         </div>
 
-        <div v-if="form.playerRankingSystem === 'player_rating_based'" class="settings-card__header settings-card__header--nested">
+        <div
+          v-if="form.playerRankingSystem === 'player_rating_based' && !form.playerRating.simpleMmr.enabled"
+          class="settings-card__header settings-card__header--nested"
+        >
           <div>
             <h3 class="settings-card__title settings-card__title--small">Player Rating Weights</h3>
             <p class="settings-card__subtitle">Edit in percent. Saving is only allowed when the weights total exactly 100%.</p>
@@ -145,7 +220,7 @@
           </div>
         </div>
 
-        <div v-if="form.playerRankingSystem === 'player_rating_based'" class="settings-weight-grid">
+        <div v-if="form.playerRankingSystem === 'player_rating_based' && !form.playerRating.simpleMmr.enabled" class="settings-weight-grid">
           <label
             v-for="field in playerRatingWeightFields"
             :key="field.key"
@@ -315,6 +390,7 @@
 <script setup lang="ts">
 import { computed, reactive, ref, watch } from 'vue'
 import {
+  buildLeagueSeasonRanges,
   getResolvedLeagueSettings,
   type LeagueSettingsDocument,
   type PlayerRankingSystem,
@@ -345,6 +421,13 @@ type EditableSettingsState = {
   playerRankingSystem: PlayerRankingSystem
   playerRating: {
     provisionalGames: number
+    topCommandersForAverageMmr: number
+    minimumGamesForAverageCommanderMmr: number
+    missingCommanderMmr: number
+    usePeakCommanderMmrForAverage: boolean
+    simpleMmr: {
+      enabled: boolean
+    }
     lPointMmrModifier: {
       enabled: boolean
     }
@@ -370,6 +453,12 @@ type EditableSettingsState = {
     freeGamesMinimumAvg: number
     freeGamesGraceMisses: number
     penaltyFactor: number
+    seasonalRanking: {
+      enabled: boolean
+      leagueStartDate: string
+      leagueEndDate: string
+      seasonCount: number
+    }
   }
   shop: {
     loosterCost: number
@@ -385,6 +474,7 @@ const playerRatingWeightFields: Array<{
 }> = [
   { key: 'recentPerformance', label: 'Recent Form', hint: 'Recent finishes and current-season form.' },
   { key: 'allTimePerformance', label: 'Long-Term Performance', hint: 'Full-history adjusted performance.' },
+  { key: 'seasonPoints', label: 'Season Points', hint: 'How strong your season-average points are across the active league seasons.' },
   { key: 'winRate', label: 'Win Rate', hint: 'How often a player turns games into wins.' },
   { key: 'commanderMMRContext', label: 'Finishes vs Stronger Opponents', hint: 'How often a player beats MMR-based placement expectations.' },
   { key: 'averageCommanderMMR', label: 'Average Commander MMR', hint: 'Average commander strength across the player pool.' },
@@ -398,7 +488,15 @@ const playerRatingWeightTotal = computed(() =>
   playerRatingWeightFields.reduce((sum, field) => sum + sanitizeNumber(form.playerRating.weights[field.key]), 0),
 )
 
-const canSavePlayerRatingWeights = computed(() => Math.abs(playerRatingWeightTotal.value - 100) < 0.001)
+const canSavePlayerRatingWeights = computed(() =>
+  form.playerRankingSystem !== 'player_rating_based'
+  || form.playerRating.simpleMmr.enabled
+  || Math.abs(playerRatingWeightTotal.value - 100) < 0.001,
+)
+
+const generatedSeasonRanges = computed(() =>
+  buildLeagueSeasonRanges(form.standings.seasonalRanking),
+)
 
 watch(
   settings,
@@ -515,6 +613,13 @@ function createEditableSettings(source: ReturnType<typeof getResolvedLeagueSetti
     playerRankingSystem: source.playerRankingSystem,
     playerRating: {
       provisionalGames: source.playerRating.provisionalGames,
+      topCommandersForAverageMmr: source.playerRating.topCommandersForAverageMmr,
+      minimumGamesForAverageCommanderMmr: source.playerRating.minimumGamesForAverageCommanderMmr,
+      missingCommanderMmr: source.playerRating.missingCommanderMmr,
+      usePeakCommanderMmrForAverage: source.playerRating.usePeakCommanderMmrForAverage,
+      simpleMmr: {
+        enabled: source.playerRating.simpleMmr.enabled,
+      },
       lPointMmrModifier: {
         enabled: source.playerRating.lPointMmrModifier.enabled,
       },
@@ -522,10 +627,11 @@ function createEditableSettings(source: ReturnType<typeof getResolvedLeagueSetti
         enabled: source.playerRating.commanderMMRPointModifier.enabled,
         maxModifierPercent: source.playerRating.commanderMMRPointModifier.maxModifierPercent,
       },
-      weights: {
-        recentPerformance: source.playerRating.weights.recentPerformance * 100,
-        allTimePerformance: source.playerRating.weights.allTimePerformance * 100,
-        winRate: source.playerRating.weights.winRate * 100,
+        weights: {
+          recentPerformance: source.playerRating.weights.recentPerformance * 100,
+          allTimePerformance: source.playerRating.weights.allTimePerformance * 100,
+          seasonPoints: source.playerRating.weights.seasonPoints * 100,
+          winRate: source.playerRating.weights.winRate * 100,
         commanderMMRContext: source.playerRating.weights.commanderMMRContext * 100,
         averageCommanderMMR: source.playerRating.weights.averageCommanderMMR * 100,
         commanderPoints: source.playerRating.weights.commanderPoints * 100,
@@ -550,6 +656,12 @@ function createEditableSettings(source: ReturnType<typeof getResolvedLeagueSetti
       freeGamesMinimumAvg: source.standings.freeGamesMinimumAvg,
       freeGamesGraceMisses: source.standings.freeGamesGraceMisses,
       penaltyFactor: source.standings.penaltyFactor,
+      seasonalRanking: {
+        enabled: source.standings.seasonalRanking.enabled,
+        leagueStartDate: source.standings.seasonalRanking.leagueStartDate,
+        leagueEndDate: source.standings.seasonalRanking.leagueEndDate,
+        seasonCount: source.standings.seasonalRanking.seasonCount,
+      },
     },
     shop: {
       loosterCost: source.shop.loosterCost,
@@ -570,11 +682,17 @@ function applyEditableSettings(target: EditableSettingsState, source: ReturnType
   )
   target.playerRankingSystem = source.playerRankingSystem
   target.playerRating.provisionalGames = source.playerRating.provisionalGames
+  target.playerRating.topCommandersForAverageMmr = source.playerRating.topCommandersForAverageMmr
+  target.playerRating.minimumGamesForAverageCommanderMmr = source.playerRating.minimumGamesForAverageCommanderMmr
+  target.playerRating.missingCommanderMmr = source.playerRating.missingCommanderMmr
+  target.playerRating.usePeakCommanderMmrForAverage = source.playerRating.usePeakCommanderMmrForAverage
+  target.playerRating.simpleMmr.enabled = source.playerRating.simpleMmr.enabled
   target.playerRating.lPointMmrModifier.enabled = source.playerRating.lPointMmrModifier.enabled
   target.playerRating.commanderMMRPointModifier.enabled = source.playerRating.commanderMMRPointModifier.enabled
   target.playerRating.commanderMMRPointModifier.maxModifierPercent = source.playerRating.commanderMMRPointModifier.maxModifierPercent
   target.playerRating.weights.recentPerformance = source.playerRating.weights.recentPerformance * 100
   target.playerRating.weights.allTimePerformance = source.playerRating.weights.allTimePerformance * 100
+  target.playerRating.weights.seasonPoints = source.playerRating.weights.seasonPoints * 100
   target.playerRating.weights.winRate = source.playerRating.weights.winRate * 100
   target.playerRating.weights.commanderMMRContext = source.playerRating.weights.commanderMMRContext * 100
   target.playerRating.weights.averageCommanderMMR = source.playerRating.weights.averageCommanderMMR * 100
@@ -595,6 +713,10 @@ function applyEditableSettings(target: EditableSettingsState, source: ReturnType
   target.standings.freeGamesMinimumAvg = source.standings.freeGamesMinimumAvg
   target.standings.freeGamesGraceMisses = source.standings.freeGamesGraceMisses
   target.standings.penaltyFactor = source.standings.penaltyFactor
+  target.standings.seasonalRanking.enabled = source.standings.seasonalRanking.enabled
+  target.standings.seasonalRanking.leagueStartDate = source.standings.seasonalRanking.leagueStartDate
+  target.standings.seasonalRanking.leagueEndDate = source.standings.seasonalRanking.leagueEndDate
+  target.standings.seasonalRanking.seasonCount = source.standings.seasonalRanking.seasonCount
   target.shop.loosterCost = source.shop.loosterCost
 }
 
@@ -617,6 +739,13 @@ function toDocument(source: EditableSettingsState): LeagueSettingsDocument {
     playerRankingSystem: source.playerRankingSystem,
     playerRating: {
       provisionalGames: sanitizeInteger(source.playerRating.provisionalGames),
+      topCommandersForAverageMmr: sanitizeInteger(source.playerRating.topCommandersForAverageMmr),
+      minimumGamesForAverageCommanderMmr: sanitizeInteger(source.playerRating.minimumGamesForAverageCommanderMmr),
+      missingCommanderMmr: sanitizeNumber(source.playerRating.missingCommanderMmr),
+      usePeakCommanderMmrForAverage: source.playerRating.usePeakCommanderMmrForAverage,
+      simpleMmr: {
+        enabled: source.playerRating.simpleMmr.enabled,
+      },
       lPointMmrModifier: {
         enabled: source.playerRating.lPointMmrModifier.enabled,
       },
@@ -627,6 +756,7 @@ function toDocument(source: EditableSettingsState): LeagueSettingsDocument {
       weights: {
         recentPerformance: sanitizePositiveNumber(source.playerRating.weights.recentPerformance) / 100,
         allTimePerformance: sanitizePositiveNumber(source.playerRating.weights.allTimePerformance) / 100,
+        seasonPoints: sanitizePositiveNumber(source.playerRating.weights.seasonPoints) / 100,
         winRate: sanitizePositiveNumber(source.playerRating.weights.winRate) / 100,
         commanderMMRContext: sanitizePositiveNumber(source.playerRating.weights.commanderMMRContext) / 100,
         averageCommanderMMR: sanitizePositiveNumber(source.playerRating.weights.averageCommanderMMR) / 100,
@@ -658,6 +788,12 @@ function toDocument(source: EditableSettingsState): LeagueSettingsDocument {
       freeGamesMinimumAvg: sanitizePositiveNumber(source.standings.freeGamesMinimumAvg),
       freeGamesGraceMisses: sanitizeInteger(source.standings.freeGamesGraceMisses),
       penaltyFactor: sanitizePositiveNumber(source.standings.penaltyFactor),
+      seasonalRanking: {
+        enabled: source.standings.seasonalRanking.enabled,
+        leagueStartDate: source.standings.seasonalRanking.leagueStartDate,
+        leagueEndDate: source.standings.seasonalRanking.leagueEndDate,
+        seasonCount: Math.max(1, sanitizeInteger(source.standings.seasonalRanking.seasonCount)),
+      },
     },
     shop: {
       loosterCost: sanitizePositiveNumber(source.shop.loosterCost),

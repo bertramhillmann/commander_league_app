@@ -56,7 +56,7 @@
               <span class="standings__sort-indicator">{{ sortIndicator('totalPoints') }}</span>
             </button>
           </th>
-          <th v-if="settings.standings.includeAchievementPoints" class="standings__th standings__th--num">
+          <th v-show="showStandingsDetailColumns && settings.standings.includeAchievementPoints" class="standings__th standings__th--num">
             <button
               type="button"
               class="standings__sort-button standings__sort-button--num"
@@ -66,7 +66,7 @@
               <span class="standings__sort-indicator">{{ sortIndicator('achievementPoints') }}</span>
             </button>
           </th>
-          <th v-if="settings.standings.includeCommanderXp" class="standings__th standings__th--num">
+          <th v-show="showStandingsDetailColumns && settings.standings.includeCommanderXp" class="standings__th standings__th--num">
             <button
               type="button"
               class="standings__sort-button standings__sort-button--num"
@@ -106,6 +106,17 @@
               <span class="standings__sort-indicator">{{ sortIndicator('avgPerGame') }}</span>
             </button>
           </th>
+          <th class="standings__th standings__th--num">
+            <button
+              type="button"
+              class="standings__sort-button standings__sort-button--num"
+              @click="toggleSort('averageCommanderMmr')"
+            >
+              <span>Avg Cmdr MMR</span>
+              <span class="standings__sort-indicator">{{ sortIndicator('averageCommanderMmr') }}</span>
+            </button>
+          </th>
+          <th v-if="showSeasonScoresInTable" class="standings__th standings__th--num">Seasons</th>
           <!-- <th class="standings__th standings__th--commander">Most Played Commander</th> -->
           <th class="standings__th standings__th--commander">Top Commander</th>
         </tr>
@@ -149,7 +160,8 @@
               class="standings__rating-button"
               @click="openRatingSidebar(row.name)"
             >
-              <IconsPlayerRatingIcon :size="20" style="margin-right: 3px" />{{ fmt(row.totalScore) }}
+              <IconsPlayerRatingIcon :size="20" style="margin-right: 3px" />
+              {{ fmt(row.totalScore) }}
             </button>
             <template v-else>
               {{ fmt(row.totalScore) }}
@@ -172,7 +184,7 @@
           <td v-if="!isPlayerRatingMode" class="standings__td standings__td--num">{{ fmt(row.adjustedTotalPoints) }}</td>
           <td v-if="!isPlayerRatingMode" class="standings__td standings__td--num">{{ fmt(row.totalPoints) }}</td>
           <td
-            v-if="settings.standings.includeAchievementPoints"
+            v-show="showStandingsDetailColumns && settings.standings.includeAchievementPoints"
             class="standings__td standings__td--num standings__td--achv standings__td--hoverable"
             @mouseenter="onAchvEnter(row.name, $event)"
             @mousemove="onMouseMove($event)"
@@ -187,7 +199,7 @@
             </button>
           </td>
           <td
-            v-if="settings.standings.includeCommanderXp"
+            v-show="showStandingsDetailColumns && settings.standings.includeCommanderXp"
             class="standings__td standings__td--num standings__td--xp standings__td--hoverable-xp"
             @mouseenter="onXpEnter(row.name, $event)"
             @mousemove="onMouseMove($event)"
@@ -204,6 +216,12 @@
           <td class="standings__td standings__td--num">{{ isPlayerRatingMode ? `${row.participationRate}%` : row.gamesPlayed }}</td>
           <td class="standings__td standings__td--num">{{ row.winRate }}%</td>
           <td class="standings__td standings__td--num">{{ fmt(row.avgPerGame) }}</td>
+          <td class="standings__td standings__td--num standings__td--avg-mmr" :title="`Avg Commander MMR: ${Math.round(row.averageCommanderMmr)}`">
+            <span class="standings__avg-mmr"><IconsMmrIcon :size="11" />{{ Math.round(row.averageCommanderMmr) }}</span>
+          </td>
+          <td v-if="showSeasonScoresInTable" class="standings__td standings__td--num">
+            <span class="standings__season-score">{{ formatSeasonOnlyCell(row.seasonScores ?? []) }}</span>
+          </td>
           <td class="standings__td standings__td--commander">
             <NuxtLink
               v-if="row.topCommander"
@@ -409,7 +427,7 @@
       </div>
     </section>
 
-    <section v-if="performanceChartData.series.length > 0" class="dashboard__perf-section">
+    <section v-if="fullPerformanceChartData.series.length > 0" class="dashboard__perf-section">
       <div class="dashboard__perf-switcher">
         <button
           type="button"
@@ -430,10 +448,29 @@
           @click="activeChart = 'participation'"
         >Participation</button>
       </div>
+      <div
+        v-if="activeChart === 'performance' && performanceSeasonOptions.length > 0"
+        class="dashboard__perf-season-switcher"
+      >
+        <button
+          type="button"
+          class="dashboard__perf-season-switch"
+          :class="{ 'dashboard__perf-season-switch--active': selectedPerformanceSeason === 'all' }"
+          @click="selectedPerformanceSeason = 'all'"
+        >All</button>
+        <button
+          v-for="season in performanceSeasonOptions"
+          :key="season.index"
+          type="button"
+          class="dashboard__perf-season-switch"
+          :class="{ 'dashboard__perf-season-switch--active': selectedPerformanceSeason === season.index }"
+          @click="selectedPerformanceSeason = season.index"
+        >{{ season.label }}</button>
+      </div>
       <ChartsPerformanceTimeline
         v-if="activeChart === 'performance'"
-        :labels="performanceChartData.labels"
-        :series="performanceChartData.series"
+        :labels="activePerformanceChartData.labels"
+        :series="activePerformanceChartData.series"
         :title="activePerfChartTitle"
         :subtitle="activePerfChartSubtitle"
       />
@@ -685,7 +722,7 @@
           <tr>
             <td class="mult-tooltip__label">Model</td>
             <td class="mult-tooltip__op"></td>
-            <td class="mult-tooltip__detail">recent form, long-term performance, win rate, MMR context, activity, achievements, clutch, diversity</td>
+            <td class="mult-tooltip__detail">recent form, long-term performance, season points, win rate, MMR context, activity, achievements, clutch, diversity</td>
             <td class="mult-tooltip__value">{{ ratingHover.playerName }}</td>
           </tr>
           <tr>
@@ -705,6 +742,12 @@
             <td class="mult-tooltip__op"></td>
             <td class="mult-tooltip__detail">weighted contribution</td>
             <td class="mult-tooltip__value">{{ fmt(ratingHover.breakdown.allTimePerformance?.weightedContribution ?? 0) }}</td>
+          </tr>
+          <tr v-if="ratingHover.breakdown">
+            <td class="mult-tooltip__label">Season points</td>
+            <td class="mult-tooltip__op"></td>
+            <td class="mult-tooltip__detail">weighted contribution</td>
+            <td class="mult-tooltip__value">{{ fmt(ratingHover.breakdown.seasonPoints?.weightedContribution ?? 0) }}</td>
           </tr>
           <tr v-if="ratingHover.breakdown">
             <td class="mult-tooltip__label">Win rate</td>
@@ -911,21 +954,27 @@
 </template>
 
 <script setup lang="ts">
-import { computed, reactive, ref } from 'vue'
+import { computed, reactive, ref, watch } from 'vue'
 import {
+  calculatePlayerSeasonAverages,
   calculateStandingsAdjustment,
   compareGamesChronological,
   type PlayerGameRecord,
   type StandingsAdjustmentResult,
 } from '~/composables/useLeagueState'
-import { calculatePlayerRating } from '~/composables/usePlayerRating'
+import { calculateAverageCommanderMMRScore, calculatePlayerRating } from '~/composables/usePlayerRating'
 import type { PerformancePlayerSeries } from '~/components/charts/PerformanceTimeline.vue'
 import { fetchSetByCode } from '~/services/scryfallService'
 import { getArchEnemySummary } from '~/utils/archEnemy'
 import { getFeaturedPlayers, type FeaturedPlayerCandidate } from '~/utils/featuredPlayer'
 import { getCommanderTierFromMMR, type CommanderMMRTier } from '~/composables/useCommanderMMR'
 import type { PlayerRatingBreakdownKey, RatingBreakdownEntry } from '~/composables/usePlayerRating'
-import { MIN_GAMES_FOR_PENALTY_MODE, type StandingsAdjustmentMode } from '~/utils/leagueSettings'
+import {
+  buildLeagueSeasonRanges,
+  hasActiveSeasonalRanking,
+  MIN_GAMES_FOR_PENALTY_MODE,
+  type StandingsAdjustmentMode,
+} from '~/utils/leagueSettings'
 import { formatLoosterPoints, roundLoosterPoints } from '~/utils/loosterPoints'
 import { formatPlayerName } from '~/utils/playerNames'
 import {
@@ -954,6 +1003,7 @@ type SortKey =
   | 'totalLosses'
   | 'winRate'
   | 'avgPerGame'
+  | 'averageCommanderMmr'
   | 'totalLPoints'
 
 type ChartStandingRow = {
@@ -1039,15 +1089,39 @@ const loggedInPlayerName = computed(() => (user.value ? formatPlayerName(user.va
 const adjustmentMode = computed(() => settings.value.standings.adjustmentMode)
 const playerRankingSystem = computed(() => settings.value.playerRankingSystem)
 const isPlayerRatingMode = computed(() => playerRankingSystem.value === 'player_rating_based')
+const seasonalRankingEnabled = computed(() =>
+  hasActiveSeasonalRanking(settings.value.standings.seasonalRanking),
+)
+const showSeasonScoresInTable = computed(() => seasonalRankingEnabled.value)
+const generatedLeagueSeasons = computed(() => buildLeagueSeasonRanges(settings.value.standings.seasonalRanking))
+const performanceSeasonOptions = computed(() => {
+  const now = Date.now()
+  return generatedLeagueSeasons.value.filter((season) => season.startMs <= now)
+})
+const selectedPerformanceSeason = ref<'all' | number>('all')
+watch(performanceSeasonOptions, (options) => {
+  if (selectedPerformanceSeason.value === 'all') return
+  if (!options.some((season) => season.index === selectedPerformanceSeason.value)) {
+    selectedPerformanceSeason.value = 'all'
+  }
+}, { immediate: true })
+const showStandingsDetailColumns = false
 const totalScoreColumnLabel = computed(() => playerRankingSystem.value === 'player_rating_based' ? 'Rating' : 'Total')
 const secondaryChartLabel = computed(() => playerRankingSystem.value === 'player_rating_based' ? 'Player Rating' : 'Total Score')
 const activePerfChartTitle = computed(() => {
-  if (activeChart.value === 'performance') return 'Performance Over Time'
+  const selectedSeason = getSelectedPerformanceSeason()
+  if (activeChart.value === 'performance') {
+    return selectedSeason ? `${selectedSeason.label} Performance` : 'Performance Over Time'
+  }
   if (activeChart.value === 'total') return secondaryChartLabel.value
   return 'Participation Over Time'
 })
 const activePerfChartSubtitle = computed(() => {
+  const selectedSeason = getSelectedPerformanceSeason()
   if (activeChart.value === 'performance') {
+    if (selectedSeason) {
+      return `Season-only average trend for ${selectedSeason.label}, resetting at the start of that season.`
+    }
     return 'League performance trend after each recorded game.'
   }
   if (activeChart.value === 'total') {
@@ -1083,12 +1157,26 @@ const adjustedPointsColumnTitle = computed(() => {
 })
 const totalScoreColumnTitle = computed(() => {
   if (playerRankingSystem.value === 'player_rating_based') {
+    if (settings.value.playerRating.simpleMmr.enabled) {
+      return [
+        'Player MMR is a simple results-only ladder.',
+        'Each pod is treated as head-to-head MMR matchups against the other players in that game.',
+        'Achievements, commander XP, and weighted subfactors are not part of this rating.',
+      ].join('\n')
+    }
     return [
-      'Player Rating combines recent form, long-term performance, win rate, commander MMR context, commander points, achievements, clutch play, and commander diversity.',
+        'Player Rating combines recent form, long-term performance, season points, win rate, commander MMR context, commander points, achievements, clutch play, and commander diversity.',
       'Total points only play a small activity role and missed-game compensation is not part of the rating formula.',
       'Recent games count more than old ones.',
       'Low sample sizes are confidence-adjusted, so provisional players move more as they build a history.',
       'Commander MMR context rewards strong results into stronger pods and softens results farmed only in easier ones.',
+    ].join('\n')
+  }
+  if (seasonalRankingEnabled.value) {
+    return [
+      'Season ranking averages each started league season separately, then averages those season scores together.',
+      'Started seasons with no games from a player count as 0.',
+      'Future seasons stay hidden as - until their start date is reached.',
     ].join('\n')
   }
   if (adjustmentMode.value === 'freeGames') {
@@ -1107,8 +1195,22 @@ function playerRatingTooltip(row: {
 }) {
   if (row.rankingSystem !== 'player_rating_based') return totalScoreColumnTitle.value
 
+  if (settings.value.playerRating.simpleMmr.enabled) {
+    const lines = [
+      'Player MMR is a simple results-only ladder.',
+      'Each pod is treated as head-to-head MMR matchups against the other players in that game.',
+    ]
+
+    if (row.provisional) {
+      lines.push('')
+      lines.push('This rating is provisional until enough games have been played.')
+    }
+
+    return lines.join('\n')
+  }
+
   const lines = [
-    'Player Rating combines recent form, long-term performance, win rate, commander MMR context, total points as a small activity signal, achievements, clutch play, and commander diversity.',
+        'Player Rating combines recent form, long-term performance, season points, win rate, commander MMR context, total points as a small activity signal, achievements, clutch play, and commander diversity.',
     'Missed-game/free-game points are not part of this rating.',
   ]
 
@@ -1118,6 +1220,7 @@ function playerRatingTooltip(row: {
     lines.push('Current weighted factors:')
     lines.push(`Recent form: ${fmt(breakdown.recentPerformance?.weightedContribution ?? 0)}`)
     lines.push(`All-time performance: ${fmt(breakdown.allTimePerformance?.weightedContribution ?? 0)}`)
+    lines.push(`Season points: ${fmt(breakdown.seasonPoints?.weightedContribution ?? 0)}`)
     lines.push(`Win rate: ${fmt(breakdown.winRate?.weightedContribution ?? 0)}`)
     lines.push(`Finishes vs stronger opponents: ${fmt(breakdown.commanderMMRContext?.weightedContribution ?? 0)}`)
     lines.push(`Average commander MMR: ${fmt(breakdown.averageCommanderMMR?.weightedContribution ?? 0)}`)
@@ -1389,6 +1492,19 @@ function topCommanderByMmr(playerName: string) {
   )[0] ?? null
 }
 
+function averageCommanderMmr(playerName: string) {
+  const records = Object.values(gameRecords.value[playerName] ?? {})
+  if (records.length === 0) return 0
+
+  return calculateAverageCommanderMMRScore(
+    records,
+    settings.value.playerRating.topCommandersForAverageMmr,
+    settings.value.playerRating.minimumGamesForAverageCommanderMmr,
+    settings.value.playerRating.missingCommanderMmr,
+    settings.value.playerRating.usePeakCommanderMmrForAverage,
+  ).averageCommanderMMR
+}
+
 function buildPerformanceMetrics(
   totalPoints: number,
   gamesPlayed: number,
@@ -1492,6 +1608,8 @@ const table = computed(() => {
     )
     const standing = standingsMap.get(player.name)
     const topCommanderEntry = topCommanderByMmr(player.name)
+    const averageCommanderMmrValue = averageCommanderMmr(player.name)
+    const seasonAverages = calculatePlayerSeasonAverages(player.name, chronologicalGames.value, gameRecords.value, settings.value)
     const participationRate = chronologicalGames.value.length > 0
       ? Math.round((player.gamesPlayed / chronologicalGames.value.length) * 100)
       : 0
@@ -1532,6 +1650,8 @@ const table = computed(() => {
       participationRate,
       winRate: performance.winRate,
       avgPerGame: performance.avgPerGame,
+      averageCommanderMmr: averageCommanderMmrValue,
+      seasonScores: seasonAverages.seasonScores,
       leagueAvgPerGame: performance.leagueAvgPerGame,
       perfMult: performance.perfMult,
       perfMultRaw: performance.perfMultRaw,
@@ -1750,8 +1870,21 @@ function fmtWeekLabel(weekKey: string) {
   return `Week of ${parsed.toLocaleDateString('de-DE', { day: '2-digit', month: '2-digit', year: '2-digit' })}`
 }
 
-const performanceChartData = computed<{ labels: string[], series: PerformancePlayerSeries[] }>(() => {
-  const games = chronologicalGames.value
+function getSelectedPerformanceSeason() {
+  if (selectedPerformanceSeason.value === 'all') return null
+  return performanceSeasonOptions.value.find((season) => season.index === selectedPerformanceSeason.value) ?? null
+}
+
+const activePerformanceGames = computed(() => {
+  const selectedSeason = getSelectedPerformanceSeason()
+  if (!selectedSeason) return chronologicalGames.value
+  return chronologicalGames.value.filter((game) => {
+    const gameMs = new Date(game.date).getTime()
+    return Number.isFinite(gameMs) && gameMs >= selectedSeason.startMs && gameMs <= selectedSeason.endMs
+  })
+})
+
+function buildPerformanceChartData(games: typeof chronologicalGames.value): { labels: string[], series: PerformancePlayerSeries[] } {
   if (games.length === 0) return { labels: [], series: [] }
 
   const labels = games.map((game) => fmtGameDate(game.date))
@@ -1781,7 +1914,15 @@ const performanceChartData = computed<{ labels: string[], series: PerformancePla
     .filter((s) => s.data.some((v) => v !== null))
 
   return { labels, series }
-})
+}
+
+const fullPerformanceChartData = computed<{ labels: string[], series: PerformancePlayerSeries[] }>(() =>
+  buildPerformanceChartData(chronologicalGames.value),
+)
+
+const activePerformanceChartData = computed<{ labels: string[], series: PerformancePlayerSeries[] }>(() =>
+  buildPerformanceChartData(activePerformanceGames.value),
+)
 
 const scoreChartData = computed<{ labels: string[], series: PerformancePlayerSeries[] }>(() => {
   const games = chronologicalGames.value
@@ -1992,7 +2133,7 @@ function toggleCommanderPlayer(playerName: string) {
 
 const currentChartStandings = computed<ChartStandingRow[]>(() => {
   const chartData = activeChart.value === 'performance'
-    ? performanceChartData.value
+    ? activePerformanceChartData.value
     : activeChart.value === 'total'
       ? scoreChartData.value
       : participationChartData.value
@@ -2086,6 +2227,13 @@ function fmt(n: number | null | undefined): string {
   if (typeof n !== 'number' || Number.isNaN(n)) return '0'
   if (n === 0) return '0'
   return n % 1 === 0 ? String(n) : n.toFixed(3).replace(/\.?0+$/, '')
+}
+
+function formatSeasonOnlyCell(seasonScores: Array<number | null>) {
+  const displayedSeasonScores = seasonScores.length > 0
+    ? seasonScores
+    : generatedLeagueSeasons.value.map(() => null)
+  return displayedSeasonScores.map((score) => (score === null ? '-' : fmt(score))).join(' | ')
 }
 
 function fmtLooster(n: number | null | undefined): string {
@@ -2486,6 +2634,11 @@ const PLAYER_RATING_FACTOR_META: Record<PlayerRatingBreakdownKey, {
     label: 'Long-Term Performance',
     note: 'deeper full-history scoring base',
     tip: 'Raise your long-term score by building a longer stretch of above-average finishes, not just one hot week.',
+  },
+  seasonPoints: {
+    label: 'Season Points',
+    note: 'stronger averages across the active league seasons',
+    tip: 'This climbs when you keep your season-by-season average high instead of relying on one isolated streak.',
   },
   winRate: {
     label: 'Win Rate',
@@ -3424,6 +3577,7 @@ function onCompLeave() {
 
 .dashboard__perf-switcher {
   display: flex;
+  flex-wrap: wrap;
   gap: $spacing-2;
 }
 
@@ -3447,6 +3601,35 @@ function onCompLeave() {
     color: $color-text;
     border-color: rgba($color-primary-light, 0.5);
     background: rgba($color-primary, 0.12);
+  }
+}
+
+.dashboard__perf-season-switcher {
+  display: flex;
+  flex-wrap: wrap;
+  gap: $spacing-2;
+}
+
+.dashboard__perf-season-switch {
+  padding: 3px 12px;
+  border-radius: $border-radius-full;
+  border: 1px solid rgba($border-color, 0.5);
+  background: rgba(255, 255, 255, 0.02);
+  color: $color-text-muted;
+  font-size: 11px;
+  font-weight: $font-weight-medium;
+  cursor: pointer;
+  transition: color $transition-fast, border-color $transition-fast, background $transition-fast;
+
+  &:hover {
+    color: $color-text;
+    border-color: rgba($color-primary-light, 0.36);
+  }
+
+  &--active {
+    color: $color-text;
+    border-color: rgba($color-primary-light, 0.5);
+    background: rgba($color-primary, 0.14);
   }
 }
 
@@ -3616,6 +3799,7 @@ function onCompLeave() {
     &--num { text-align: right; font-variant-numeric: tabular-nums; }
     &--rank { text-align: center; }
     &--total { font-weight: $font-weight-bold; color: $color-secondary; }
+    &--avg-mmr { white-space: nowrap; }
     &--achv  { color: $color-accent; }
     &--hoverable { cursor: default; text-decoration: underline dotted $color-accent; }
     &--hoverable-xp { cursor: default; text-decoration: underline dotted $color-primary-light; }
@@ -3638,6 +3822,15 @@ function onCompLeave() {
 
   &__row--self &__td:last-child {
     border-right: 2px solid rgba(214, 170, 74, 0.95);
+  }
+
+  &__avg-mmr {
+    display: inline-flex;
+    align-items: center;
+    gap: 4px;
+    color: $color-primary-light;
+    font-size: $font-size-xs;
+    white-space: nowrap;
   }
 
   &__rank {
@@ -3801,6 +3994,14 @@ function onCompLeave() {
     color: $color-primary-light;
     text-decoration-color: rgba($color-primary-light, 0.75);
   }
+}
+
+.standings__season-score {
+  display: inline-block;
+  font-size: 12px;
+  line-height: 1.45;
+  font-variant-numeric: tabular-nums;
+  white-space: nowrap;
 }
 
 .standings__detail-button {

@@ -12,6 +12,7 @@ const props = withDefaults(defineProps<{
 const { games, gameRecords, players, loading, error, refresh: refreshLeagueState } = useLeagueState()
 const { preloadCommanderImages, getCachedCommanderImage } = useImageCache()
 const { isAdmin } = useAuth()
+const { settings } = useLeagueSettings()
 
 const canCreateGame = computed(() => props.allowCreate && isAdmin.value)
 
@@ -45,7 +46,13 @@ watch(
 )
 
 const matchmaking = computed(() =>
-  buildFairMatchmakingResult(selectedPlayers.value, selectedCommanderByPlayer.value, games.value, gameRecords.value),
+  buildFairMatchmakingResult(
+    selectedPlayers.value,
+    selectedCommanderByPlayer.value,
+    games.value,
+    gameRecords.value,
+    settings.value.playerRating.simpleMmr.enabled,
+  ),
 )
 
 watch(
@@ -462,6 +469,15 @@ watch(
                     {{ fmtAdj(outcome.delta) }}
                   </div>
                   <div class="mm__outcome-next">{{ fmt(outcome.newMMR) }} MMR</div>
+                  <template v-if="settings.playerRating.simpleMmr.enabled && outcome.playerMmrAfter !== null">
+                    <div
+                      class="mm__outcome-player-delta"
+                      :class="(outcome.playerMmrDelta ?? 0) >= 0 ? 'mm__outcome-player-delta--up' : 'mm__outcome-player-delta--down'"
+                    >
+                      Player {{ fmtAdj(outcome.playerMmrDelta ?? 0) }}
+                    </div>
+                    <div class="mm__outcome-player-next">{{ fmt(outcome.playerMmrAfter ?? 0) }} player MMR</div>
+                  </template>
                 </div>
               </div>
             </div>
@@ -1051,6 +1067,22 @@ watch(
   &__outcome-next {
     font-size: 11px;
     color: $color-text;
+    font-variant-numeric: tabular-nums;
+  }
+
+  &__outcome-player-delta {
+    margin-top: 2px;
+    font-size: 10px;
+    font-weight: $font-weight-semibold;
+    font-variant-numeric: tabular-nums;
+
+    &--up { color: rgba($color-success, 0.9); }
+    &--down { color: rgba($color-danger, 0.9); }
+  }
+
+  &__outcome-player-next {
+    font-size: 10px;
+    color: rgba($color-text-muted, 0.92);
     font-variant-numeric: tabular-nums;
   }
 

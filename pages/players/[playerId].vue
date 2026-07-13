@@ -239,7 +239,17 @@
       <!-- ── Commanders ──────────────────────────────────────── -->
       <div class="player__section">
         <div class="player__section-header">
-          <h2 class="player__section-title">Commanders</h2>
+          <div class="player__section-heading">
+            <h2 class="player__section-title">Commanders</h2>
+            <div v-if="showAverageCommanderMmrHighlight && averageCommanderMmrInsight" class="player__section-summary">
+              <span>Avg Cmdr MMR: <strong>{{ formatCommanderMmr(averageCommanderMmrInsight.averageCommanderMmr) }}</strong></span>
+              <span>{{ averageCommanderMmrInsight.usePeakCommanderMmr ? 'Peak MMR' : 'Current MMR' }} source</span>
+              <span>{{ averageCommanderMmrInsight.countedCommanders }}/{{ averageCommanderMmrInsight.topCount }} commander slots filled</span>
+              <span v-if="averageCommanderMmrInsight.fallbackSlots > 0">
+                {{ averageCommanderMmrInsight.fallbackSlots }} fallback slot{{ averageCommanderMmrInsight.fallbackSlots === 1 ? '' : 's' }} @ {{ formatCommanderMmr(averageCommanderMmrInsight.fallbackMmr) }}
+              </span>
+            </div>
+          </div>
           <div class="player__sort">
             <button
               v-for="s in sortOptions"
@@ -431,6 +441,20 @@
               </div>
 
               <div class="cmd-row__stats-band">
+                <div
+                  v-if="showAverageCommanderMmrHighlight && getAverageCommanderMmrInsight(cmd.name)"
+                  class="cmd-row__avg-mmr-card"
+                  :class="`cmd-row__avg-mmr-card--${getAverageCommanderMmrInsight(cmd.name)?.status}`"
+                >
+                  <div class="cmd-row__avg-mmr-topline">
+                    <span class="cmd-row__avg-mmr-badge">{{ getAverageCommanderMmrInsightLabel(cmd.name) }}</span>
+                    <span class="cmd-row__avg-mmr-value">
+                      <IconsMmrIcon :size="11" />{{ formatCommanderMmr(getAverageCommanderMmrInsight(cmd.name)?.usedMmr ?? 0) }}
+                    </span>
+                  </div>
+                  <div class="cmd-row__avg-mmr-detail">{{ getAverageCommanderMmrInsightText(cmd.name) }}</div>
+                </div>
+
                 <!-- Core stats row -->
                 <div class="cmd-row__stats">
                   <div class="cmd-row__stat" :class="{ 'cmd-row__stat--sorted': sortKey === 'plays' }">
@@ -971,6 +995,21 @@ const playerRatingTooltip = computed(() => {
     return 'Points + Achievement Points + XP Points'
   }
 
+  if (leagueSettings.value.playerRating.simpleMmr.enabled) {
+    const lines = [
+      'Player MMR is a simple results-only ladder.',
+      'Each pod is treated as head-to-head MMR matchups against the other players in that game.',
+      'Achievements, commander XP, and weighted subfactors are not part of this rating.',
+    ]
+
+    if (playerStanding.value?.provisional) {
+      lines.push('')
+      lines.push('This rating is provisional because the minimum game sample has not been reached yet.')
+    }
+
+    return lines.join('\n')
+  }
+
   const breakdown = playerStanding.value?.ratingBreakdown
   const provisional = playerStanding.value?.provisional
   const lines = [
@@ -1010,6 +1049,97 @@ const avgPerGame = computed(() => {
 })
 
 const allRecords = computed(() => Object.values(gameRecords.value[playerId.value] ?? {}))
+const showAverageCommanderMmrHighlight = computed(() =>
+  playerRankingSystem.value === 'player_rating_based'
+  && !leagueSettings.value.playerRating.simpleMmr.enabled,
+)
+
+type CommanderAverageMmrInsight = {
+  commander: string
+  plays: number
+  currentMmr: number
+  peakMmr: number
+  usedMmr: number
+  contribution: number
+  rank: number | null
+  status: 'counted' | 'eligible' | 'ineligible'
+}
+
+const averageCommanderMmrInsight = computed(() => {
+  if (!showAverageCommanderMmrHighlight.value) return null
+
+  const topCount = Math.max(1, leagueSettings.value.playerRating.topCommandersForAverageMmr)
+  const minimumGames = Math.max(1, leagueSettings.value.playerRating.minimumGamesForAverageCommanderMmr)
+  const fallbackMmr = Number.isFinite(leagueSettings.value.playerRating.missingCommanderMmr)
+    ? leagueSettings.value.playerRating.missingCommanderMmr
+    : 0
+  const usePeakCommanderMmr = leagueSettings.value.playerRating.usePeakCommanderMmrForAverage
+
+  const orderedRecords = chronologicalGames.value
+    .map((game) => gameRecords.value[playerId.value]?.[game.gameId])
+    .filter((record): record is NonNullable<typeof record> => Boolean(record))
+
+  const statsByCommander = new Map<string, { commander: string; plays: number; currentMmr: number; peakMmr: number }>()
+
+  for (const record of orderedRecords) {
+    const mmrValue = record.commanderMMRAfter ?? record.commanderMMRBefore ?? 0
+    const current = statsByCommander.get(record.commander)
+    statsByCommander.set(record.commander, {
+      commander: record.commander,
+      plays: (current?.plays ?? 0) + 1,
+      currentMmr: mmrValue,
+      peakMmr: Math.max(current?.peakMmr ?? mmrValue, mmrValue),
+    })
+  }
+
+  const eligible = [...statsByCommander.values()]
+    .filter((entry) => entry.plays >= minimumGames)
+    .map((entry) => ({
+      ...entry,
+      usedMmr: usePeakCommanderMmr ? entry.peakMmr : entry.currentMmr,
+    }))
+    .sort((left, right) => right.usedMmr - left.usedMmr || left.commander.localeCompare(right.commander))
+
+  const counted = eligible.slice(0, topCount)
+  const countedNames = new Set(counted.map((entry) => entry.commander))
+  const entries = Object.fromEntries(
+    [...statsByCommander.values()].map((entry) => {
+      const usedMmr = usePeakCommanderMmr ? entry.peakMmr : entry.currentMmr
+      const rank = eligible.findIndex((eligibleEntry) => eligibleEntry.commander === entry.commander)
+      const status: CommanderAverageMmrInsight['status'] = countedNames.has(entry.commander)
+        ? 'counted'
+        : entry.plays >= minimumGames
+          ? 'eligible'
+          : 'ineligible'
+
+      return [entry.commander, {
+        commander: entry.commander,
+        plays: entry.plays,
+        currentMmr: entry.currentMmr,
+        peakMmr: entry.peakMmr,
+        usedMmr,
+        contribution: countedNames.has(entry.commander) ? usedMmr / topCount : 0,
+        rank: rank >= 0 ? rank + 1 : null,
+        status,
+      } satisfies CommanderAverageMmrInsight]
+    }),
+  ) as Record<string, CommanderAverageMmrInsight>
+
+  const countedMmrSum = counted.reduce((sum, entry) => sum + entry.usedMmr, 0)
+  const fallbackSlots = Math.max(0, topCount - counted.length)
+  const averageCommanderMmr = (countedMmrSum + fallbackSlots * fallbackMmr) / topCount
+
+  return {
+    topCount,
+    minimumGames,
+    fallbackMmr,
+    fallbackSlots,
+    countedCommanders: counted.length,
+    usePeakCommanderMmr,
+    averageCommanderMmr,
+    entries,
+  }
+})
 
 const clutchRating = computed(() => {
   const recs = allRecords.value
@@ -1035,6 +1165,36 @@ const consistencyFactor = computed(() => {
 
   return Math.round((1 - normalizedVarianceShare) * 100)
 })
+
+function getAverageCommanderMmrInsight(commanderName: string) {
+  return averageCommanderMmrInsight.value?.entries[commanderName] ?? null
+}
+
+function getAverageCommanderMmrInsightLabel(commanderName: string) {
+  const insight = getAverageCommanderMmrInsight(commanderName)
+  if (!insight) return ''
+  if (insight.status === 'counted') {
+    return insight.rank ? `Counting (#${insight.rank})` : 'Counting'
+  }
+  if (insight.status === 'eligible') return 'Eligible'
+  return 'Not Eligible'
+}
+
+function getAverageCommanderMmrInsightText(commanderName: string) {
+  const insight = getAverageCommanderMmrInsight(commanderName)
+  const summary = averageCommanderMmrInsight.value
+  if (!insight || !summary) return ''
+
+  if (insight.status === 'counted') {
+    return `Uses ${summary.usePeakCommanderMmr ? 'peak' : 'current'} commander MMR and contributes ${fmt(insight.contribution)} to the player's Avg Cmdr MMR.`
+  }
+
+  if (insight.status === 'eligible') {
+    return `Eligible at ${insight.plays} games, but outside the top ${summary.topCount} commanders currently counted.`
+  }
+
+  return `Not eligible yet: ${insight.plays}/${summary.minimumGames} games played for this commander.`
+}
 
 // ── Per-commander aggregation ─────────────────────────────────────────────────
 
@@ -2594,6 +2754,21 @@ function getEdgeTooltipText(cmd: CommanderRow) {
     color: $color-text;
   }
 
+  &__section-heading {
+    display: flex;
+    flex-direction: column;
+    gap: $spacing-1;
+    min-width: 0;
+  }
+
+  &__section-summary {
+    display: flex;
+    flex-wrap: wrap;
+    gap: $spacing-1 $spacing-3;
+    font-size: $font-size-xs;
+    color: rgba($color-text-muted, 0.88);
+  }
+
   &__sort {
     display: flex;
     gap: $spacing-2;
@@ -3065,6 +3240,64 @@ function getEdgeTooltipText(cmd: CommanderRow) {
     justify-content: space-between;
     gap: $spacing-3;
     flex-wrap: wrap;
+  }
+
+  &__avg-mmr-card {
+    display: flex;
+    flex-direction: column;
+    gap: $spacing-1;
+    min-width: min(100%, 320px);
+    padding: $spacing-2 $spacing-3;
+    border-radius: $border-radius-md;
+    border: 1px solid rgba($border-color, 0.85);
+    background: rgba(0, 0, 0, 0.24);
+
+    &--counted {
+      border-color: rgba($color-primary-light, 0.42);
+      background: rgba($color-primary, 0.14);
+    }
+
+    &--eligible {
+      border-color: rgba($color-secondary, 0.32);
+      background: rgba($color-secondary, 0.08);
+    }
+
+    &--ineligible {
+      border-color: rgba($color-danger, 0.24);
+      background: rgba($color-danger, 0.08);
+    }
+  }
+
+  &__avg-mmr-topline {
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    gap: $spacing-2;
+    flex-wrap: wrap;
+  }
+
+  &__avg-mmr-badge {
+    font-size: 10px;
+    font-weight: $font-weight-semibold;
+    letter-spacing: 0.08em;
+    text-transform: uppercase;
+    color: $color-text;
+  }
+
+  &__avg-mmr-value {
+    display: inline-flex;
+    align-items: center;
+    gap: 4px;
+    font-size: $font-size-sm;
+    font-weight: $font-weight-bold;
+    color: $color-primary-light;
+    font-variant-numeric: tabular-nums;
+  }
+
+  &__avg-mmr-detail {
+    font-size: $font-size-xs;
+    line-height: 1.45;
+    color: rgba($color-text-muted, 0.92);
   }
 
   &__stat {

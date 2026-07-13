@@ -1,9 +1,18 @@
 import type { EarnedAchievement } from '~/utils/achievements'
-import { getResolvedLeagueSettings, type LeagueSettingsDocument, type PlayerRatingConfig } from '~/utils/leagueSettings'
+import {
+  buildLeagueSeasonRanges,
+  getResolvedLeagueSettings,
+  hasActiveSeasonalRanking,
+  type LeagueSettingsDocument,
+  type PlayerRatingConfig,
+} from '~/utils/leagueSettings'
+
+export type PlayerRatingSystemMode = 'composite' | 'simple_mmr'
 
 export type PlayerRatingBreakdownKey =
   | 'recentPerformance'
   | 'allTimePerformance'
+  | 'seasonPoints'
   | 'winRate'
   | 'commanderMMRContext'
   | 'averageCommanderMMR'
@@ -22,6 +31,7 @@ export type RatingBreakdownEntry = {
 export type PlayerRatingResult = {
   playerId: string
   playerName?: string
+  system: PlayerRatingSystemMode
   rating: number
   provisional: boolean
   weightedScore: number
@@ -44,6 +54,7 @@ export type PlayerRatingSnapshot = {
   gameId: string
   date: string
   label: string
+  system: PlayerRatingSystemMode
   commander: string
   placement: number
   rating: number
@@ -57,6 +68,7 @@ export type PlayerRatingSnapshot = {
 
 export type PlayerRatingDetail = {
   playerName: string
+  system: PlayerRatingSystemMode
   rating: number
   weightedScore: number
   provisional: boolean
@@ -111,6 +123,17 @@ export type CalculatePlayerRatingInput = {
   settings?: LeagueSettingsDocument | null
 }
 
+export type SimplePlayerMmrPodRecord = {
+  playerName: string
+  placement: number
+}
+
+export type SimplePlayerMmrUpdate = {
+  playerName: string
+  delta: number
+  newRating: number
+}
+
 type RatingGameContext = {
   ownRecord: PlayerRatingRecord
   opponents: PlayerRatingRecord[]
@@ -138,6 +161,9 @@ const ACHIEVEMENT_RARITY_MULTIPLIER = {
   rare: 1.75,
   mythic: 2.4,
 } as const
+
+const SIMPLE_PLAYER_MMR_INITIAL_RATING = 1500
+const SIMPLE_PLAYER_MMR_K_FACTOR = 32
 
 export function normalizeScore(value: number, min: number, max: number) {
   if (!Number.isFinite(value)) return 0
@@ -193,6 +219,7 @@ export function buildPlayerRatingDetail(input: CalculatePlayerRatingInput): Play
 
   return {
     playerName: input.player.name,
+    system: computation.result.system,
     rating: computation.result.rating,
     weightedScore: computation.result.weightedScore,
     provisional: computation.result.provisional,
@@ -209,16 +236,25 @@ export function buildPlayerRatingDetail(input: CalculatePlayerRatingInput): Play
 function buildPlayerRatingComputation(input: CalculatePlayerRatingInput): RatingComputation {
   const settings = getResolvedLeagueSettings(input.settings)
   const config = settings.playerRating
+  if (config.simpleMmr.enabled) {
+    return buildSimplePlayerMmrComputation(input, settings)
+  }
   const records = getOrderedPlayerRecords(input.player.name, input.gameRecords, input.games)
-  const currentSeasonYear = getCurrentSeasonYear(input.games)
   const gamesById = new Map(input.games.map((game) => [game.gameId, game]))
   const gameContexts = buildGameContexts(input.player.name, input.gameRecords, input.games, config)
 
-  const recentPerformance = calculateRecentPerformanceScore(records, gameContexts, currentSeasonYear, gamesById)
+  const recentPerformance = calculateRecentPerformanceScore(records, gameContexts, settings, gamesById)
   const allTimePerformance = calculateAllTimePerformanceScore(records, gameContexts)
+  const seasonPoints = calculateSeasonPointsScore(records, input.games, settings)
   const winRate = calculateWinRateScore(input.player)
   const commanderMMRContext = calculateCommanderMMRContextScore(gameContexts)
-  const averageCommanderMMR = calculateAverageCommanderMMRScore(records)
+  const averageCommanderMMR = calculateAverageCommanderMMRScore(
+    records,
+    config.topCommandersForAverageMmr,
+    config.minimumGamesForAverageCommanderMmr,
+    config.missingCommanderMmr,
+    config.usePeakCommanderMmrForAverage,
+  )
   const activityPoints = calculateActivityPointsScore(input.player, records)
   const achievements = calculateAchievementScore(input.player, settings.achievements)
   const clutch = calculateClutchScore(gameContexts)
@@ -228,6 +264,7 @@ function buildPlayerRatingComputation(input: CalculatePlayerRatingInput): Rating
   const breakdown = {
     recentPerformance: buildBreakdownEntry(recentPerformance.rawValue, recentPerformance.normalizedScore, weights.recentPerformance),
     allTimePerformance: buildBreakdownEntry(allTimePerformance.rawValue, allTimePerformance.normalizedScore, weights.allTimePerformance),
+    seasonPoints: buildBreakdownEntry(seasonPoints.rawValue, seasonPoints.normalizedScore, weights.seasonPoints),
     winRate: buildBreakdownEntry(winRate.rawValue, winRate.normalizedScore, weights.winRate),
     commanderMMRContext: buildBreakdownEntry(commanderMMRContext.rawValue, commanderMMRContext.normalizedScore, weights.commanderMMRContext),
     averageCommanderMMR: buildBreakdownEntry(averageCommanderMMR.rawValue, averageCommanderMMR.normalizedScore, weights.averageCommanderMMR),
@@ -251,6 +288,7 @@ function buildPlayerRatingComputation(input: CalculatePlayerRatingInput): Rating
     {
       recentPerformance,
       allTimePerformance,
+      seasonPoints,
       winRate,
       commanderMMRContext,
       averageCommanderMMR,
@@ -266,6 +304,7 @@ function buildPlayerRatingComputation(input: CalculatePlayerRatingInput): Rating
     result: {
       playerId: input.player.name,
       playerName: input.player.name,
+      system: 'composite',
       rating,
       provisional: input.player.gamesPlayed < config.provisionalGames,
       weightedScore: clamp(weightedWithConfidence, 0, 100),
@@ -273,6 +312,28 @@ function buildPlayerRatingComputation(input: CalculatePlayerRatingInput): Rating
     },
     confidenceMultiplier: activityConfidence,
     factors,
+  }
+}
+
+function buildSimplePlayerMmrComputation(
+  input: CalculatePlayerRatingInput,
+  settings: ReturnType<typeof getResolvedLeagueSettings>,
+): RatingComputation {
+  const rating = calculateSimplePlayerMmrForPlayer(input.player.name, input.gameRecords, input.games)
+  const confidenceMultiplier = clamp(input.player.gamesPlayed / settings.playerRating.provisionalGames, 0, 1)
+
+  return {
+    result: {
+      playerId: input.player.name,
+      playerName: input.player.name,
+      system: 'simple_mmr',
+      rating,
+      provisional: input.player.gamesPlayed < settings.playerRating.provisionalGames,
+      weightedScore: rating,
+      breakdown: createZeroBreakdown(),
+    },
+    confidenceMultiplier,
+    factors: createZeroFactorDetails(),
   }
 }
 
@@ -293,20 +354,26 @@ export function calculatePlayerRatings(
 export function calculateRecentPerformanceScore(
   records: PlayerRatingRecord[],
   gameContexts: RatingGameContext[],
-  currentSeasonYear: number | null,
+  settings: ReturnType<typeof getResolvedLeagueSettings>,
   gamesById: Map<string, PlayerRatingGame>,
 ) {
   const adjustedPoints = gameContexts.map((context) => context.adjustedBaselinePoints)
   const last10Average = average(adjustedPoints.slice(-10))
   const last25Average = average(adjustedPoints.slice(-25))
+  const currentSeason = getCurrentSeasonRange(settings)
   const seasonAverage = average(
     records
       .filter((record) => {
-        if (currentSeasonYear === null) return false
         const game = gamesById.get(record.gameId)
         if (!game) return false
-        const date = new Date(game.date)
-        return !Number.isNaN(date.getTime()) && date.getUTCFullYear() === currentSeasonYear
+        const timestamp = new Date(game.date).getTime()
+        if (Number.isNaN(timestamp)) return false
+        if (currentSeason) {
+          return timestamp >= currentSeason.startMs && timestamp <= currentSeason.endMs
+        }
+        const date = new Date(timestamp)
+        const currentSeasonYear = getCurrentSeasonYear(gamesById)
+        return currentSeasonYear !== null && date.getUTCFullYear() === currentSeasonYear
       })
       .map((record) => {
         const context = gameContexts.find((entry) => entry.ownRecord.gameId === record.gameId)
@@ -338,6 +405,68 @@ export function calculateAllTimePerformanceScore(
   }
 }
 
+export function calculateSeasonPointsScore(
+  records: PlayerRatingRecord[],
+  games: PlayerRatingGame[],
+  settings: ReturnType<typeof getResolvedLeagueSettings>,
+) {
+  const gameTimeById = new Map(
+    games.map((game) => {
+      const timestamp = new Date(game.date).getTime()
+      return [game.gameId, Number.isNaN(timestamp) ? null : timestamp] as const
+    }),
+  )
+  const configuredSeasons = hasActiveSeasonalRanking(settings.standings.seasonalRanking)
+    ? buildLeagueSeasonRanges(settings.standings.seasonalRanking)
+    : []
+
+  if (configuredSeasons.length > 0) {
+    const now = Date.now()
+    const startedSeasons = configuredSeasons.filter((season) => season.startMs <= now)
+    const seasonAverages = startedSeasons.map((season) => {
+      const seasonRecords = records.filter((record) => {
+        const timestamp = gameTimeById.get(record.gameId)
+        return timestamp !== null && timestamp !== undefined && timestamp >= season.startMs && timestamp <= season.endMs
+      })
+
+      return seasonRecords.length > 0
+        ? seasonRecords.reduce((sum, record) => sum + record.finalPoints, 0) / seasonRecords.length
+        : 0
+    })
+    const rawValue = average(seasonAverages)
+
+    return {
+      rawValue,
+      normalizedScore: normalizeScore(rawValue, 0, 1.8),
+      seasonAverage: round3(rawValue),
+      playedSeasons: startedSeasons.length,
+      configuredSeasons: configuredSeasons.length,
+      usesConfiguredSeasons: 1,
+    }
+  }
+
+  const gamesById = new Map(games.map((game) => [game.gameId, game]))
+  const currentSeasonYear = getCurrentSeasonYear(gamesById)
+  const currentSeasonRecords = records.filter((record) => {
+    if (currentSeasonYear === null) return false
+    const timestamp = gameTimeById.get(record.gameId)
+    if (timestamp === null || timestamp === undefined) return false
+    return new Date(timestamp).getUTCFullYear() === currentSeasonYear
+  })
+  const rawValue = currentSeasonRecords.length > 0
+    ? currentSeasonRecords.reduce((sum, record) => sum + record.finalPoints, 0) / currentSeasonRecords.length
+    : 0
+
+  return {
+    rawValue,
+    normalizedScore: normalizeScore(rawValue, 0, 1.8),
+    seasonAverage: round3(rawValue),
+    playedSeasons: currentSeasonYear === null ? 0 : 1,
+    configuredSeasons: 0,
+    usesConfiguredSeasons: 0,
+  }
+}
+
 export function calculateWinRateScore(player: PlayerRatingPlayerState) {
   const rawValue = player.gamesPlayed > 0 ? player.baseWins / player.gamesPlayed : 0
   return {
@@ -358,12 +487,51 @@ export function calculateCommanderMMRContextScore(gameContexts: RatingGameContex
   }
 }
 
-export function calculateAverageCommanderMMRScore(records: PlayerRatingRecord[]) {
-  const rawValue = average(records.map((record) => record.commanderMMRAfter ?? record.commanderMMRBefore ?? 0))
+export function calculateAverageCommanderMMRScore(
+  records: PlayerRatingRecord[],
+  topCommanderCount = 3,
+  minimumGamesPerCommander = 1,
+  missingCommanderMmr = 0,
+  usePeakCommanderMmr = false,
+) {
+  const commanderStats = new Map<string, { gamesPlayed: number; latestMmr: number; peakMmr: number }>()
+
+  for (const record of records) {
+    const current = commanderStats.get(record.commander)
+    const mmrValue = record.commanderMMRAfter ?? record.commanderMMRBefore ?? 0
+    commanderStats.set(record.commander, {
+      gamesPlayed: (current?.gamesPlayed ?? 0) + 1,
+      latestMmr: mmrValue,
+      peakMmr: Math.max(current?.peakMmr ?? mmrValue, mmrValue),
+    })
+  }
+
+  const sanitizedTopCommanderCount = Math.max(1, topCommanderCount)
+  const sanitizedMinimumGames = Math.max(1, minimumGamesPerCommander)
+  const sanitizedMissingCommanderMmr = Number.isFinite(missingCommanderMmr) ? missingCommanderMmr : 0
+  const eligibleCommanders = [...commanderStats.values()]
+    .filter((commander) => commander.gamesPlayed >= sanitizedMinimumGames)
+
+  const bestCommanderMmrs = eligibleCommanders
+    .map((commander) => usePeakCommanderMmr ? commander.peakMmr : commander.latestMmr)
+    .sort((left, right) => right - left)
+    .slice(0, sanitizedTopCommanderCount)
+
+  while (bestCommanderMmrs.length < sanitizedTopCommanderCount) {
+    bestCommanderMmrs.push(sanitizedMissingCommanderMmr)
+  }
+
+  const rawValue = average(bestCommanderMmrs)
   return {
     rawValue,
     normalizedScore: normalizeScore(rawValue, 1000, 2600),
     averageCommanderMMR: round3(rawValue),
+    countedCommanders: sanitizedTopCommanderCount,
+    availableCommanders: commanderStats.size,
+    eligibleCommanders: eligibleCommanders.length,
+    minimumGamesPerCommander: sanitizedMinimumGames,
+    missingCommanderMmr: round3(sanitizedMissingCommanderMmr),
+    usePeakCommanderMmr: usePeakCommanderMmr ? 1 : 0,
   }
 }
 
@@ -486,6 +654,17 @@ function buildFactorDetails(
         'raw = adjusted average * confidence',
       ],
     ),
+    seasonPoints: buildFactorDetail(
+      'seasonPoints',
+      breakdown.seasonPoints,
+      [
+        `season avg points: ${round3(factors.seasonPoints.seasonAverage ?? 0)}`,
+        `played seasons counted: ${Math.round(factors.seasonPoints.playedSeasons ?? 0)}`,
+        (factors.seasonPoints.usesConfiguredSeasons ?? 0) > 0
+          ? `configured seasons available: ${Math.round(factors.seasonPoints.configuredSeasons ?? 0)}`
+          : 'falling back to the latest calendar-season average',
+      ],
+    ),
     winRate: buildFactorDetail(
       'winRate',
       breakdown.winRate,
@@ -509,6 +688,12 @@ function buildFactorDetails(
       breakdown.averageCommanderMMR,
       [
         `average commander MMR: ${round3(factors.averageCommanderMMR.averageCommanderMMR ?? 0)}`,
+        `best commanders counted: ${Math.round(factors.averageCommanderMMR.countedCommanders ?? 0)}`,
+        `minimum games per commander: ${Math.round(factors.averageCommanderMMR.minimumGamesPerCommander ?? 0)}`,
+        `fallback MMR for missing slots: ${round3(factors.averageCommanderMMR.missingCommanderMmr ?? 0)}`,
+        `MMR source: ${(factors.averageCommanderMMR.usePeakCommanderMmr ?? 0) > 0 ? 'peak ever' : 'current'}`,
+        `eligible commanders: ${Math.round(factors.averageCommanderMMR.eligibleCommanders ?? 0)}`,
+        `commanders available: ${Math.round(factors.averageCommanderMMR.availableCommanders ?? 0)}`,
         'higher values mean your regular commander pool is stronger on average',
       ],
     ),
@@ -605,6 +790,7 @@ function buildFallbackSnapshot(computation: RatingComputation) {
     gameId: '',
     date: 'Now',
     label: 'Now',
+    system: computation.result.system,
     commander: '',
     placement: 0,
     rating: computation.result.rating,
@@ -615,6 +801,110 @@ function buildFallbackSnapshot(computation: RatingComputation) {
     breakdown: computation.result.breakdown,
     factors: computation.factors,
   } satisfies PlayerRatingSnapshot
+}
+
+function calculateSimplePlayerMmrForPlayer(
+  playerName: string,
+  gameRecords: Record<string, Record<string, PlayerRatingRecord>>,
+  games: PlayerRatingGame[],
+) {
+  const playerRecords = getOrderedPlayerRecords(playerName, gameRecords, games)
+  if (playerRecords.length === 0) return 0
+  const ratings = calculateSimplePlayerMmrRatings(gameRecords, games)
+  return round3(ratings[playerName] ?? SIMPLE_PLAYER_MMR_INITIAL_RATING)
+}
+
+export function calculateSimplePlayerMmrRatings(
+  gameRecords: Record<string, Record<string, PlayerRatingRecord>>,
+  games: PlayerRatingGame[],
+) {
+  const ratings = new Map<string, number>()
+
+  for (const game of games) {
+    const podRecords = game.players
+      .map((player) => gameRecords[player.name]?.[game.gameId])
+      .filter((entry): entry is PlayerRatingRecord => Boolean(entry))
+      .map((record) => ({
+        playerName: record.playerName,
+        placement: record.placement,
+      }))
+
+    if (podRecords.length < 2) continue
+
+    const updates = calculateSimplePlayerMmrUpdates(
+      Object.fromEntries(ratings.entries()),
+      podRecords,
+    )
+
+    for (const update of updates) {
+      ratings.set(update.playerName, update.newRating)
+    }
+  }
+
+  return Object.fromEntries(ratings.entries()) as Record<string, number>
+}
+
+export function calculateSimplePlayerMmrUpdates(
+  currentRatings: Record<string, number>,
+  podRecords: SimplePlayerMmrPodRecord[],
+): SimplePlayerMmrUpdate[] {
+  if (podRecords.length < 2) return []
+
+  return podRecords.map((record) => {
+    const currentRating = currentRatings[record.playerName] ?? SIMPLE_PLAYER_MMR_INITIAL_RATING
+    let actualScore = 0
+    let expectedScore = 0
+
+    for (const opponent of podRecords) {
+      if (opponent.playerName === record.playerName) continue
+
+      const opponentRating = currentRatings[opponent.playerName] ?? SIMPLE_PLAYER_MMR_INITIAL_RATING
+      expectedScore += 1 / (1 + 10 ** ((opponentRating - currentRating) / 400))
+
+      if (record.placement < opponent.placement) actualScore += 1
+      else if (record.placement === opponent.placement) actualScore += 0.5
+    }
+
+    const perOpponentK = SIMPLE_PLAYER_MMR_K_FACTOR / Math.max(1, podRecords.length - 1)
+    const delta = perOpponentK * (actualScore - expectedScore)
+
+    return {
+      playerName: record.playerName,
+      delta: round3(delta),
+      newRating: round3(currentRating + delta),
+    }
+  })
+}
+
+function createZeroBreakdown(): Record<PlayerRatingBreakdownKey, RatingBreakdownEntry> {
+  return {
+    recentPerformance: buildBreakdownEntry(0, 0, 0),
+    allTimePerformance: buildBreakdownEntry(0, 0, 0),
+    seasonPoints: buildBreakdownEntry(0, 0, 0),
+    winRate: buildBreakdownEntry(0, 0, 0),
+    commanderMMRContext: buildBreakdownEntry(0, 0, 0),
+    averageCommanderMMR: buildBreakdownEntry(0, 0, 0),
+    activityPoints: buildBreakdownEntry(0, 0, 0),
+    achievements: buildBreakdownEntry(0, 0, 0),
+    clutch: buildBreakdownEntry(0, 0, 0),
+    commanderDiversity: buildBreakdownEntry(0, 0, 0),
+  }
+}
+
+function createZeroFactorDetails(): Record<PlayerRatingBreakdownKey, PlayerRatingFactorDetail> {
+  const breakdown = createZeroBreakdown()
+  return {
+    recentPerformance: buildFactorDetail('recentPerformance', breakdown.recentPerformance, ['Not used in simple player MMR mode.']),
+    allTimePerformance: buildFactorDetail('allTimePerformance', breakdown.allTimePerformance, ['Not used in simple player MMR mode.']),
+    seasonPoints: buildFactorDetail('seasonPoints', breakdown.seasonPoints, ['Not used in simple player MMR mode.']),
+    winRate: buildFactorDetail('winRate', breakdown.winRate, ['Not used in simple player MMR mode.']),
+    commanderMMRContext: buildFactorDetail('commanderMMRContext', breakdown.commanderMMRContext, ['Not used in simple player MMR mode.']),
+    averageCommanderMMR: buildFactorDetail('averageCommanderMMR', breakdown.averageCommanderMMR, ['Not used in simple player MMR mode.']),
+    activityPoints: buildFactorDetail('activityPoints', breakdown.activityPoints, ['Not used in simple player MMR mode.']),
+    achievements: buildFactorDetail('achievements', breakdown.achievements, ['Not used in simple player MMR mode.']),
+    clutch: buildFactorDetail('clutch', breakdown.clutch, ['Not used in simple player MMR mode.']),
+    commanderDiversity: buildFactorDetail('commanderDiversity', breakdown.commanderDiversity, ['Not used in simple player MMR mode.']),
+  }
 }
 
 function formatSnapshotDate(value: string | Date | undefined) {
@@ -638,6 +928,11 @@ const FACTOR_META: Record<PlayerRatingBreakdownKey, { label: string, description
     label: 'All-Time Performance',
     description: 'Long-term adjusted point average, scaled up as your sample becomes trustworthy.',
     formula: 'Normalize(adjusted average * sample confidence) × weight',
+  },
+  seasonPoints: {
+    label: 'Season Points',
+    description: 'Rewards stronger average points across the configured league seasons.',
+    formula: 'Normalize(average of started season point averages) x weight',
   },
   winRate: {
     label: 'Win Rate',
@@ -751,11 +1046,20 @@ function calculateCommanderEntropy(counts: number[], total: number) {
   }, 0)
 }
 
-function getCurrentSeasonYear(games: PlayerRatingGame[]) {
-  const latest = games.at(-1)
+function getCurrentSeasonYear(gamesById: Map<string, PlayerRatingGame>) {
+  const latest = [...gamesById.values()].at(-1)
   if (!latest) return null
   const date = new Date(latest.date)
   return Number.isNaN(date.getTime()) ? null : date.getUTCFullYear()
+}
+
+function getCurrentSeasonRange(settings: ReturnType<typeof getResolvedLeagueSettings>) {
+  if (!hasActiveSeasonalRanking(settings.standings.seasonalRanking)) return null
+  const seasons = buildLeagueSeasonRanges(settings.standings.seasonalRanking)
+  const now = Date.now()
+  return seasons.find((season) => now >= season.startMs && now <= season.endMs)
+    ?? seasons.filter((season) => season.startMs <= now).at(-1)
+    ?? null
 }
 
 function average(values: number[]) {

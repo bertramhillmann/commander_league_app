@@ -7,6 +7,13 @@ export interface ISettings extends Document {
   playerRankingSystem?: 'classic' | 'player_rating_based'
   playerRating?: {
     provisionalGames?: number
+    topCommandersForAverageMmr?: number
+    minimumGamesForAverageCommanderMmr?: number
+    missingCommanderMmr?: number
+    usePeakCommanderMmrForAverage?: boolean
+    simpleMmr?: {
+      enabled?: boolean
+    }
     lPointMmrModifier?: {
       enabled?: boolean
     }
@@ -31,6 +38,12 @@ export interface ISettings extends Document {
     freeGamesMinimumAvg?: number
     freeGamesGraceMisses?: number
     penaltyFactor?: number
+    seasonalRanking?: {
+      enabled?: boolean
+      leagueStartDate?: string
+      leagueEndDate?: string
+      seasonCount?: number
+    }
   }
   shop?: {
     loosterCost?: number

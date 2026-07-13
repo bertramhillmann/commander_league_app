@@ -14,7 +14,7 @@ export default defineEventHandler(async (event) => {
   const body = await readBody<{ settings?: LeagueSettingsDocument | null }>(event)
   const nextSettings = body?.settings ?? null
 
-  if (nextSettings?.playerRankingSystem === 'player_rating_based') {
+  if (nextSettings?.playerRankingSystem === 'player_rating_based' && !nextSettings.playerRating?.simpleMmr?.enabled) {
     const weights = nextSettings.playerRating?.weights
     const totalWeight = Object.values(weights ?? {}).reduce((sum, value) => sum + (Number(value) || 0), 0)
     if (Math.abs(totalWeight - 1) > 0.0001) {
@@ -70,6 +70,11 @@ function isEmptySettings(settings: LeagueSettingsDocument) {
     && Object.keys(settings.achievements ?? {}).length === 0
     && settings.playerRankingSystem === undefined
     && settings.playerRating?.provisionalGames === undefined
+    && settings.playerRating?.topCommandersForAverageMmr === undefined
+    && settings.playerRating?.minimumGamesForAverageCommanderMmr === undefined
+    && settings.playerRating?.missingCommanderMmr === undefined
+    && settings.playerRating?.usePeakCommanderMmrForAverage === undefined
+    && settings.playerRating?.simpleMmr?.enabled === undefined
     && settings.playerRating?.commanderMMRPointModifier?.enabled === undefined
     && settings.playerRating?.commanderMMRPointModifier?.maxModifierPercent === undefined
     && Object.keys(settings.playerRating?.weights ?? {}).length === 0
@@ -86,5 +91,9 @@ function isEmptySettings(settings: LeagueSettingsDocument) {
     && settings.standings?.freeGamesMinimumAvg === undefined
     && settings.standings?.freeGamesGraceMisses === undefined
     && settings.standings?.penaltyFactor === undefined
+    && settings.standings?.seasonalRanking?.enabled === undefined
+    && settings.standings?.seasonalRanking?.leagueStartDate === undefined
+    && settings.standings?.seasonalRanking?.leagueEndDate === undefined
+    && settings.standings?.seasonalRanking?.seasonCount === undefined
     && settings.shop?.loosterCost === undefined
 }
