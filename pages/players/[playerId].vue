@@ -289,12 +289,19 @@
                     {{ getCommanderIndicator(cmd)?.direction === 'up' ? '▲' : '▼' }}
                   </span>
                 </div>
-                <img
-                  v-if="artUrls.get(cmd.name)"
-                  :src="artUrls.get(cmd.name)"
-                  :alt="cmd.name"
-                  class="cmd-row__card-img"
-                />
+                <template v-if="artUrls.get(cmd.name)">
+                  <img
+                    :src="artUrls.get(cmd.name)"
+                    alt=""
+                    aria-hidden="true"
+                    class="cmd-row__card-bg"
+                  />
+                  <img
+                    :src="artUrls.get(cmd.name)"
+                    :alt="cmd.name"
+                    class="cmd-row__card-img"
+                  />
+                </template>
                 <div v-else class="cmd-row__card-placeholder" />
               </div>
               <div
@@ -440,6 +447,79 @@
                 </span>
               </div>
 
+              <div class="cmd-row__slot-section">
+                <div class="cmd-row__slot-section-head">
+                  <span class="cmd-row__slot-label">Game Changer / Combo</span>
+                  <span class="cmd-row__slot-count">{{ getCommanderSlotCapacity() }} slot{{ getCommanderSlotCapacity() === 1 ? '' : 's' }}</span>
+                </div>
+
+                <div class="cmd-row__slot-list">
+                  <button
+                    v-for="slotNumber in getCommanderSlotCapacity()"
+                    :key="`${cmd.name}-slot-${slotNumber}`"
+                    type="button"
+                    class="cmd-row__slot"
+                    :class="{
+                      'cmd-row__slot--filled': getCommanderSlotCards(cmd.name, slotNumber - 1).length > 0,
+                      'cmd-row__slot--editable': isOwnProfile,
+                      'cmd-row__slot--active': isCommanderSlotEditorOpen(cmd.name, slotNumber - 1),
+                    }"
+                    :disabled="!isOwnProfile"
+                    :data-slot-trigger-id="getCommanderSlotTriggerId(cmd.name, slotNumber - 1)"
+                    @click="openCommanderSlotEditor(cmd.name, slotNumber - 1, $event)"
+                  >
+                    <span class="cmd-row__slot-eyebrow">Slot {{ slotNumber }}</span>
+                    <div v-if="getCommanderSlotCards(cmd.name, slotNumber - 1).length > 0" class="cmd-row__slot-card-stack">
+                      <a
+                        v-for="(card, cardIndex) in getCommanderSlotCards(cmd.name, slotNumber - 1)"
+                        :key="`${cmd.name}-${slotNumber}-${card.name}`"
+                        class="cmd-row__slot-card"
+                        :class="{ 'cmd-row__slot-card--combo': getCommanderSlotCards(cmd.name, slotNumber - 1).length > 1 }"
+                        :style="{ zIndex: String(cardIndex + 1) }"
+                        :href="card.scryfallUrl || undefined"
+                        target="_blank"
+                        rel="noopener noreferrer"
+                      >
+                        <img :src="card.imageUrl" :alt="card.name" class="cmd-row__slot-card-image" loading="lazy" />
+                      </a>
+                    </div>
+                    <span class="cmd-row__slot-text">
+                      {{ getCommanderSlotValue(cmd.name, slotNumber - 1) || (isOwnProfile ? 'Add a card or combo' : 'Empty') }}
+                    </span>
+                  </button>
+                </div>
+
+                <div v-if="isCommanderSlotEditorOpen(cmd.name, commanderSlotEditor.slotIndex)" class="cmd-row__slot-editor">
+                  <input
+                    v-model="commanderSlotEditor.value"
+                    type="text"
+                    class="cmd-row__slot-input"
+                    placeholder="Card name or card one, card two"
+                    @keydown.enter.prevent="saveCommanderSlot(cmd.name, commanderSlotEditor.slotIndex)"
+                    @keydown.esc.prevent="closeCommanderSlotEditor()"
+                  />
+                  <button
+                    type="button"
+                    class="cmd-row__deck-btn cmd-row__deck-btn--primary"
+                    :disabled="commanderSlotEditor.saving"
+                    @click="saveCommanderSlot(cmd.name, commanderSlotEditor.slotIndex)"
+                  >
+                    {{ commanderSlotEditor.saving ? 'Saving…' : 'Save Slot' }}
+                  </button>
+                  <button
+                    type="button"
+                    class="cmd-row__deck-btn"
+                    :disabled="commanderSlotEditor.saving"
+                    @click="closeCommanderSlotEditor()"
+                  >
+                    Cancel
+                  </button>
+                  <span v-if="commanderSlotEditor.error" class="cmd-row__deck-error">
+                    {{ commanderSlotEditor.error }}
+                  </span>
+                </div>
+              </div>
+
               <div class="cmd-row__stats-band">
                 <div
                   v-if="showAverageCommanderMmrHighlight && getAverageCommanderMmrInsight(cmd.name)"
@@ -504,32 +584,92 @@
                   </div>
                 </div>
 
-                <div v-if="cmd.timeline.length > 0 || cmd.mmrTimeline.length > 0" class="cmd-row__timeline-wrap">
-                  <div class="cmd-row__timeline-switcher">
-                    <button
-                      type="button"
-                      class="cmd-row__timeline-switch"
-                      :class="{ 'cmd-row__timeline-switch--active': activeCommanderTimeline === 'mmr' }"
-                      @click="activeCommanderTimeline = 'mmr'"
-                    >
-                      MMR Rating
-                    </button>
-                    <button
-                      type="button"
-                      class="cmd-row__timeline-switch"
-                      :class="{ 'cmd-row__timeline-switch--active': activeCommanderTimeline === 'placement' }"
-                      @click="activeCommanderTimeline = 'placement'"
-                    >
-                      Placement
-                    </button>
+                <div class="cmd-row__meta-row">
+                  <div class="cmd-row__slot-section cmd-row__slot-section--inline">
+                    <div class="cmd-row__slot-section-head">
+                      <span class="cmd-row__slot-label">Game Changer / Combo</span>
+                      <span class="cmd-row__slot-count">{{ getCommanderSlotCapacity() }} slot{{ getCommanderSlotCapacity() === 1 ? '' : 's' }}</span>
+                    </div>
+
+                    <div class="cmd-row__slot-list">
+                      <div
+                        v-for="slotNumber in getCommanderSlotCapacity()"
+                        :key="`${cmd.name}-inline-slot-${slotNumber}`"
+                        class="cmd-row__slot cmd-row__slot--compact"
+                        :class="{
+                          'cmd-row__slot--filled': getCommanderSlotCards(cmd.name, slotNumber - 1).length > 0,
+                          'cmd-row__slot--editable': isOwnProfile,
+                          'cmd-row__slot--active': isCommanderSlotEditorOpen(cmd.name, slotNumber - 1),
+                        }"
+                      >
+                        <button
+                          type="button"
+                          class="cmd-row__slot-btn"
+                          :disabled="!isOwnProfile"
+                          :data-slot-trigger-id="getCommanderSlotTriggerId(cmd.name, slotNumber - 1)"
+                          @click="openCommanderSlotEditor(cmd.name, slotNumber - 1, $event)"
+                        >
+                          <div
+                            v-if="getCommanderSlotCards(cmd.name, slotNumber - 1).length > 0"
+                            class="cmd-row__slot-card-fill"
+                          >
+                            <a
+                              v-for="card in getCommanderSlotCards(cmd.name, slotNumber - 1)"
+                              :key="`${cmd.name}-${slotNumber}-${card.name}`"
+                              class="cmd-row__slot-card-fill-item"
+                              :href="card.scryfallUrl || undefined"
+                              target="_blank"
+                              rel="noopener noreferrer"
+                            >
+                              <img :src="card.imageUrl" :alt="card.name" class="cmd-row__slot-card-image" loading="lazy" />
+                            </a>
+                          </div>
+                          <span class="cmd-row__slot-eyebrow">Slot {{ slotNumber }}</span>
+                          <span class="cmd-row__slot-text">
+                            {{ getCommanderSlotValue(cmd.name, slotNumber - 1) || (isOwnProfile ? 'Add a card or combo' : 'Empty') }}
+                          </span>
+                        </button>
+                        <button
+                          v-if="isOwnProfile && getCommanderSlotCards(cmd.name, slotNumber - 1).length > 0"
+                          type="button"
+                          class="cmd-row__slot-clear"
+                          title="Clear slot"
+                          aria-label="Clear slot"
+                          @click="clearCommanderSlot(cmd.name, slotNumber - 1, $event)"
+                        >
+                          ✕
+                        </button>
+                      </div>
+                    </div>
                   </div>
-                  <ChartsPlacementTimeline
-                    :points="activeCommanderTimeline === 'mmr' ? cmd.mmrTimeline : cmd.timeline"
-                    :mode="activeCommanderTimeline"
-                    :title="activeCommanderTimeline === 'mmr' ? 'MMR Rating Over Time' : 'Placements Over Time'"
-                    class="cmd-row__timeline"
-                    compact
-                  />
+
+                  <div v-if="cmd.timeline.length > 0 || cmd.mmrTimeline.length > 0" class="cmd-row__timeline-wrap">
+                    <div class="cmd-row__timeline-switcher">
+                      <button
+                        type="button"
+                        class="cmd-row__timeline-switch"
+                        :class="{ 'cmd-row__timeline-switch--active': activeCommanderTimeline === 'mmr' }"
+                        @click="activeCommanderTimeline = 'mmr'"
+                      >
+                        MMR Rating
+                      </button>
+                      <button
+                        type="button"
+                        class="cmd-row__timeline-switch"
+                        :class="{ 'cmd-row__timeline-switch--active': activeCommanderTimeline === 'placement' }"
+                        @click="activeCommanderTimeline = 'placement'"
+                      >
+                        Placement
+                      </button>
+                    </div>
+                    <ChartsPlacementTimeline
+                      :points="activeCommanderTimeline === 'mmr' ? cmd.mmrTimeline : cmd.timeline"
+                      :mode="activeCommanderTimeline"
+                      :title="activeCommanderTimeline === 'mmr' ? 'MMR Rating Over Time' : 'Placements Over Time'"
+                      class="cmd-row__timeline"
+                      compact
+                    />
+                  </div>
                 </div>
               </div>
 
@@ -815,6 +955,82 @@
       </aside>
     </div>
   </Teleport>
+
+  <Teleport to="body">
+  <div
+    v-if="commanderSlotEditor.slotIndex >= 0"
+    ref="commanderSlotPopupRef"
+    class="cmd-row__slot-popup"
+    :style="{
+      left: `${commanderSlotEditor.popupX}px`,
+      top: `${commanderSlotEditor.popupY}px`,
+    }"
+  >
+    <input
+      v-model="commanderSlotEditor.value"
+      type="text"
+      class="cmd-row__slot-input"
+      placeholder="Card name or card one, card two"
+      @keydown.enter.prevent="saveCommanderSlot(commanderSlotEditor.commanderName, commanderSlotEditor.slotIndex)"
+      @keydown.esc.prevent="closeCommanderSlotEditor()"
+    />
+    <div v-if="commanderSlotEditor.previewLoading" class="cmd-row__slot-preview-status">
+      Checking Scryfall…
+    </div>
+    <div
+      v-else-if="commanderSlotEditor.previewCards.length > 0"
+      class="cmd-row__slot-preview"
+    >
+      <div
+        class="cmd-row__slot-card-stack"
+        :class="{ 'cmd-row__slot-card-stack--compact': commanderSlotEditor.previewCards.length > 1 }"
+      >
+        <a
+          v-for="card in commanderSlotEditor.previewCards"
+          :key="card.name"
+          class="cmd-row__slot-card"
+          :class="{ 'cmd-row__slot-card--combo': commanderSlotEditor.previewCards.length > 1 }"
+          :href="card.scryfallUrl"
+          target="_blank"
+          rel="noreferrer"
+        >
+          <img
+            :src="card.imageUrl"
+            :alt="card.name"
+            class="cmd-row__slot-card-image"
+          />
+        </a>
+      </div>
+      <div class="cmd-row__slot-preview-names">
+        {{ commanderSlotEditor.previewCards.map((card) => card.name).join(' + ') }}
+      </div>
+    </div>
+    <span v-if="commanderSlotEditor.previewError" class="cmd-row__deck-error">
+      {{ commanderSlotEditor.previewError }}
+    </span>
+    <div class="cmd-row__slot-popup-actions">
+      <button
+        type="button"
+        class="cmd-row__deck-btn cmd-row__deck-btn--primary"
+        :disabled="isCommanderSlotSaveDisabled()"
+        @click="saveCommanderSlot(commanderSlotEditor.commanderName, commanderSlotEditor.slotIndex)"
+      >
+        {{ commanderSlotEditor.saving ? 'Saving…' : 'Save Slot' }}
+      </button>
+      <button
+        type="button"
+        class="cmd-row__deck-btn"
+        :disabled="commanderSlotEditor.saving"
+        @click="closeCommanderSlotEditor()"
+      >
+        Cancel
+      </button>
+    </div>
+    <span v-if="commanderSlotEditor.error" class="cmd-row__deck-error">
+      {{ commanderSlotEditor.error }}
+    </span>
+  </div>
+</Teleport>
 </template>
 
 <script setup lang="ts">
@@ -838,6 +1054,7 @@ import { buildPlayerSuggestion, type PlayerCommanderPickSuggestion } from '~/uti
 import { getAchievementDefinition } from '~/utils/achievements'
 import type { CommanderTitleId } from '~/utils/titles'
 import { getCommanderTierFromMMR, type CommanderMMRTier } from '~/composables/useCommanderMMR'
+import type { LoosterPurchaseRecord } from '~/utils/loosterPurchases'
 
 const RARITY_ORDER: Record<string, number> = { common: 0, uncommon: 1, rare: 2, mythic: 3 }
 import { getCommanderTitleSummary, type CommanderTitleResult } from '~/utils/titles'
@@ -1256,7 +1473,15 @@ type CommanderDeckLinkRecord = {
   archidektUrl: string
   archidektDeckId: string
   selectedTitle?: CommanderTitleId
+  gameChangerSlots?: string[]
   updatedAt?: string
+}
+
+type CommanderSlotCard = {
+  name: string
+  imageUrl: string
+  previewUrl: string
+  scryfallUrl: string
 }
 
 type ArchidektDeckCard = {
@@ -1305,6 +1530,37 @@ const titleSaving = reactive<Record<string, boolean>>({})
 const deckPopoverOpen = ref<string | null>(null)
 const deckLinkErrors = reactive<Record<string, string>>({})
 const titleErrors = reactive<Record<string, string>>({})
+const playerPurchases = ref<LoosterPurchaseRecord[]>([])
+const commanderSlotCards = ref<Record<string, CommanderSlotCard[]>>({})
+const commanderSlotEditor = reactive({
+  commanderName: '',
+  slotIndex: -1,
+  value: '',
+  saving: false,
+  error: '',
+  previewLoading: false,
+  previewError: '',
+  previewCards: [] as CommanderSlotCard[],
+  popupX: 0,
+  popupY: 0,
+})
+const commanderSlotPopupRef = ref<HTMLElement | null>(null)
+let commanderSlotPreviewTimer: ReturnType<typeof setTimeout> | null = null
+let commanderSlotPreviewToken = 0
+let commanderSlotPopupResizeObserver: ResizeObserver | null = null
+
+function clampCommanderSlotPopupPosition() {
+  if (!import.meta.client) return
+  const el = commanderSlotPopupRef.value
+  if (!el) return
+
+  const margin = 12
+  const rect = el.getBoundingClientRect()
+  const maxLeft = Math.max(margin, window.innerWidth - rect.width - margin)
+  const maxTop = Math.max(margin, window.innerHeight - rect.height - margin)
+  commanderSlotEditor.popupX = Math.min(Math.max(commanderSlotEditor.popupX, margin), maxLeft)
+  commanderSlotEditor.popupY = Math.min(Math.max(commanderSlotEditor.popupY, margin), maxTop)
+}
 
 function getCommanderDeckLink(commanderName: string) {
   const normalizedCommanderName = normalizeDeckIdentityKey(commanderName)
@@ -1324,6 +1580,127 @@ function getCommanderDeckEntry(commanderName: string) {
     ?? Object.values(commanderDeckLinks.value).find(
       (link) => (link.commanderNameKey ?? normalizeDeckIdentityKey(link.commanderName)) === normalizedCommanderName,
     )
+}
+
+function getCommanderSlotKey(commanderName: string, slotIndex: number) {
+  return `${normalizeDeckIdentityKey(commanderName)}::${slotIndex}`
+}
+
+function getCommanderSlotTriggerId(commanderName: string, slotIndex: number) {
+  return `slot-trigger:${getCommanderSlotKey(commanderName, slotIndex)}`
+}
+
+function getCommanderSlotCapacity() {
+  const ownedUpgradeTypes = new Set(
+    playerPurchases.value
+      .filter((purchase) => purchase.playerName === displayPlayerName.value)
+      .map((purchase) => purchase.type),
+  )
+
+  return 1
+    + (ownedUpgradeTypes.has('commander_slot_2') ? 1 : 0)
+    + (ownedUpgradeTypes.has('commander_slot_3') ? 1 : 0)
+}
+
+function getCommanderSlotValue(commanderName: string, slotIndex: number) {
+  return getCommanderDeckEntry(commanderName)?.gameChangerSlots?.[slotIndex]?.trim() ?? ''
+}
+
+function getCommanderSlotCards(commanderName: string, slotIndex: number) {
+  return commanderSlotCards.value[getCommanderSlotKey(commanderName, slotIndex)] ?? []
+}
+
+function parseCommanderSlotNames(rawValue: string) {
+  return rawValue
+    .split(',')
+    .map((name) => name.trim())
+    .filter(Boolean)
+    .slice(0, 2)
+}
+
+function isCommanderSlotEditorOpen(commanderName: string, slotIndex: number) {
+  return commanderSlotEditor.commanderName === commanderName && commanderSlotEditor.slotIndex === slotIndex
+}
+
+function openCommanderSlotEditor(commanderName: string, slotIndex: number, event: MouseEvent) {
+  if (!isOwnProfile.value) return
+
+  const trigger = event.currentTarget as HTMLElement | null
+  if (trigger && import.meta.client) {
+    const rect = trigger.getBoundingClientRect()
+    const popupWidth = 290
+    const popupHeight = 276
+    commanderSlotEditor.popupX = Math.max(12, Math.min(rect.left + 10, window.innerWidth - popupWidth - 12))
+    commanderSlotEditor.popupY = Math.max(12, Math.min(rect.top + 10, window.innerHeight - popupHeight - 12))
+  }
+
+  commanderSlotEditor.commanderName = commanderName
+  commanderSlotEditor.slotIndex = slotIndex
+  commanderSlotEditor.value = getCommanderSlotValue(commanderName, slotIndex)
+  commanderSlotEditor.error = ''
+  commanderSlotEditor.previewError = ''
+  commanderSlotEditor.previewCards = []
+  void updateCommanderSlotPreview(commanderSlotEditor.value)
+}
+
+function closeCommanderSlotEditor() {
+  if (commanderSlotPreviewTimer) {
+    clearTimeout(commanderSlotPreviewTimer)
+    commanderSlotPreviewTimer = null
+  }
+  commanderSlotEditor.commanderName = ''
+  commanderSlotEditor.slotIndex = -1
+  commanderSlotEditor.value = ''
+  commanderSlotEditor.error = ''
+  commanderSlotEditor.previewLoading = false
+  commanderSlotEditor.previewError = ''
+  commanderSlotEditor.previewCards = []
+  commanderSlotEditor.popupX = 0
+  commanderSlotEditor.popupY = 0
+}
+
+function isCommanderSlotSaveDisabled() {
+  return commanderSlotEditor.saving
+    || commanderSlotEditor.previewLoading
+    || (parseCommanderSlotNames(commanderSlotEditor.value).length > 0 && Boolean(commanderSlotEditor.previewError))
+}
+
+async function hydrateCommanderSlotCards() {
+  const nextCards: Record<string, CommanderSlotCard[]> = {}
+
+  for (const link of Object.values(commanderDeckLinks.value)) {
+    const commanderName = link.commanderName
+    const slots = Array.isArray(link.gameChangerSlots) ? link.gameChangerSlots : []
+
+    for (const [slotIndex, rawValue] of slots.entries()) {
+      const names = rawValue
+        .split(',')
+        .map((name) => name.trim())
+        .filter(Boolean)
+        .slice(0, 2)
+
+      if (names.length === 0) continue
+
+      const scryfallCards = await fetchCardsByName(names)
+      const cards = names.map((name) => {
+        const card = scryfallCards.get(name)
+        if (!card) return null
+
+        return {
+          name,
+          imageUrl: getCardImageUrl(card, 'small') ?? getCardImageUrl(card, 'normal') ?? '',
+          previewUrl: getCardImageUrl(card, 'normal') ?? getCardImageUrl(card, 'large') ?? '',
+          scryfallUrl: card.scryfall_uri ?? '',
+        } satisfies CommanderSlotCard
+      })
+
+      nextCards[getCommanderSlotKey(commanderName, slotIndex)] = cards.filter((card): card is CommanderSlotCard =>
+        Boolean(card?.imageUrl),
+      )
+    }
+  }
+
+  commanderSlotCards.value = nextCards
 }
 
 function getCommanderSelectedTitleId(commanderName: string) {
@@ -1349,6 +1726,12 @@ function toggleDeckPopover(commanderName: string) {
   commanderDeckInputs[commanderName] = savedLink?.archidektUrl ?? commanderDeckInputs[commanderName] ?? ''
   deckLinkErrors[commanderName] = ''
   deckPopoverOpen.value = commanderName
+}
+
+async function loadPlayerPurchases() {
+  const response = await $fetch<{ purchases: LoosterPurchaseRecord[] }>('/api/purchases').catch(() => ({ purchases: [] }))
+  playerPurchases.value = response.purchases ?? []
+  return playerPurchases.value
 }
 
 function normalizePlacement(placement: number, playerCount: number) {
@@ -1603,6 +1986,7 @@ function applyCommanderDeckLinks(links: CommanderDeckLinkRecord[]) {
   }
 
   commanderDeckLinks.value = nextLinks
+  void hydrateCommanderSlotCards()
 }
 
 async function loadCommanderDeckLinks(playerName: string) {
@@ -1622,6 +2006,11 @@ async function loadCommanderDeckLinks(playerName: string) {
 await useAsyncData(
   () => `player-deck-links:${displayPlayerName.value}`,
   () => loadCommanderDeckLinks(displayPlayerName.value),
+  { watch: [displayPlayerName] },
+)
+await useAsyncData(
+  () => `player-purchases:${displayPlayerName.value}`,
+  () => loadPlayerPurchases(),
   { watch: [displayPlayerName] },
 )
 const consistencyPreview = reactive({
@@ -1845,6 +2234,17 @@ watch(
 )
 
 watch(
+  () => commanderSlotEditor.value,
+  (value) => {
+    if (!import.meta.client || commanderSlotEditor.slotIndex < 0) return
+    if (commanderSlotPreviewTimer) clearTimeout(commanderSlotPreviewTimer)
+    commanderSlotPreviewTimer = setTimeout(() => {
+      void updateCommanderSlotPreview(value)
+    }, 220)
+  },
+)
+
+watch(
   () => deckPanel.open,
   (open) => {
     if (!import.meta.client) return
@@ -1854,12 +2254,50 @@ watch(
 
 if (import.meta.client) {
   const onKeydown = (event: KeyboardEvent) => {
+    if (event.key === 'Escape' && commanderSlotEditor.slotIndex >= 0) {
+      closeCommanderSlotEditor()
+      return
+    }
     if (event.key === 'Escape' && deckPanel.open) closeDeckPanel()
   }
 
-  onMounted(() => window.addEventListener('keydown', onKeydown))
+  const onPointerDown = (event: PointerEvent) => {
+    if (commanderSlotEditor.slotIndex < 0) return
+
+    const target = event.target as HTMLElement | null
+    if (!target) return
+
+    if (commanderSlotPopupRef.value?.contains(target)) return
+
+    const triggerId = getCommanderSlotTriggerId(commanderSlotEditor.commanderName, commanderSlotEditor.slotIndex)
+    const trigger = document.querySelector<HTMLElement>(`[data-slot-trigger-id="${triggerId}"]`)
+    if (trigger?.contains(target)) return
+
+    closeCommanderSlotEditor()
+  }
+
+  const onWindowResize = () => clampCommanderSlotPopupPosition()
+
+  // Re-clamp whenever the popup's own size changes (preview cards loading in,
+  // error text wrapping, etc.) so it never drifts outside the viewport.
+  commanderSlotPopupResizeObserver = new ResizeObserver(() => {
+    clampCommanderSlotPopupPosition()
+  })
+  watch(commanderSlotPopupRef, (el, previousEl) => {
+    if (previousEl) commanderSlotPopupResizeObserver?.unobserve(previousEl)
+    if (el) commanderSlotPopupResizeObserver?.observe(el)
+  })
+
+  onMounted(() => {
+    window.addEventListener('keydown', onKeydown)
+    window.addEventListener('pointerdown', onPointerDown)
+    window.addEventListener('resize', onWindowResize)
+  })
   onBeforeUnmount(() => {
     window.removeEventListener('keydown', onKeydown)
+    window.removeEventListener('pointerdown', onPointerDown)
+    window.removeEventListener('resize', onWindowResize)
+    commanderSlotPopupResizeObserver?.disconnect()
     document.body.style.overflow = ''
   })
 }
@@ -1891,10 +2329,120 @@ async function saveCommanderDeckLink(commanderName: string) {
       [commanderKey]: result.link,
     }
     commanderDeckInputs[commanderName] = result.link.archidektUrl
+    void hydrateCommanderSlotCards()
   } catch (error: any) {
     deckLinkErrors[commanderName] = error?.data?.statusMessage ?? 'Could not save deck link.'
   } finally {
     deckLinkSaving[commanderName] = false
+  }
+}
+
+async function saveCommanderSlot(commanderName: string, slotIndex: number) {
+  commanderSlotEditor.saving = true
+  commanderSlotEditor.error = ''
+
+  try {
+    const names = parseCommanderSlotNames(commanderSlotEditor.value)
+
+    const result = await $fetch<{ ok: boolean; entry: CommanderDeckLinkRecord | null }>('/api/commander-slots', {
+      method: 'PUT',
+      body: {
+        playerName: displayPlayerName.value,
+        commanderName,
+        slotIndex,
+        cardNames: names.join(', '),
+      },
+    })
+
+    if (!result.entry) {
+      commanderSlotEditor.error = 'Could not save this slot.'
+      return
+    }
+
+    const commanderKey = result.entry.commanderNameKey ?? normalizeDeckIdentityKey(commanderName)
+    commanderDeckLinks.value = {
+      ...commanderDeckLinks.value,
+      [commanderKey]: result.entry,
+    }
+    await hydrateCommanderSlotCards()
+    closeCommanderSlotEditor()
+  } catch (error: any) {
+    commanderSlotEditor.error = error?.data?.statusMessage ?? 'Could not save this slot.'
+  } finally {
+    commanderSlotEditor.saving = false
+  }
+}
+
+async function clearCommanderSlot(commanderName: string, slotIndex: number, event: MouseEvent) {
+  event.stopPropagation()
+  if (!isOwnProfile.value) return
+
+  try {
+    const result = await $fetch<{ ok: boolean; entry: CommanderDeckLinkRecord | null }>('/api/commander-slots', {
+      method: 'PUT',
+      body: {
+        playerName: displayPlayerName.value,
+        commanderName,
+        slotIndex,
+        cardNames: '',
+      },
+    })
+
+    if (!result.entry) return
+
+    const commanderKey = result.entry.commanderNameKey ?? normalizeDeckIdentityKey(commanderName)
+    commanderDeckLinks.value = {
+      ...commanderDeckLinks.value,
+      [commanderKey]: result.entry,
+    }
+    await hydrateCommanderSlotCards()
+    if (isCommanderSlotEditorOpen(commanderName, slotIndex)) closeCommanderSlotEditor()
+  } catch (error: any) {
+    console.error('Failed to clear commander slot', error)
+  }
+}
+
+async function updateCommanderSlotPreview(rawValue: string) {
+  const token = ++commanderSlotPreviewToken
+  const names = parseCommanderSlotNames(rawValue)
+
+  commanderSlotEditor.previewError = ''
+  commanderSlotEditor.previewCards = []
+
+  if (names.length === 0) {
+    commanderSlotEditor.previewLoading = false
+    return
+  }
+
+  commanderSlotEditor.previewLoading = true
+
+  try {
+    const scryfallCards = await fetchCardsByName(names)
+    if (token !== commanderSlotPreviewToken) return
+
+    const cards = names.map((name) => scryfallCards.get(name) ?? null)
+    const missingNames = names.filter((name, index) => !cards[index])
+    commanderSlotEditor.previewCards = cards
+      .map((card, index) => {
+        if (!card) return null
+
+        return {
+          name: names[index],
+          imageUrl: getCardImageUrl(card, 'small') ?? getCardImageUrl(card, 'normal') ?? '',
+          previewUrl: getCardImageUrl(card, 'normal') ?? getCardImageUrl(card, 'large') ?? '',
+          scryfallUrl: card.scryfall_uri ?? '',
+        } satisfies CommanderSlotCard
+      })
+      .filter((card): card is CommanderSlotCard => Boolean(card?.imageUrl))
+
+    commanderSlotEditor.previewError = missingNames.length > 0
+      ? `Could not find: ${missingNames.join(', ')}.`
+      : ''
+  } catch {
+    if (token !== commanderSlotPreviewToken) return
+    commanderSlotEditor.previewError = 'Could not verify these cards on Scryfall right now.'
+  } finally {
+    if (token === commanderSlotPreviewToken) commanderSlotEditor.previewLoading = false
   }
 }
 
@@ -1983,6 +2531,7 @@ async function clearCommanderDeckLink(commanderName: string) {
     delete nextLinks[normalizeDeckIdentityKey(commanderName)]
     commanderDeckLinks.value = nextLinks
     commanderDeckInputs[commanderName] = ''
+    void hydrateCommanderSlotCards()
 
     if (deckPanel.commanderName === commanderName) closeDeckPanel()
   } catch (error: any) {
@@ -2847,11 +3396,24 @@ function getEdgeTooltipText(cmd: CommanderRow) {
     cursor: zoom-in;
   }
 
-  &__card-img {
+  &__card-bg {
+    position: absolute;
+    inset: 0;
     width: 100%;
     height: 100%;
     object-fit: cover;
     object-position: center top;
+    display: block;
+    filter: saturate(0.1%) blur(3px);
+  }
+
+  &__card-img {
+    position: relative;
+    z-index: 1;
+    width: 100%;
+    height: 100%;
+    object-fit: contain;
+    object-position: center;
     display: block;
   }
 
@@ -3242,6 +3804,15 @@ function getEdgeTooltipText(cmd: CommanderRow) {
     flex-wrap: wrap;
   }
 
+  &__meta-row {
+    display: flex;
+    align-items: flex-start;
+    gap: $spacing-3;
+    flex: 1 1 520px;
+    flex-wrap: wrap;
+    min-width: 0;
+  }
+
   &__avg-mmr-card {
     display: flex;
     flex-direction: column;
@@ -3295,7 +3866,7 @@ function getEdgeTooltipText(cmd: CommanderRow) {
   }
 
   &__avg-mmr-detail {
-    font-size: $font-size-xs;
+    font-size: 0.65rem;
     line-height: 1.45;
     color: rgba($color-text-muted, 0.92);
   }
@@ -4144,6 +4715,286 @@ function getEdgeTooltipText(cmd: CommanderRow) {
   border-radius: 4px;
   padding: 1px 6px;
   white-space: nowrap;
+}
+
+.cmd-row__slot-section {
+  margin-bottom: 14px;
+  display: flex;
+  flex-direction: column;
+  gap: 10px;
+}
+
+.cmd-row__body > .cmd-row__slot-section:not(.cmd-row__slot-section--inline) {
+  display: none;
+}
+
+.cmd-row__slot-section--inline {
+  margin-bottom: 0;
+  flex: 0 0 auto;
+  align-self: flex-start;
+  min-width: 0;
+}
+
+.cmd-row__slot-section-head {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 10px;
+}
+
+.cmd-row__slot-label,
+.cmd-row__slot-count {
+  font-size: 11px;
+  text-transform: uppercase;
+  letter-spacing: 0.08em;
+  color: $color-text-muted;
+}
+
+.cmd-row__slot-list {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 10px;
+}
+
+.cmd-row__slot {
+  position: relative;
+  width: 154px;
+  min-height: 146px;
+  border-radius: 14px;
+  overflow: hidden;
+  border: 1px solid rgba($border-color, 0.95);
+  background: linear-gradient(180deg, rgba($color-bg-elevated, 0.96), rgba(0, 0, 0, 0.55));
+  transition: transform $transition-fast, border-color $transition-fast, box-shadow $transition-fast;
+
+  &--editable:hover {
+    transform: translateY(-2px);
+    border-color: rgba($color-primary-light, 0.4);
+    box-shadow: 0 12px 26px rgba(0, 0, 0, 0.3);
+  }
+
+  &--active {
+    border-color: rgba($color-primary-light, 0.48);
+    box-shadow: 0 0 0 1px rgba($color-primary-light, 0.18) inset;
+  }
+}
+
+.cmd-row__slot--compact {
+  width: 144px;
+  min-height: 170px;
+}
+
+.cmd-row__slot-btn {
+  position: absolute;
+  inset: 0;
+  width: 100%;
+  height: 100%;
+  padding: 8px;
+  display: flex;
+  flex-direction: column;
+  align-items: flex-start;
+  justify-content: space-between;
+  gap: 6px;
+  border: none;
+  background: none;
+  color: $color-text;
+  text-align: left;
+  cursor: default;
+
+  &:disabled {
+    cursor: default;
+  }
+}
+
+.cmd-row__slot--editable .cmd-row__slot-btn {
+  cursor: pointer;
+}
+
+.cmd-row__slot-card-fill {
+  position: absolute;
+  inset: 0;
+  display: flex;
+}
+
+.cmd-row__slot-card-fill-item {
+  flex: 1 1 0;
+  display: block;
+
+  & + & {
+    border-left: 1px solid rgba(0, 0, 0, 0.45);
+  }
+}
+
+.cmd-row__slot-clear {
+  position: absolute;
+  top: 6px;
+  right: 6px;
+  z-index: 2;
+  width: 22px;
+  height: 22px;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  border-radius: 50%;
+  border: none;
+  background: rgba(220, 38, 38, 0.92);
+  color: #fff;
+  font-size: 11px;
+  line-height: 1;
+  cursor: pointer;
+  opacity: 0;
+  transform: scale(0.85);
+  pointer-events: none;
+  transition: opacity $transition-fast, transform $transition-fast, background $transition-fast;
+}
+
+.cmd-row__slot:hover .cmd-row__slot-clear {
+  opacity: 1;
+  transform: scale(1);
+  pointer-events: auto;
+}
+
+.cmd-row__slot-clear:hover {
+  background: rgb(239, 68, 68);
+}
+
+.cmd-row__slot-eyebrow {
+  position: relative;
+  z-index: 1;
+  align-self: flex-start;
+  font-size: 10px;
+  text-transform: uppercase;
+  letter-spacing: 0.08em;
+  color: rgba(255, 255, 255, 0.9);
+  background: rgba(0, 0, 0, 0.55);
+  padding: 2px 6px;
+  border-radius: 6px;
+}
+
+.cmd-row__slot-card-stack {
+  position: relative;
+  height: 74px;
+  width: 100%;
+}
+
+.cmd-row__slot-card-stack--compact {
+  height: 48px;
+}
+
+.cmd-row__slot-card {
+  position: absolute;
+  top: 0;
+  left: 0;
+  width: 54px;
+  height: 74px;
+  border-radius: 10px;
+  overflow: hidden;
+  box-shadow: 0 12px 22px rgba(0, 0, 0, 0.28);
+  border: 1px solid rgba(255, 255, 255, 0.08);
+
+  &--combo:nth-child(2) {
+    left: 34px;
+    top: 8px;
+  }
+}
+
+.cmd-row__slot--compact .cmd-row__slot-card {
+  width: 36px;
+  height: 48px;
+
+  &.cmd-row__slot-card--combo:nth-child(2) {
+    left: 22px;
+    top: 4px;
+  }
+}
+
+.cmd-row__slot-card-image {
+  width: 100%;
+  height: 100%;
+  display: block;
+  object-fit: cover;
+}
+
+.cmd-row__slot-text {
+  position: relative;
+  z-index: 1;
+  align-self: stretch;
+  margin: 0 -8px -8px;
+  padding: 18px 8px 8px;
+  font-size: 12px;
+  line-height: 1.35;
+  color: #fff;
+  background: linear-gradient(180deg, rgba(0, 0, 0, 0) 0%, rgba(0, 0, 0, 0.82) 75%);
+}
+
+.cmd-row__slot--compact .cmd-row__slot-text {
+  font-size: 11px;
+  line-height: 1.3;
+}
+
+.cmd-row__slot-editor {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px;
+  align-items: center;
+  margin-top: 10px;
+}
+
+.cmd-row__slot-popup {
+  position: fixed;
+  z-index: 1200;
+  width: min(290px, calc(100vw - 24px));
+  display: flex;
+  flex-direction: column;
+  gap: 10px;
+  padding: 12px;
+  border-radius: 14px;
+  border: 1px solid rgba($color-primary-light, 0.28);
+  background: linear-gradient(180deg, rgba(18, 16, 30, 0.98), rgba(9, 8, 18, 0.98));
+  box-shadow: 0 18px 44px rgba(0, 0, 0, 0.38);
+}
+
+.cmd-row__slot-popup-actions {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px;
+}
+
+.cmd-row__slot-preview-status {
+  font-size: 11px;
+  color: rgba($color-text-muted, 0.9);
+}
+
+.cmd-row__slot-preview {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  min-height: 56px;
+}
+
+.cmd-row__slot-preview .cmd-row__slot-card-stack {
+  width: 62px;
+  flex: 0 0 62px;
+}
+
+.cmd-row__slot-preview-names {
+  font-size: 11px;
+  line-height: 1.35;
+  color: rgba($color-text, 0.95);
+}
+
+.cmd-row__meta-row .cmd-row__timeline-wrap {
+  flex: 1 1 320px;
+  min-width: 280px;
+}
+
+.cmd-row__slot-input {
+  min-width: min(320px, 100%);
+  flex: 1 1 260px;
+  border-radius: 10px;
+  border: 1px solid rgba($border-color, 0.95);
+  background: rgba(0, 0, 0, 0.28);
+  color: $color-text;
+  padding: 10px 12px;
 }
 
 @keyframes deck-drawer-spin {

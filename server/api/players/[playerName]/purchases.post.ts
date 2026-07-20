@@ -6,6 +6,7 @@ import { flattenPlayerPurchases, normalizeEuroPrice, parsePurchaseDate, validate
 import { Settings } from '../../../models/Settings'
 import { formatPlayerName } from '~/utils/playerNames'
 import { DEFAULT_LOOSTER_COST } from '~/utils/leagueSettings'
+import { getShopItemByType, getStartedSeasonCount } from '~/utils/shopOptions'
 
 type PurchaseBody = {
   name?: string
@@ -42,13 +43,8 @@ export default defineEventHandler(async (event) => {
   const type = (body.type ?? 'looster').trim() || 'looster'
   const set = (body.set ?? '').trim()
   const setName = (body.set_name ?? '').trim()
-  const cards = await validateAndCanonicalizeCards(body.cards, set)
   const purchaseDate = parsePurchaseDate(body.date)
   const priceEuro = normalizeEuroPrice(body.priceEuro)
-
-  if (!purchaseName || !type || !set || !setName) {
-    throw createError({ statusCode: 400, statusMessage: 'Purchase name, type, set, and set name are required' })
-  }
 
   await connectToDatabase()
   await ensurePlayerExists(playerName)
@@ -56,6 +52,37 @@ export default defineEventHandler(async (event) => {
   const loosterCost = Number.isFinite(Number(settingsDoc?.shop?.loosterCost))
     ? Number(settingsDoc?.shop?.loosterCost)
     : DEFAULT_LOOSTER_COST
+  const shopItem = getShopItemByType(type as 'looster' | 'commander_slot_2' | 'commander_slot_3', settingsDoc, loosterCost)
+
+  if (!purchaseName || !type || !shopItem) {
+    throw createError({ statusCode: 400, statusMessage: 'Unknown shop item.' })
+  }
+
+  if (shopItem.purchaseType === 'looster' && (!set || !setName)) {
+    throw createError({ statusCode: 400, statusMessage: 'Purchase name, type, set, and set name are required' })
+  }
+
+  if (shopItem.requiredStartedSeasons > getStartedSeasonCount(settingsDoc)) {
+    throw createError({
+      statusCode: 400,
+      statusMessage: `${shopItem.name} unlocks at the start of Season ${shopItem.requiredStartedSeasons}.`,
+    })
+  }
+
+  const cards = shopItem.purchaseType === 'looster'
+    ? await validateAndCanonicalizeCards(body.cards, set)
+    : []
+
+  if (shopItem.purchaseType !== 'looster') {
+    const existingUnlock = await Player.findOne({
+      name: playerName,
+      'purchases.type': shopItem.purchaseType,
+    }).lean()
+
+    if (existingUnlock) {
+      throw createError({ statusCode: 400, statusMessage: `${shopItem.name} has already been purchased.` })
+    }
+  }
 
   await Player.updateOne(
     { name: playerName },
@@ -64,7 +91,7 @@ export default defineEventHandler(async (event) => {
         purchases: {
           name: purchaseName,
           type,
-          cost: loosterCost,
+          cost: shopItem.cost,
           set,
           set_name: setName,
           cards,
@@ -75,7 +102,9 @@ export default defineEventHandler(async (event) => {
     },
   )
 
-  await addCardsToPlayerCardpool(playerName, cards)
+  if (cards.length > 0) {
+    await addCardsToPlayerCardpool(playerName, cards)
+  }
 
   const player = await Player.findOne({ name: playerName }).lean()
   return {

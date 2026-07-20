@@ -72,6 +72,7 @@ export default defineEventHandler(async (event) => {
           archidektUrl: existingEntry?.archidektUrl ?? '',
           archidektDeckId: existingEntry?.archidektDeckId ?? '',
           selectedTitle,
+          gameChangerSlots: Array.isArray(existingEntry?.gameChangerSlots) ? existingEntry.gameChangerSlots : [],
         },
       },
     },

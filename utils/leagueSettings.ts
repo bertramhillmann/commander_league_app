@@ -18,6 +18,8 @@ export const DEFAULT_FREE_GAMES_MIN_AVG = 0.3
 export const DEFAULT_FREE_GAMES_GRACE_MISSES = 3
 export const DEFAULT_PENALTY_FACTOR = 0.88
 export const DEFAULT_LOOSTER_COST = 2.4
+export const DEFAULT_COMMANDER_SLOT_2_COST = 5
+export const DEFAULT_COMMANDER_SLOT_3_COST = 10
 export const MIN_GAMES_FOR_PENALTY_MODE = 30
 export const DEFAULT_PLAYER_RATING_MIN = 0
 export const DEFAULT_PLAYER_RATING_MAX = 4000
@@ -142,6 +144,8 @@ export interface LeagueSettingsDocument {
   }
   shop?: {
     loosterCost?: number
+    commanderSlot2Cost?: number
+    commanderSlot3Cost?: number
   }
 }
 
@@ -171,6 +175,8 @@ export interface ResolvedLeagueSettings {
   }
   shop: {
     loosterCost: number
+    commanderSlot2Cost: number
+    commanderSlot3Cost: number
   }
 }
 
@@ -299,6 +305,8 @@ export function getResolvedLeagueSettings(settings?: LeagueSettingsDocument | nu
     },
     shop: {
       loosterCost: toNumberOr(source?.shop?.loosterCost, DEFAULT_LOOSTER_COST),
+      commanderSlot2Cost: toNumberOr(source?.shop?.commanderSlot2Cost, DEFAULT_COMMANDER_SLOT_2_COST),
+      commanderSlot3Cost: toNumberOr(source?.shop?.commanderSlot3Cost, DEFAULT_COMMANDER_SLOT_3_COST),
     },
   }
 }

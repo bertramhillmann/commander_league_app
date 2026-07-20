@@ -20,6 +20,7 @@ export interface IPlayerCommanderDeck {
   archidektUrl?: string
   archidektDeckId?: string
   selectedTitle?: CommanderTitleId
+  gameChangerSlots?: string[]
   createdAt?: Date
   updatedAt?: Date
 }
@@ -55,6 +56,7 @@ const PlayerCommanderDeckSchema = new Schema<IPlayerCommanderDeck>(
     archidektUrl: { type: String, default: '' },
     archidektDeckId: { type: String, default: '' },
     selectedTitle: { type: String, default: '' },
+    gameChangerSlots: { type: [String], default: [] },
   },
   { _id: false, timestamps: true }
 )

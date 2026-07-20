@@ -1,7 +1,16 @@
 const BASE_URL = 'https://api.scryfall.com'
 const COLLECTION_CHUNK_SIZE = 75
-const CARD_STORAGE_KEY = 'scryfall-card-cache:v1'
+const CARD_STORAGE_KEY = 'scryfall-card-cache:v2'
 const SET_STORAGE_KEY = 'scryfall-set-cache:v1'
+
+// Scryfall rejects requests carrying a generic HTTP-library User-Agent (e.g. Node's
+// default) with a 400 "generic_user_agent" error. Server-side requests need an explicit
+// override; browsers ignore this header (forbidden to override) and send their own, which
+// Scryfall already accepts.
+const SCRYFALL_HEADERS = {
+  'User-Agent': 'CmdApp/1.0 (+https://github.com/)',
+  Accept: 'application/json',
+}
 
 export interface ScryfallCard {
   id: string
@@ -92,7 +101,7 @@ function loadBrowserCache() {
     if (storedCards) {
       const parsedCards = JSON.parse(storedCards) as Record<string, ScryfallCard | null>
       for (const [name, card] of Object.entries(parsedCards)) {
-        cache.set(name, card)
+        if (card) cache.set(name, card)
       }
     }
   } catch {
@@ -134,6 +143,11 @@ function persistBrowserSetCache() {
 
 function setCardCache(cacheKey: string, card: ScryfallCard | null, persist = true) {
   loadBrowserCache()
+  if (card === null) {
+    cache.delete(cacheKey)
+    if (persist) persistBrowserCardCache()
+    return
+  }
   cache.set(cacheKey, card)
   if (persist) persistBrowserCardCache()
 }
@@ -176,6 +190,7 @@ async function requestCardByName(name: string, setCode?: string) {
     try {
       const response = await $fetch<ScryfallCollectionResponse>(`${BASE_URL}/cards/collection`, {
         method: 'POST',
+        headers: SCRYFALL_HEADERS,
         body: {
           identifiers: [{ name, set: normalizedSetCode }],
         },
@@ -193,6 +208,7 @@ async function requestCardByName(name: string, setCode?: string) {
 
     try {
       const response = await $fetch<ScryfallSearchResponse>(`${BASE_URL}/cards/search`, {
+        headers: SCRYFALL_HEADERS,
         params: {
           q: `!"${escapeScryfallQueryValue(name)}" set:${normalizedSetCode}`,
         },
@@ -211,6 +227,7 @@ async function requestCardByName(name: string, setCode?: string) {
 
   try {
     return await $fetch<ScryfallCard>(`${BASE_URL}/cards/named`, {
+      headers: SCRYFALL_HEADERS,
       params: { fuzzy: name },
     })
   } catch {
@@ -285,6 +302,7 @@ export async function fetchCardsByIdentifiers(
     try {
       const response = await $fetch<ScryfallCollectionResponse>(`${BASE_URL}/cards/collection`, {
         method: 'POST',
+        headers: SCRYFALL_HEADERS,
         body: {
           identifiers: identifiersChunk.map((identifier) => (
             identifier.setCode
@@ -381,7 +399,7 @@ export async function fetchSetByCode(code: string): Promise<ScryfallSet | null> 
   const existingRequest = pendingSetRequests.get(normalizedCode)
   if (existingRequest) return existingRequest
 
-  const request = $fetch<ScryfallSet>(`${BASE_URL}/sets/${normalizedCode}`)
+  const request = $fetch<ScryfallSet>(`${BASE_URL}/sets/${normalizedCode}`, { headers: SCRYFALL_HEADERS })
     .then((data) => {
       setSetCacheEntry(normalizedCode, data)
       return data

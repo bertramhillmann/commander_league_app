@@ -336,14 +336,22 @@
         <div class="settings-card__header">
           <div>
             <h2 class="settings-card__title">Shop</h2>
-            <p class="settings-card__subtitle">Configure league shop defaults for Looster purchases.</p>
+            <p class="settings-card__subtitle">Configure league shop costs for boosters and commander slot upgrades.</p>
           </div>
         </div>
 
-        <div class="settings-subgrid settings-subgrid--single">
+        <div class="settings-subgrid">
           <label class="form-field">
             <span class="form-label">Looster Cost (L-Points)</span>
             <input v-model.number="form.shop.loosterCost" type="number" step="0.001" min="0" class="form-input" />
+          </label>
+          <label class="form-field">
+            <span class="form-label">Second Slot Cost (L-Points)</span>
+            <input v-model.number="form.shop.commanderSlot2Cost" type="number" step="0.001" min="0" class="form-input" />
+          </label>
+          <label class="form-field">
+            <span class="form-label">Third Slot Cost (L-Points)</span>
+            <input v-model.number="form.shop.commanderSlot3Cost" type="number" step="0.001" min="0" class="form-input" />
           </label>
         </div>
       </section>
@@ -462,6 +470,8 @@ type EditableSettingsState = {
   }
   shop: {
     loosterCost: number
+    commanderSlot2Cost: number
+    commanderSlot3Cost: number
   }
 }
 
@@ -665,6 +675,8 @@ function createEditableSettings(source: ReturnType<typeof getResolvedLeagueSetti
     },
     shop: {
       loosterCost: source.shop.loosterCost,
+      commanderSlot2Cost: source.shop.commanderSlot2Cost,
+      commanderSlot3Cost: source.shop.commanderSlot3Cost,
     },
   }
 }
@@ -718,6 +730,8 @@ function applyEditableSettings(target: EditableSettingsState, source: ReturnType
   target.standings.seasonalRanking.leagueEndDate = source.standings.seasonalRanking.leagueEndDate
   target.standings.seasonalRanking.seasonCount = source.standings.seasonalRanking.seasonCount
   target.shop.loosterCost = source.shop.loosterCost
+  target.shop.commanderSlot2Cost = source.shop.commanderSlot2Cost
+  target.shop.commanderSlot3Cost = source.shop.commanderSlot3Cost
 }
 
 function toDocument(source: EditableSettingsState): LeagueSettingsDocument {
@@ -797,6 +811,8 @@ function toDocument(source: EditableSettingsState): LeagueSettingsDocument {
     },
     shop: {
       loosterCost: sanitizePositiveNumber(source.shop.loosterCost),
+      commanderSlot2Cost: sanitizePositiveNumber(source.shop.commanderSlot2Cost),
+      commanderSlot3Cost: sanitizePositiveNumber(source.shop.commanderSlot3Cost),
     },
   }
 }

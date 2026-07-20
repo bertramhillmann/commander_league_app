@@ -13,12 +13,12 @@
         </div>
         <div class="shop-banner__stats">
           <article class="shop-stat">
-            <span class="shop-stat__label">Item Cost</span>
-            <strong class="shop-stat__value">{{ fmt(loosterCost) }} <small>L-PTS</small></strong>
+            <span class="shop-stat__label">Selected Cost</span>
+            <strong class="shop-stat__value">{{ fmt(selectedShopItemCost) }} <small>L-PTS</small></strong>
           </article>
           <article class="shop-stat">
             <span class="shop-stat__label">Your Balance</span>
-            <strong class="shop-stat__value" :class="{ 'shop-stat__value--low': selectedRemainingBalance < loosterCost }">
+            <strong class="shop-stat__value" :class="{ 'shop-stat__value--low': selectedRemainingBalance < selectedShopItemCost }">
               {{ fmt(selectedRemainingBalance) }} <small>L-PTS</small>
             </strong>
           </article>
@@ -48,22 +48,24 @@
       <section v-if="viewMode === 'shop'" class="shop-floor">
         <header class="shop-floor__header">
           <h2 class="shop-floor__title">Available Items</h2>
-          <p class="shop-floor__hint">Select an item to open the purchase dialog</p>
+          <p class="shop-floor__hint">Booster packs open the purchase dialog. Upgrades unlock instantly for your own account.</p>
         </header>
 
         <div class="shop-floor__grid">
           <article
+            v-for="item in shopItems"
+            :key="item.id"
             class="shop-item"
             role="button"
             tabindex="0"
-            @click="openPurchaseModal"
-            @keydown.enter="openPurchaseModal"
-            @keydown.space.prevent="openPurchaseModal"
+            @click="openShopItem(item)"
+            @keydown.enter="openShopItem(item)"
+            @keydown.space.prevent="openShopItem(item)"
           >
             <div class="shop-item__shimmer" />
 
             <div class="shop-item__art">
-              <div class="booster-fan">
+              <div class="booster-fan" :class="{ 'booster-fan--upgrade': item.category === 'upgrade' }">
                 <span class="booster-fan__card booster-fan__card--left" />
                 <span class="booster-fan__card booster-fan__card--right" />
                 <span class="booster-fan__card booster-fan__card--center">
@@ -74,31 +76,37 @@
 
             <div class="shop-item__body">
               <div class="shop-item__type-row">
-                <span class="shop-item__type">Booster Pack</span>
+                <span class="shop-item__type">{{ item.category === 'upgrade' ? 'Commander Upgrade' : 'Booster Pack' }}</span>
                 <span
-                  class="shop-item__badge shop-item__badge--available"
+                  class="shop-item__badge"
+                  :class="{
+                    'shop-item__badge--owned': isShopItemOwned(item),
+                    'shop-item__badge--available': !isShopItemOwned(item) && !isShopItemSeasonLocked(item),
+                    'shop-item__badge--locked': isShopItemSeasonLocked(item),
+                  }"
                 >
-                  Available
+                  {{ getShopItemBadge(item) }}
                 </span>
               </div>
-              <h3 class="shop-item__name">Looster</h3>
+              <h3 class="shop-item__name">{{ item.name }}</h3>
               <p class="shop-item__desc">
-                A sealed Magic booster from the multiverse. Open it to discover new cards and grow the league card pool.
+                {{ item.description }}
               </p>
             </div>
 
             <div class="shop-item__footer">
               <div class="shop-item__price">
                 <span class="shop-item__price-glyph">◈</span>
-                <span class="shop-item__price-amount">{{ fmt(loosterCost) }}</span>
+                <span class="shop-item__price-amount">{{ fmt(item.cost) }}</span>
                 <span class="shop-item__price-unit">L-Points</span>
               </div>
               <button
                 type="button"
                 class="shop-item__buy-btn"
-                @click.stop="openPurchaseModal"
+                :disabled="isShopItemActionDisabled(item) || savingPurchase"
+                @click.stop="openShopItem(item)"
               >
-                Purchase
+                {{ getShopItemButtonLabel(item) }}
               </button>
             </div>
           </article>
@@ -403,6 +411,7 @@ import { fetchCardsByIdentifiers, fetchSetByCode, getCardImageUrl } from '~/serv
 import { formatPlayerName } from '~/utils/playerNames'
 import type { LoosterPurchaseRecord } from '~/utils/loosterPurchases'
 import type { ScryfallCard } from '~/services/scryfallService'
+import { getShopItems, getStartedSeasonCount, type ShopItem } from '~/utils/shopOptions'
 
 type PurchaseFormState = {
   playerName: string
@@ -482,6 +491,8 @@ const form = reactive<PurchaseFormState>({
   cardsText: '',
 })
 
+const selectedShopItemId = ref<string>('looster')
+
 const editingPurchase = reactive<PurchaseFormState>({
   playerName: '',
   date: today,
@@ -502,6 +513,12 @@ const selectablePlayers = computed(() => {
 })
 
 const loosterCost = computed(() => settings.value.shop.loosterCost)
+const shopItems = computed(() => getShopItems(settings.value, loosterCost.value))
+const selectedShopItem = computed<ShopItem | null>(() =>
+  shopItems.value.find((item) => item.id === selectedShopItemId.value) ?? shopItems.value[0] ?? null,
+)
+const selectedShopItemCost = computed(() => selectedShopItem.value?.cost ?? loosterCost.value)
+const startedSeasonCount = computed(() => getStartedSeasonCount(settings.value))
 const scryfallCardProgress = reactive({
   loaded: 0,
   total: 0,
@@ -555,7 +572,12 @@ const earnedByPlayer = computed(() => {
 const selectedEarnedBalance = computed(() => earnedByPlayer.value.get(form.playerName) ?? 0)
 const selectedSpentBalance = computed(() => spentByPlayer.value.get(form.playerName) ?? 0)
 const selectedRemainingBalance = computed(() => round3(selectedEarnedBalance.value - selectedSpentBalance.value))
-const projectedRemainingBalance = computed(() => round3(selectedRemainingBalance.value - loosterCost.value))
+const projectedRemainingBalance = computed(() => round3(selectedRemainingBalance.value - selectedShopItemCost.value))
+const ownedUpgradeTypes = computed(() => new Set(
+  purchases.value
+    .filter((purchase) => purchase.playerName === currentPlayerName.value)
+    .map((purchase) => purchase.type),
+))
 
 watch(
   viewMode,
@@ -592,6 +614,46 @@ function openPurchaseModal() {
   showModal.value = true
 }
 
+function isShopItemOwned(item: ShopItem) {
+  if (item.purchaseType === 'looster') return false
+  return ownedUpgradeTypes.value.has(item.purchaseType)
+}
+
+function isShopItemSeasonLocked(item: ShopItem) {
+  return startedSeasonCount.value < item.requiredStartedSeasons
+}
+
+function canAffordShopItem(item: ShopItem) {
+  return selectedRemainingBalance.value >= item.cost
+}
+
+function getShopItemBadge(item: ShopItem) {
+  if (isShopItemOwned(item)) return 'Owned'
+  if (isShopItemSeasonLocked(item)) return `Season ${item.requiredStartedSeasons}`
+  return 'Available'
+}
+
+function getShopItemButtonLabel(item: ShopItem) {
+  if (isShopItemOwned(item)) return 'Owned'
+  if (item.purchaseType === 'looster') return 'Purchase'
+  return 'Unlock'
+}
+
+function isShopItemActionDisabled(item: ShopItem) {
+  return isShopItemOwned(item) || isShopItemSeasonLocked(item) || !canAffordShopItem(item)
+}
+
+function openShopItem(item: ShopItem) {
+  selectedShopItemId.value = item.id
+
+  if (item.purchaseType === 'looster') {
+    openPurchaseModal()
+    return
+  }
+
+  void purchaseUpgrade(item)
+}
+
 function closePurchaseModal() {
   showModal.value = false
 }
@@ -600,6 +662,39 @@ async function submitPurchaseAndClose() {
   await submitPurchase()
   if (successMessage.value) {
     showModal.value = false
+  }
+}
+
+async function purchaseUpgrade(item: ShopItem) {
+  if (isShopItemActionDisabled(item) || !currentPlayerName.value) return
+
+  const confirmed = window.confirm(`Buy ${item.name} for ${fmt(item.cost)} L-Points?`)
+  if (!confirmed) return
+
+  successMessage.value = ''
+  errorMessage.value = ''
+  savingPurchase.value = true
+
+  try {
+    await $fetch(`/api/players/${encodeURIComponent(currentPlayerName.value)}/purchases`, {
+      method: 'POST',
+      body: {
+        name: item.name,
+        type: item.purchaseType,
+        date: today,
+        set: '',
+        set_name: '',
+        priceEuro: 0,
+        cards: [],
+      },
+    })
+
+    successMessage.value = `${item.name} unlocked.`
+    await loadPurchases()
+  } catch (error: any) {
+    errorMessage.value = error?.data?.statusMessage ?? 'Failed to unlock this upgrade.'
+  } finally {
+    savingPurchase.value = false
   }
 }
 

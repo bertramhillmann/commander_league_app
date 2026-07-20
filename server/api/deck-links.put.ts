@@ -56,7 +56,7 @@ export default defineEventHandler(async (event) => {
       },
     )
 
-    if (existingEntry?.selectedTitle) {
+    if (existingEntry?.selectedTitle || (existingEntry?.gameChangerSlots?.length ?? 0) > 0) {
       await Player.updateOne(
         playerLookup,
         {
@@ -66,7 +66,8 @@ export default defineEventHandler(async (event) => {
               commanderNameKey,
               archidektUrl: '',
               archidektDeckId: '',
-              selectedTitle: existingEntry.selectedTitle,
+              selectedTitle: existingEntry.selectedTitle ?? '',
+              gameChangerSlots: Array.isArray(existingEntry.gameChangerSlots) ? existingEntry.gameChangerSlots : [],
             },
           },
         },
@@ -112,14 +113,15 @@ export default defineEventHandler(async (event) => {
       },
       $push: {
         commanderDecks: {
-          commanderName,
-          commanderNameKey,
-          archidektUrl: normalizedUrl,
-          archidektDeckId,
-          selectedTitle: existingEntry?.selectedTitle ?? '',
-        },
+        commanderName,
+        commanderNameKey,
+        archidektUrl: normalizedUrl,
+        archidektDeckId,
+        selectedTitle: existingEntry?.selectedTitle ?? '',
+        gameChangerSlots: Array.isArray(existingEntry?.gameChangerSlots) ? existingEntry.gameChangerSlots : [],
       },
     },
+  },
   )
 
   await addCardsToPlayerCardpool(playerName, deck.cards.map((card) => card.name))
@@ -140,6 +142,7 @@ export default defineEventHandler(async (event) => {
           archidektUrl: link.archidektUrl,
           archidektDeckId: link.archidektDeckId,
           selectedTitle: link.selectedTitle || undefined,
+          gameChangerSlots: Array.isArray(link.gameChangerSlots) ? link.gameChangerSlots : [],
           updatedAt: link.updatedAt,
         }
       : null,

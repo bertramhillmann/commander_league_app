@@ -15,7 +15,11 @@
       "Bash(Out-String)",
       "Bash(Get-ChildItem -Path \"c:\\\\Users\\\\bertr\\\\Desktop\\\\Work\\\\cmd_app\\\\assets\\\\img\\\\icons\" -File)",
       "Bash(Select-Object -ExpandProperty Name)",
-      "Bash(Copy-Item \"c:\\\\Users\\\\bertr\\\\Desktop\\\\Work\\\\cmd_app\\\\assets\\\\img\\\\icons\\\\favicon.png\" -Destination \"c:\\\\Users\\\\bertr\\\\Desktop\\\\Work\\\\cmd_app\\\\public\\\\favicon.png\" -Force)"
+      "Bash(Copy-Item \"c:\\\\Users\\\\bertr\\\\Desktop\\\\Work\\\\cmd_app\\\\assets\\\\img\\\\icons\\\\favicon.png\" -Destination \"c:\\\\Users\\\\bertr\\\\Desktop\\\\Work\\\\cmd_app\\\\public\\\\favicon.png\" -Force)",
+      "Bash(curl -s -X POST https://api.scryfall.com/cards/collection -H \"Content-Type: application/json\" -d '{\"identifiers\":[{\"name\":\"Cyclonic Rift\"}]}')",
+      "Bash(node \"C:\\\\Users\\\\bertr\\\\AppData\\\\Local\\\\Temp\\\\claude\\\\c--Users-bertr-Desktop-Work-cmd-app\\\\7ceea090-6a88-4766-bccc-ef7841d7459a\\\\scratchpad\\\\test-scryfall.mjs\")",
+      "Bash(node -e ' *)",
+      "Bash(npx nuxi *)"
     ]
   }
 }

@@ -491,7 +491,7 @@ const overallSeries = computed(() => {
   return series
 })
 
-const factorKeys: PlayerRatingBreakdownKey[] = [
+const factorKeyOrder: PlayerRatingBreakdownKey[] = [
   'recentPerformance',
   'allTimePerformance',
   'winRate',
@@ -502,6 +502,10 @@ const factorKeys: PlayerRatingBreakdownKey[] = [
   'clutch',
   'commanderDiversity',
 ]
+
+const factorKeys = computed(() =>
+  factorKeyOrder.filter((key) => (settings.value.playerRating.weights[key] ?? 0) > 0),
+)
 
 const factorColors: Record<PlayerRatingBreakdownKey, string> = {
   recentPerformance: '#fb7185',
@@ -669,7 +673,7 @@ function buildAlignedRatingSeries(
 const comparisonDetail = computed(() => {
   if (!detail.value || !compareDetail.value) return null
 
-  const factorEntries = factorKeys
+  const factorEntries = factorKeys.value
     .map((key) => {
       const targetCurrent = detail.value?.current?.factors[key]
       const viewerCurrent = compareDetail.value?.current?.factors[key]
@@ -736,7 +740,7 @@ const comparisonOverallSeries = computed(() => {
 const comparisonFactorPanels = computed(() => {
   if (!comparisonDetail.value) return []
 
-  return factorKeys
+  return factorKeys.value
     .map((key) => {
       const targetCurrent = comparisonDetail.value?.target.current?.factors[key]
       const viewerCurrent = comparisonDetail.value?.viewer.current?.factors[key]
@@ -777,7 +781,7 @@ const comparisonFactorPanels = computed(() => {
 })
 
 const factorPanels = computed(() =>
-  factorKeys
+  factorKeys.value
     .map((key) => {
       const current = detail.value?.current?.factors[key]
       if (!current) return null

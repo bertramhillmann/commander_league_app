@@ -47,6 +47,8 @@ export interface ISettings extends Document {
   }
   shop?: {
     loosterCost?: number
+    commanderSlot2Cost?: number
+    commanderSlot3Cost?: number
   }
   createdAt: Date
   updatedAt: Date

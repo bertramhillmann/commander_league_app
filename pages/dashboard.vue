@@ -447,6 +447,12 @@
           :class="{ 'dashboard__perf-switch--active': activeChart === 'participation' }"
           @click="activeChart = 'participation'"
         >Participation</button>
+        <button
+          type="button"
+          class="dashboard__perf-switch"
+          :class="{ 'dashboard__perf-switch--active': activeChart === 'averageCommanderMmr' }"
+          @click="activeChart = 'averageCommanderMmr'"
+        >Avg Commander MMR</button>
       </div>
       <div
         v-if="activeChart === 'performance' && performanceSeasonOptions.length > 0"
@@ -482,9 +488,16 @@
         :subtitle="activePerfChartSubtitle"
       />
       <ChartsPerformanceTimeline
-        v-else
+        v-else-if="activeChart === 'participation'"
         :labels="participationChartData.labels"
         :series="participationChartData.series"
+        :title="activePerfChartTitle"
+        :subtitle="activePerfChartSubtitle"
+      />
+      <ChartsPerformanceTimeline
+        v-else
+        :labels="averageCommanderMmrChartData.labels"
+        :series="averageCommanderMmrChartData.series"
         :title="activePerfChartTitle"
         :subtitle="activePerfChartSubtitle"
       />
@@ -719,77 +732,27 @@
         <div class="mult-tooltip__title">Player Rating</div>
         <table class="mult-tooltip__table">
           <tbody>
-          <tr>
-            <td class="mult-tooltip__label">Model</td>
-            <td class="mult-tooltip__op"></td>
-            <td class="mult-tooltip__detail">recent form, long-term performance, season points, win rate, MMR context, activity, achievements, clutch, diversity</td>
-            <td class="mult-tooltip__value">{{ ratingHover.playerName }}</td>
-          </tr>
+            <tr>
+              <td class="mult-tooltip__label">Model</td>
+              <td class="mult-tooltip__op"></td>
+              <td class="mult-tooltip__detail">{{ ratingHoverModelDescription }}</td>
+              <td class="mult-tooltip__value">{{ ratingHover.playerName }}</td>
+            </tr>
           <tr>
             <td class="mult-tooltip__label">Missed games</td>
             <td class="mult-tooltip__op"></td>
             <td class="mult-tooltip__detail">free-game points excluded</td>
             <td class="mult-tooltip__value">off</td>
           </tr>
-          <tr v-if="ratingHover.breakdown" class="mult-tooltip__row--sep">
-            <td class="mult-tooltip__label">Recent</td>
+          <tr
+            v-for="(entry, index) in ratingHoverRows"
+            :key="entry.key"
+            :class="{ 'mult-tooltip__row--sep': index === 0 }"
+          >
+            <td class="mult-tooltip__label">{{ entry.label }}</td>
             <td class="mult-tooltip__op"></td>
-            <td class="mult-tooltip__detail">weighted contribution</td>
-            <td class="mult-tooltip__value">{{ fmt(ratingHover.breakdown.recentPerformance?.weightedContribution ?? 0) }}</td>
-          </tr>
-          <tr v-if="ratingHover.breakdown">
-            <td class="mult-tooltip__label">All-time</td>
-            <td class="mult-tooltip__op"></td>
-            <td class="mult-tooltip__detail">weighted contribution</td>
-            <td class="mult-tooltip__value">{{ fmt(ratingHover.breakdown.allTimePerformance?.weightedContribution ?? 0) }}</td>
-          </tr>
-          <tr v-if="ratingHover.breakdown">
-            <td class="mult-tooltip__label">Season points</td>
-            <td class="mult-tooltip__op"></td>
-            <td class="mult-tooltip__detail">weighted contribution</td>
-            <td class="mult-tooltip__value">{{ fmt(ratingHover.breakdown.seasonPoints?.weightedContribution ?? 0) }}</td>
-          </tr>
-          <tr v-if="ratingHover.breakdown">
-            <td class="mult-tooltip__label">Win rate</td>
-            <td class="mult-tooltip__op"></td>
-            <td class="mult-tooltip__detail">weighted contribution</td>
-            <td class="mult-tooltip__value">{{ fmt(ratingHover.breakdown.winRate?.weightedContribution ?? 0) }}</td>
-          </tr>
-          <tr v-if="ratingHover.breakdown">
-            <td class="mult-tooltip__label">Finishes vs stronger opponents</td>
-            <td class="mult-tooltip__op"></td>
-            <td class="mult-tooltip__detail">weighted contribution</td>
-            <td class="mult-tooltip__value">{{ fmt(ratingHover.breakdown.commanderMMRContext?.weightedContribution ?? 0) }}</td>
-          </tr>
-          <tr v-if="ratingHover.breakdown">
-            <td class="mult-tooltip__label">Average commander MMR</td>
-            <td class="mult-tooltip__op"></td>
-            <td class="mult-tooltip__detail">weighted contribution</td>
-            <td class="mult-tooltip__value">{{ fmt(ratingHover.breakdown.averageCommanderMMR?.weightedContribution ?? 0) }}</td>
-          </tr>
-          <tr v-if="ratingHover.breakdown">
-            <td class="mult-tooltip__label">Activity</td>
-            <td class="mult-tooltip__op"></td>
-            <td class="mult-tooltip__detail">total points as a small signal</td>
-            <td class="mult-tooltip__value">{{ fmt(ratingHover.breakdown.activityPoints?.weightedContribution ?? 0) }}</td>
-          </tr>
-          <tr v-if="ratingHover.breakdown">
-            <td class="mult-tooltip__label">Achv.</td>
-            <td class="mult-tooltip__op"></td>
-            <td class="mult-tooltip__detail">weighted contribution</td>
-            <td class="mult-tooltip__value">{{ fmt(ratingHover.breakdown.achievements?.weightedContribution ?? 0) }}</td>
-          </tr>
-          <tr v-if="ratingHover.breakdown">
-            <td class="mult-tooltip__label">Clutch</td>
-            <td class="mult-tooltip__op"></td>
-            <td class="mult-tooltip__detail">weighted contribution</td>
-            <td class="mult-tooltip__value">{{ fmt(ratingHover.breakdown.clutch?.weightedContribution ?? 0) }}</td>
-          </tr>
-          <tr v-if="ratingHover.breakdown">
-            <td class="mult-tooltip__label">Diversity</td>
-            <td class="mult-tooltip__op"></td>
-            <td class="mult-tooltip__detail">weighted contribution</td>
-            <td class="mult-tooltip__value">{{ fmt(ratingHover.breakdown.commanderDiversity?.weightedContribution ?? 0) }}</td>
+            <td class="mult-tooltip__detail">{{ entry.detail }}</td>
+            <td class="mult-tooltip__value">{{ fmt(entry.value) }}</td>
           </tr>
           <tr v-if="ratingHover.provisional" class="mult-tooltip__row--sep">
             <td class="mult-tooltip__label">Status</td>
@@ -963,11 +926,11 @@ import {
   type StandingsAdjustmentResult,
 } from '~/composables/useLeagueState'
 import { calculateAverageCommanderMMRScore, calculatePlayerRating } from '~/composables/usePlayerRating'
+import { getCommanderTierFromMMR, getInitialCommanderMMR, type CommanderMMRTier } from '~/composables/useCommanderMMR'
 import type { PerformancePlayerSeries } from '~/components/charts/PerformanceTimeline.vue'
 import { fetchSetByCode } from '~/services/scryfallService'
 import { getArchEnemySummary } from '~/utils/archEnemy'
 import { getFeaturedPlayers, type FeaturedPlayerCandidate } from '~/utils/featuredPlayer'
-import { getCommanderTierFromMMR, type CommanderMMRTier } from '~/composables/useCommanderMMR'
 import type { PlayerRatingBreakdownKey, RatingBreakdownEntry } from '~/composables/usePlayerRating'
 import {
   buildLeagueSeasonRanges,
@@ -1114,6 +1077,7 @@ const activePerfChartTitle = computed(() => {
     return selectedSeason ? `${selectedSeason.label} Performance` : 'Performance Over Time'
   }
   if (activeChart.value === 'total') return secondaryChartLabel.value
+  if (activeChart.value === 'averageCommanderMmr') return 'Average Commander MMR Over Time'
   return 'Participation Over Time'
 })
 const activePerfChartSubtitle = computed(() => {
@@ -1128,6 +1092,9 @@ const activePerfChartSubtitle = computed(() => {
     return playerRankingSystem.value === 'player_rating_based'
       ? 'Live player rating across the full league timeline.'
       : 'Total score across the full league timeline.'
+  }
+  if (activeChart.value === 'averageCommanderMmr') {
+    return 'Rolling average commander strength per player after each recorded game.'
   }
   return 'Games played per week for each player.'
 })
@@ -1848,7 +1815,7 @@ function computeWeightedScore(records: PlayerGameRecord[]): number {
   return totalWeight > 0 ? r3(weightedSum / totalWeight) : 0
 }
 
-const activeChart = ref<'performance' | 'total' | 'participation'>('performance')
+const activeChart = ref<'performance' | 'total' | 'participation' | 'averageCommanderMmr'>('performance')
 
 function fmtGameDate(date: string | Date) {
   return new Date(date).toLocaleDateString('de-DE', { day: '2-digit', month: '2-digit', year: '2-digit' })
@@ -2040,18 +2007,66 @@ const participationChartData = computed<{ labels: string[], series: PerformanceP
   return { labels, series }
 })
 
+const averageCommanderMmrChartData = computed<{ labels: string[], series: PerformancePlayerSeries[] }>(() => {
+  const games = chronologicalGames.value
+  if (games.length === 0) return { labels: [], series: [] }
+
+  const initialCommanderMmr = getInitialCommanderMMR()
+  const labels = games.map((game) => fmtGameDate(game.date))
+  const playerNames = standings.value.map((s) => s.name)
+  const partialRecordMap: Record<string, Record<string, PlayerGameRecord>> = Object.fromEntries(
+    playerNames.map((playerName) => [playerName, {}]),
+  )
+  const dataByPlayer = Object.fromEntries(
+    playerNames.map((playerName) => [playerName, [] as number[]]),
+  ) as Record<string, number[]>
+
+  for (const game of games) {
+    for (const playerName of playerNames) {
+      const record = gameRecords.value[playerName]?.[game.gameId]
+      if (record) partialRecordMap[playerName][game.gameId] = record
+    }
+
+    for (const playerName of playerNames) {
+      const records = Object.values(partialRecordMap[playerName] ?? {})
+      const averageMmr = records.length > 0
+        ? calculateAverageCommanderMMRScore(
+            records,
+            settings.value.playerRating.topCommandersForAverageMmr,
+            settings.value.playerRating.minimumGamesForAverageCommanderMmr,
+            settings.value.playerRating.missingCommanderMmr,
+            settings.value.playerRating.usePeakCommanderMmrForAverage,
+          ).averageCommanderMMR
+        : initialCommanderMmr
+      dataByPlayer[playerName].push(averageMmr)
+    }
+  }
+
+  const series: PerformancePlayerSeries[] = playerNames
+    .map((playerName, index) => ({
+      name: playerName,
+      color: PERF_CHART_COLORS[index % PERF_CHART_COLORS.length],
+      data: dataByPlayer[playerName],
+    }))
+    .filter((entry) => entry.data.some((value) => value > 0))
+
+  return { labels, series }
+})
+
 const commanderMmrChartData = computed<{ labels: string[], series: PerformancePlayerSeries[] }>(() => {
   const games = chronologicalGames.value
   if (games.length === 0) return { labels: [], series: [] }
 
   const labels = games.map((game) => fmtGameDate(game.date))
   const latestCommanderMmr = new Map<string, number>()
+  const lastPlayedGameIndexByCommander = new Map<string, number>()
 
-  for (const game of games) {
+  for (const [gameIndex, game] of games.entries()) {
     const aggregateMap = getCommanderMmrAggregateForGame(game.gameId)
 
     for (const [commanderName, aggregate] of aggregateMap.entries()) {
       latestCommanderMmr.set(commanderName, aggregate.before + aggregate.delta)
+      lastPlayedGameIndexByCommander.set(commanderName, gameIndex)
     }
   }
 
@@ -2068,7 +2083,7 @@ const commanderMmrChartData = computed<{ labels: string[], series: PerformancePl
     commanderNames.map((commanderName) => [commanderName, []]),
   )
 
-  for (const game of games) {
+  for (const [gameIndex, game] of games.entries()) {
     const aggregateMap = getCommanderMmrAggregateForGame(game.gameId)
 
     for (const [commanderName, aggregate] of aggregateMap.entries()) {
@@ -2079,8 +2094,9 @@ const commanderMmrChartData = computed<{ labels: string[], series: PerformancePl
     for (const commanderName of commanderNames) {
       const series = seriesData.get(commanderName)
       if (!series) continue
+      const lastPlayedGameIndex = lastPlayedGameIndexByCommander.get(commanderName) ?? -1
       series.push(
-        seenCommanders.has(commanderName)
+        seenCommanders.has(commanderName) && gameIndex <= lastPlayedGameIndex
           ? currentMmrByCommander.get(commanderName) ?? null
           : null,
       )
@@ -2136,7 +2152,9 @@ const currentChartStandings = computed<ChartStandingRow[]>(() => {
     ? activePerformanceChartData.value
     : activeChart.value === 'total'
       ? scoreChartData.value
-      : participationChartData.value
+      : activeChart.value === 'participation'
+        ? participationChartData.value
+        : averageCommanderMmrChartData.value
 
   const standingOrder = new Map(
     standings.value.map((player, index) => [player.name, index]),
@@ -2410,7 +2428,7 @@ const ratingHover = reactive<{
   visible: boolean
   playerName: string
   provisional: boolean
-  breakdown: any
+  breakdown: Record<PlayerRatingBreakdownKey, RatingBreakdownEntry> | null
   x: number
   y: number
 }>({
@@ -2549,6 +2567,43 @@ type PlayerRatingComparisonEntry = {
   delta: number
   note: string
 }
+
+const dashboardRatingFactorRows: Array<{
+  key: PlayerRatingBreakdownKey
+  label: string
+  detail: string
+}> = [
+  { key: 'recentPerformance', label: 'Recent', detail: 'weighted contribution' },
+  { key: 'allTimePerformance', label: 'All-time', detail: 'weighted contribution' },
+  { key: 'seasonPoints', label: 'Season points', detail: 'weighted contribution' },
+  { key: 'winRate', label: 'Win rate', detail: 'weighted contribution' },
+  { key: 'commanderMMRContext', label: 'Finishes vs stronger opponents', detail: 'weighted contribution' },
+  { key: 'averageCommanderMMR', label: 'Average commander MMR', detail: 'weighted contribution' },
+  { key: 'activityPoints', label: 'Activity', detail: 'total points as a small signal' },
+  { key: 'achievements', label: 'Achv.', detail: 'weighted contribution' },
+  { key: 'clutch', label: 'Clutch', detail: 'weighted contribution' },
+  { key: 'commanderDiversity', label: 'Diversity', detail: 'weighted contribution' },
+]
+
+const enabledDashboardRatingFactorRows = computed(() =>
+  dashboardRatingFactorRows.filter((entry) => (settings.value.playerRating.weights[entry.key] ?? 0) > 0),
+)
+
+const ratingHoverModelDescription = computed(() =>
+  enabledDashboardRatingFactorRows.value.length > 0
+    ? enabledDashboardRatingFactorRows.value.map((entry) => entry.label.toLowerCase()).join(', ')
+    : 'no active weighted factors',
+)
+
+const ratingHoverRows = computed(() => {
+  const breakdown = ratingHover.breakdown
+  if (!breakdown) return []
+
+  return enabledDashboardRatingFactorRows.value.map((entry) => ({
+    ...entry,
+    value: breakdown[entry.key]?.weightedContribution ?? 0,
+  }))
+})
 
 const compHover = reactive<CompensationHoverData>({
   visible: false,
@@ -2796,7 +2851,8 @@ function buildPlayerRatingComparison(target: CatchupRow) {
   if (!viewer || viewer.rankingSystem !== 'player_rating_based') return null
   if (!target.ratingBreakdown || !viewer.ratingBreakdown) return null
 
-  const factorEntries = (Object.keys(PLAYER_RATING_FACTOR_META) as PlayerRatingBreakdownKey[])
+  const factorEntries = enabledDashboardRatingFactorRows.value
+    .map((entry) => entry.key)
     .map((key) => {
       const targetEntry = target.ratingBreakdown?.[key]
       const viewerEntry = viewer.ratingBreakdown?.[key]
