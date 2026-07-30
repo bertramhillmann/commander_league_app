@@ -423,15 +423,15 @@ export function calculateSeasonPointsScore(
   if (configuredSeasons.length > 0) {
     const now = Date.now()
     const startedSeasons = configuredSeasons.filter((season) => season.startMs <= now)
-    const seasonAverages = startedSeasons.map((season) => {
+    const seasonAverages = startedSeasons.flatMap((season) => {
       const seasonRecords = records.filter((record) => {
         const timestamp = gameTimeById.get(record.gameId)
         return timestamp !== null && timestamp !== undefined && timestamp >= season.startMs && timestamp <= season.endMs
       })
 
       return seasonRecords.length > 0
-        ? seasonRecords.reduce((sum, record) => sum + record.finalPoints, 0) / seasonRecords.length
-        : 0
+        ? [seasonRecords.reduce((sum, record) => sum + record.finalPoints, 0) / seasonRecords.length]
+        : []
     })
     const rawValue = average(seasonAverages)
 
@@ -439,7 +439,7 @@ export function calculateSeasonPointsScore(
       rawValue,
       normalizedScore: normalizeScore(rawValue, 0, 1.8),
       seasonAverage: round3(rawValue),
-      playedSeasons: startedSeasons.length,
+      playedSeasons: seasonAverages.length,
       configuredSeasons: configuredSeasons.length,
       usesConfiguredSeasons: 1,
     }

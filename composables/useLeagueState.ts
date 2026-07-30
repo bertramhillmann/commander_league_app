@@ -336,14 +336,14 @@ export function calculatePlayerSeasonAverages(
     })
     const score = seasonRecords.length > 0
       ? round3(seasonRecords.reduce((sum, record) => sum + record.finalPoints, 0) / seasonRecords.length)
-      : 0
+      : null
 
     return { ...season, started, score }
   })
 
   const playedSeasonScores = seasonEntries
-    .filter((season) => season.started)
-    .map((season) => season.score ?? 0)
+    .filter((season): season is typeof season & { score: number } => season.started && season.score !== null)
+    .map((season) => season.score)
   const totalAverage = playedSeasonScores.length > 0
     ? round3(playedSeasonScores.reduce((sum, score) => sum + score, 0) / playedSeasonScores.length)
     : 0

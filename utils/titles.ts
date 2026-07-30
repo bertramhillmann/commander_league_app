@@ -1,4 +1,5 @@
 import type { LeagueStanding, PlayerGameRecord, ProcessedGame, ProcessedGamePlayer } from '~/composables/useLeagueState'
+import { buildLeagueSeasonRanges, getResolvedLeagueSettings, hasActiveSeasonalRanking } from '~/utils/leagueSettings'
 
 export type CommanderTitleId =
   | 'chaotic_force'
@@ -21,6 +22,17 @@ export type CommanderTitleId =
   | 'wild_card'
   | 'giant_slayer'
   | 'crusher_of_the_meek'
+  | 'challenger'
+  | 'underdog'
+  | 'overthrower'
+  | 'kingslayer'
+  | 'legends_bane'
+  | 'comeback_kid'
+  | 'hero_to_zero'
+  | 'hero_of_the_first_era'
+  | 'herald_of_the_second_coming'
+  | 'knight_of_three_crossroads'
+  | 'champion_of_the_end'
 
 export interface CommanderTitleDef {
   id: CommanderTitleId
@@ -139,6 +151,17 @@ export const TITLES: Record<CommanderTitleId, CommanderTitleDef> = {
     name: 'Crusher Of the Meek',
     description: 'Most wins came against weaker opposition near the bottom of the league.',
   },
+  challenger: { id: 'challenger', name: 'Challenger', description: 'Won a game against a commander MMR advantage of at least 200.' },
+  underdog: { id: 'underdog', name: 'Underdog', description: 'Won a game against a commander MMR advantage of at least 300.' },
+  overthrower: { id: 'overthrower', name: 'Overthrower', description: 'Won a game against a commander MMR advantage of at least 400.' },
+  kingslayer: { id: 'kingslayer', name: 'Kingslayer', description: 'Won a game against the league leader while last in the standings.' },
+  legends_bane: { id: 'legends_bane', name: "Legend's Bane", description: 'Repeatedly finished strongly against pods with at least 150 more average commander MMR.' },
+  comeback_kid: { id: 'comeback_kid', name: 'Comeback Kid', description: 'Recovered more than 600 commander MMR from this pairing’s low point.' },
+  hero_to_zero: { id: 'hero_to_zero', name: 'Hero to Zero', description: 'Fell more than 600 commander MMR from this pairing’s peak.' },
+  hero_of_the_first_era: { id: 'hero_of_the_first_era', name: 'Hero of the First Era', description: 'Best eligible commander pairing by average placement in the first league season.' },
+  herald_of_the_second_coming: { id: 'herald_of_the_second_coming', name: 'Herald Of the Second Coming', description: 'Best eligible commander pairing by average placement in the second league season.' },
+  knight_of_three_crossroads: { id: 'knight_of_three_crossroads', name: 'Knight of Three Crossroads', description: 'Best eligible commander pairing by average placement in the third league season.' },
+  champion_of_the_end: { id: 'champion_of_the_end', name: 'Champion of the End', description: 'Best eligible commander pairing by average placement in the final league season.' },
 }
 
 export const TITLE_ORDER: CommanderTitleId[] = [
@@ -161,6 +184,17 @@ export const TITLE_ORDER: CommanderTitleId[] = [
   'prodigy',
   'paradigm_of_stubbornness',
   'tyrant_of_the_tables',
+  'challenger',
+  'underdog',
+  'overthrower',
+  'kingslayer',
+  'legends_bane',
+  'comeback_kid',
+  'hero_to_zero',
+  'hero_of_the_first_era',
+  'herald_of_the_second_coming',
+  'knight_of_three_crossroads',
+  'champion_of_the_end',
 ]
 
 type OpponentSummary = {
@@ -170,17 +204,35 @@ type OpponentSummary = {
   winGames: number
 }
 
+type MmrTitleStats = {
+  largestWinMmrGap: number
+  strongUnderdogFinishes: number
+  kingslayerWins: number
+  recoveryFromLow: number
+  fallFromPeak: number
+}
+
 export type CommanderTitleContext = {
   playerName: string
   commanderName: string
   commanderRecords: PlayerGameRecord[]
   playerRecords: PlayerGameRecord[]
   allRecords: PlayerGameRecord[]
-  games: Pick<ProcessedGame, 'gameId' | 'players'>[]
+  games: Pick<ProcessedGame, 'gameId' | 'players' | 'date'>[]
   standings: Pick<LeagueStanding, 'name' | 'rank'>[]
 }
 
-export function getCommanderPerformanceTitle(context: CommanderTitleContext): CommanderTitleResult {
+const SEASON_CHAMPION_TITLE_IDS = new Set<CommanderTitleId>([
+  'hero_of_the_first_era',
+  'herald_of_the_second_coming',
+  'knight_of_three_crossroads',
+  'champion_of_the_end',
+])
+
+function getEligibleCommanderTitles(
+  context: CommanderTitleContext,
+  includeSeasonChampionTitles = true,
+): CommanderTitleResult[] {
   const {
     playerName,
     commanderName,
@@ -192,7 +244,7 @@ export function getCommanderPerformanceTitle(context: CommanderTitleContext): Co
   } = context
 
   if (commanderRecords.length === 0) {
-    return withReason('wild_card', 'No games recorded with this pairing yet.')
+    return [withReason('wild_card', 'No games recorded with this pairing yet.')]
   }
 
   const gameOrder = new Map(games.map((game, index) => [game.gameId, index]))
@@ -265,10 +317,20 @@ export function getCommanderPerformanceTitle(context: CommanderTitleContext): Co
     standingsByName,
     standings.length,
   )
+  const mmrTitleStats = summarizeMmrTitles(
+    playerName,
+    orderedCommanderRecords,
+    allRecords,
+    standingsByName,
+    standings.length,
+  )
+  const seasonChampionIndexes = includeSeasonChampionTitles
+    ? getSeasonChampionIndexes(playerName, commanderName, allRecords, games)
+    : []
 
-  let selected = withReason('wild_card', 'No more specific pattern outweighed the others for this pairing.')
-
+  const earnedTitles: CommanderTitleResult[] = []
   for (const id of TITLE_ORDER) {
+    if (!includeSeasonChampionTitles && SEASON_CHAMPION_TITLE_IDS.has(id)) continue
     const reason = evaluateTitle(id, {
       playerName,
       commanderName,
@@ -294,12 +356,21 @@ export function getCommanderPerformanceTitle(context: CommanderTitleContext): Co
       forgottenGames,
       forgottenThreshold,
       winOpponents,
+      mmrTitleStats,
+      seasonChampionIndexes,
     })
 
-    if (reason) selected = withReason(id, reason)
+    if (reason) earnedTitles.push(withReason(id, reason))
   }
 
-  return selected
+  return earnedTitles.length > 0
+    ? earnedTitles
+    : [withReason('wild_card', 'No more specific pattern outweighed the others for this pairing.')]
+}
+
+export function getCommanderPerformanceTitle(context: CommanderTitleContext): CommanderTitleResult {
+  return getEligibleCommanderTitles(context).at(-1)
+    ?? withReason('wild_card', 'No games recorded with this pairing yet.')
 }
 
 export function getCommanderTitleHistory(context: CommanderTitleContext): CommanderTitleResult[] {
@@ -323,14 +394,20 @@ export function getCommanderTitleHistory(context: CommanderTitleContext): Comman
   for (let index = 0; index < orderedCommanderRecords.length; index++) {
     const latestCommanderRecord = orderedCommanderRecords[index]
     const lastGameIndex = gameOrder.get(latestCommanderRecord.gameId) ?? index
-    const title = getCommanderPerformanceTitle({
+    const snapshotContext = {
       ...context,
       commanderRecords: orderedCommanderRecords.slice(0, index + 1),
       playerRecords: orderedPlayerRecords.filter((record) => (gameOrder.get(record.gameId) ?? 0) <= lastGameIndex),
       allRecords: orderedAllRecords.filter((record) => (gameOrder.get(record.gameId) ?? 0) <= lastGameIndex),
       games: orderedGames.slice(0, lastGameIndex + 1),
-    })
+    }
 
+    for (const title of getEligibleCommanderTitles(snapshotContext, false)) {
+      earnedById.set(title.id, title)
+    }
+  }
+
+  for (const title of getEligibleCommanderTitles(context)) {
     earnedById.set(title.id, title)
   }
 
@@ -381,6 +458,8 @@ function evaluateTitle(
     forgottenGames: number
     forgottenThreshold: number
     winOpponents: OpponentSummary
+    mmrTitleStats: MmrTitleStats
+    seasonChampionIndexes: number[]
   },
 ) {
   const {
@@ -406,6 +485,8 @@ function evaluateTitle(
     forgottenGames,
     forgottenThreshold,
     winOpponents,
+    mmrTitleStats,
+    seasonChampionIndexes,
   } = metrics
 
   switch (id) {
@@ -490,6 +571,49 @@ function evaluateTitle(
         return `Wins mostly came through stronger pods, with ${Math.round(winOpponents.topShare * 100)}% of winning tables featuring top-tier opposition.`
       }
       return null
+    case 'challenger':
+      if (mmrTitleStats.largestWinMmrGap >= 200) {
+        return `Won a game while facing ${Math.round(mmrTitleStats.largestWinMmrGap)} more average commander MMR across the rest of the pod.`
+      }
+      return null
+    case 'underdog':
+      if (mmrTitleStats.largestWinMmrGap >= 300) {
+        return `Won a game while facing ${Math.round(mmrTitleStats.largestWinMmrGap)} more average commander MMR across the rest of the pod.`
+      }
+      return null
+    case 'overthrower':
+      if (mmrTitleStats.largestWinMmrGap >= 400) {
+        return `Toppled a pod with ${Math.round(mmrTitleStats.largestWinMmrGap)} more average commander MMR.`
+      }
+      return null
+    case 'kingslayer':
+      if (mmrTitleStats.kingslayerWins > 0) {
+        return `Won ${mmrTitleStats.kingslayerWins} game${mmrTitleStats.kingslayerWins === 1 ? '' : 's'} against the current league leader while sitting last in the standings.`
+      }
+      return null
+    case 'legends_bane':
+      if (mmrTitleStats.strongUnderdogFinishes >= 4) {
+        return `Finished in the top half ${mmrTitleStats.strongUnderdogFinishes} times against pods averaging at least 150 more commander MMR.`
+      }
+      return null
+    case 'comeback_kid':
+      if (mmrTitleStats.recoveryFromLow >= 600) {
+        return `Climbed ${Math.round(mmrTitleStats.recoveryFromLow)} commander MMR from its lowest recorded point.`
+      }
+      return null
+    case 'hero_to_zero':
+      if (mmrTitleStats.fallFromPeak >= 600) {
+        return `Dropped ${Math.round(mmrTitleStats.fallFromPeak)} commander MMR from its highest recorded point.`
+      }
+      return null
+    case 'hero_of_the_first_era':
+      return seasonChampionIndexes.includes(0) ? 'Finished as the best eligible commander pairing of Season 1 by average placement.' : null
+    case 'herald_of_the_second_coming':
+      return seasonChampionIndexes.includes(1) ? 'Finished as the best eligible commander pairing of Season 2 by average placement.' : null
+    case 'knight_of_three_crossroads':
+      return seasonChampionIndexes.includes(2) ? 'Finished as the best eligible commander pairing of Season 3 by average placement.' : null
+    case 'champion_of_the_end':
+      return seasonChampionIndexes.includes(3) ? 'Finished as the best eligible commander pairing of Season 4 by average placement.' : null
     case 'feast_or_famine':
       if (
         plays >= 7 &&
@@ -580,6 +704,114 @@ function evaluateTitle(
       return null
     default:
       return null
+  }
+}
+
+function getSeasonChampionIndexes(
+  playerName: string,
+  commanderName: string,
+  allRecords: PlayerGameRecord[],
+  games: Pick<ProcessedGame, 'gameId' | 'date'>[],
+): number[] {
+  const seasonalRanking = getResolvedLeagueSettings().standings.seasonalRanking
+  if (!hasActiveSeasonalRanking(seasonalRanking)) return []
+
+  const timestampByGameId = new Map(games.map((game) => [game.gameId, new Date(game.date).getTime()]))
+  const minimumGames = 3
+  const now = Date.now()
+
+  const championIndexes: number[] = []
+  for (const [index, season] of buildLeagueSeasonRanges(seasonalRanking).entries()) {
+    if (season.endMs >= now) continue
+
+    const pairRecords = new Map<string, PlayerGameRecord[]>()
+    for (const record of allRecords) {
+      const timestamp = timestampByGameId.get(record.gameId)
+      if (!Number.isFinite(timestamp) || timestamp! < season.startMs || timestamp! > season.endMs) continue
+      const key = `${record.playerName}::${record.commander}`
+      const bucket = pairRecords.get(key)
+      if (bucket) bucket.push(record)
+      else pairRecords.set(key, [record])
+    }
+
+    const champion = [...pairRecords.entries()]
+      .filter(([, records]) => records.length >= minimumGames)
+      .map(([key, records]) => ({
+        key,
+        averagePlacement: average(records.map((record) => record.placement)),
+        averagePoints: average(records.map((record) => record.finalPoints)),
+        plays: records.length,
+      }))
+      .sort((left, right) =>
+        left.averagePlacement - right.averagePlacement
+        || right.averagePoints - left.averagePoints
+        || right.plays - left.plays
+        || left.key.localeCompare(right.key),
+      )[0]
+
+    if (champion?.key === `${playerName}::${commanderName}`) championIndexes.push(index)
+  }
+
+  return championIndexes
+}
+
+function summarizeMmrTitles(
+  playerName: string,
+  commanderRecords: PlayerGameRecord[],
+  allRecords: PlayerGameRecord[],
+  standingsByName: Map<string, number>,
+  standingCount: number,
+): MmrTitleStats {
+  const recordsByGameId = new Map<string, PlayerGameRecord[]>()
+  for (const record of allRecords) {
+    const bucket = recordsByGameId.get(record.gameId)
+    if (bucket) bucket.push(record)
+    else recordsByGameId.set(record.gameId, [record])
+  }
+
+  let largestWinMmrGap = 0
+  let strongUnderdogFinishes = 0
+  let kingslayerWins = 0
+
+  for (const record of commanderRecords) {
+    const ownMmr = record.commanderMMRBefore ?? record.commanderMMRAfter ?? 0
+    const opponents = (recordsByGameId.get(record.gameId) ?? [])
+      .filter((opponent) => opponent.playerName !== playerName)
+    const opponentMmrs = opponents
+      .map((opponent) => opponent.commanderMMRBefore ?? opponent.commanderMMRAfter ?? 0)
+      .filter((mmr) => Number.isFinite(mmr) && mmr > 0)
+    const opponentAverage = opponentMmrs.length > 0 ? average(opponentMmrs) : 0
+    const mmrGap = opponentAverage - ownMmr
+
+    if (record.placement === 1) largestWinMmrGap = Math.max(largestWinMmrGap, mmrGap)
+    if (mmrGap >= 150 && record.placement <= Math.ceil(record.playerCount / 2)) {
+      strongUnderdogFinishes++
+    }
+
+    const playerRank = standingsByName.get(playerName)
+    const facesLeader = opponents.some((opponent) => standingsByName.get(opponent.playerName) === 1)
+    if (record.placement === 1 && playerRank === standingCount && facesLeader) kingslayerWins++
+  }
+
+  let lowPoint = Number.POSITIVE_INFINITY
+  let peakPoint = Number.NEGATIVE_INFINITY
+  let recoveryFromLow = 0
+  let fallFromPeak = 0
+  for (const record of commanderRecords) {
+    const mmr = record.commanderMMRAfter ?? record.commanderMMRBefore ?? 0
+    if (!Number.isFinite(mmr) || mmr <= 0) continue
+    recoveryFromLow = Math.max(recoveryFromLow, mmr - lowPoint)
+    fallFromPeak = Math.max(fallFromPeak, peakPoint - mmr)
+    lowPoint = Math.min(lowPoint, mmr)
+    peakPoint = Math.max(peakPoint, mmr)
+  }
+
+  return {
+    largestWinMmrGap: Math.max(0, largestWinMmrGap),
+    strongUnderdogFinishes,
+    kingslayerWins,
+    recoveryFromLow: Math.max(0, recoveryFromLow),
+    fallFromPeak: Math.max(0, fallFromPeak),
   }
 }
 

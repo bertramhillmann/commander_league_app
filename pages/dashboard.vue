@@ -96,7 +96,7 @@
               <span class="standings__sort-indicator">{{ sortIndicator('winRate') }}</span>
             </button>
           </th>
-          <th class="standings__th standings__th--num">
+          <th v-show="showAveragePerGameColumn" class="standings__th standings__th--num">
             <button
               type="button"
               class="standings__sort-button standings__sort-button--num"
@@ -116,7 +116,21 @@
               <span class="standings__sort-indicator">{{ sortIndicator('averageCommanderMmr') }}</span>
             </button>
           </th>
-          <th v-if="showSeasonScoresInTable" class="standings__th standings__th--num">Seasons</th>
+          <th
+            v-for="season in displayedLeagueSeasons"
+            :key="season.index"
+            class="standings__th standings__th--num"
+            :title="`${season.label}: ${formatSeasonDate(season.startDate)} – ${formatSeasonDate(season.endDate)}`"
+          >
+            <button
+              type="button"
+              class="standings__sort-button standings__sort-button--num"
+              @click="toggleSort(seasonSortKey(season.index))"
+            >
+              <span>{{ season.label }}</span>
+              <span class="standings__sort-indicator">{{ sortIndicator(seasonSortKey(season.index)) }}</span>
+            </button>
+          </th>
           <!-- <th class="standings__th standings__th--commander">Most Played Commander</th> -->
           <th class="standings__th standings__th--commander">Top Commander</th>
         </tr>
@@ -215,12 +229,16 @@
           </td>
           <td class="standings__td standings__td--num">{{ isPlayerRatingMode ? `${row.participationRate}%` : row.gamesPlayed }}</td>
           <td class="standings__td standings__td--num">{{ row.winRate }}%</td>
-          <td class="standings__td standings__td--num">{{ fmt(row.avgPerGame) }}</td>
+          <td v-show="showAveragePerGameColumn" class="standings__td standings__td--num">{{ fmt(row.avgPerGame) }}</td>
           <td class="standings__td standings__td--num standings__td--avg-mmr" :title="`Avg Commander MMR: ${Math.round(row.averageCommanderMmr)}`">
             <span class="standings__avg-mmr"><IconsMmrIcon :size="11" />{{ Math.round(row.averageCommanderMmr) }}</span>
           </td>
-          <td v-if="showSeasonScoresInTable" class="standings__td standings__td--num">
-            <span class="standings__season-score">{{ formatSeasonOnlyCell(row.seasonScores ?? []) }}</span>
+          <td
+            v-for="season in displayedLeagueSeasons"
+            :key="season.index"
+            class="standings__td standings__td--num"
+          >
+            <span class="standings__season-score">{{ formatSeasonScoreCell(row.seasonScores?.[season.index] ?? null, season) }}</span>
           </td>
           <td class="standings__td standings__td--commander">
             <NuxtLink
@@ -520,7 +538,10 @@
             class="dashboard__perf-player-icon dashboard__perf-player-icon--fallback"
           >{{ player.initials }}</span>
           <span class="dashboard__perf-player-name">{{ player.name }}</span>
-          <span class="dashboard__perf-player-points">{{ fmt(player.points) }}</span>
+          <span
+            class="dashboard__perf-player-points"
+            :title="player.pointsTitle"
+          >{{ fmt(player.points) }}</span>
         </NuxtLink>
       </div>
     </section>
@@ -968,11 +989,13 @@ type SortKey =
   | 'avgPerGame'
   | 'averageCommanderMmr'
   | 'totalLPoints'
+  | `season:${number}`
 
 type ChartStandingRow = {
   rank: number
   name: string
   points: number
+  pointsTitle?: string
   imageUrl: string
   initials: string
 }
@@ -1057,6 +1080,7 @@ const seasonalRankingEnabled = computed(() =>
 )
 const showSeasonScoresInTable = computed(() => seasonalRankingEnabled.value)
 const generatedLeagueSeasons = computed(() => buildLeagueSeasonRanges(settings.value.standings.seasonalRanking))
+const displayedLeagueSeasons = computed(() => showSeasonScoresInTable.value ? generatedLeagueSeasons.value : [])
 const performanceSeasonOptions = computed(() => {
   const now = Date.now()
   return generatedLeagueSeasons.value.filter((season) => season.startMs <= now)
@@ -1069,6 +1093,7 @@ watch(performanceSeasonOptions, (options) => {
   }
 }, { immediate: true })
 const showStandingsDetailColumns = false
+const showAveragePerGameColumn = false
 const totalScoreColumnLabel = computed(() => playerRankingSystem.value === 'player_rating_based' ? 'Rating' : 'Total')
 const secondaryChartLabel = computed(() => playerRankingSystem.value === 'player_rating_based' ? 'Player Rating' : 'Total Score')
 const activePerfChartTitle = computed(() => {
@@ -1142,7 +1167,7 @@ const totalScoreColumnTitle = computed(() => {
   if (seasonalRankingEnabled.value) {
     return [
       'Season ranking averages each started league season separately, then averages those season scores together.',
-      'Started seasons with no games from a player count as 0.',
+      'Only seasons in which a player has recorded a game count toward that player’s season average.',
       'Future seasons stay hidden as - until their start date is reached.',
     ].join('\n')
   }
@@ -1642,7 +1667,7 @@ const table = computed(() => {
 
   return rankedRows.sort((a, b) => {
     const direction = sortDirection.value === 'desc' ? -1 : 1
-    const delta = a[sortKey.value] - b[sortKey.value]
+    const delta = getTableSortValue(a, sortKey.value) - getTableSortValue(b, sortKey.value)
 
     if (delta !== 0) return delta * direction
 
@@ -2007,6 +2032,17 @@ const participationChartData = computed<{ labels: string[], series: PerformanceP
   return { labels, series }
 })
 
+function averageGamesPerWeekSinceFirstGame(playerName: string): number | null {
+  const playedGames = chronologicalGames.value.filter((game) => gameRecords.value[playerName]?.[game.gameId])
+  if (playedGames.length === 0) return null
+
+  const firstWeek = new Date(`${startOfWeekKey(playedGames[0].date)}T00:00:00Z`)
+  const latestWeek = new Date(`${startOfWeekKey(chronologicalGames.value.at(-1)?.date ?? '')}T00:00:00Z`)
+  const elapsedWeeks = Math.floor((latestWeek.getTime() - firstWeek.getTime()) / (7 * 24 * 60 * 60 * 1000)) + 1
+
+  return elapsedWeeks > 0 ? playedGames.length / elapsedWeeks : null
+}
+
 const averageCommanderMmrChartData = computed<{ labels: string[], series: PerformancePlayerSeries[] }>(() => {
   const games = chronologicalGames.value
   if (games.length === 0) return { labels: [], series: [] }
@@ -2162,12 +2198,17 @@ const currentChartStandings = computed<ChartStandingRow[]>(() => {
 
   return chartData.series
     .map((series) => {
-      const latestValue = [...series.data].reverse().find((value): value is number => typeof value === 'number')
-      return latestValue === undefined
+      const points = activeChart.value === 'participation'
+        ? averageGamesPerWeekSinceFirstGame(series.name)
+        : [...series.data].reverse().find((value): value is number => typeof value === 'number')
+      return points === null || points === undefined
         ? null
         : {
             name: series.name,
-            points: latestValue,
+            points,
+            pointsTitle: activeChart.value === 'participation'
+              ? 'Average games per week, from the player’s first recorded game onward.'
+              : undefined,
             imageUrl: getPlayerPortrait(series.name),
             initials: series.name.slice(0, 2).toUpperCase(),
           }
@@ -2227,6 +2268,18 @@ function toggleSort(key: SortKey) {
   sortDirection.value = 'desc'
 }
 
+function seasonSortKey(index: number): SortKey {
+  return `season:${index}`
+}
+
+function getTableSortValue(row: { seasonScores?: Array<number | null>, [key: string]: any }, key: SortKey) {
+  if (key.startsWith('season:')) {
+    const seasonIndex = Number(key.slice('season:'.length))
+    return row.seasonScores?.[seasonIndex] ?? Number.NEGATIVE_INFINITY
+  }
+  return row[key] ?? 0
+}
+
 function sortIndicator(key: SortKey) {
   if (sortKey.value !== key) return '↕'
   return sortDirection.value === 'desc' ? '↓' : '↑'
@@ -2247,11 +2300,17 @@ function fmt(n: number | null | undefined): string {
   return n % 1 === 0 ? String(n) : n.toFixed(3).replace(/\.?0+$/, '')
 }
 
-function formatSeasonOnlyCell(seasonScores: Array<number | null>) {
-  const displayedSeasonScores = seasonScores.length > 0
-    ? seasonScores
-    : generatedLeagueSeasons.value.map(() => null)
-  return displayedSeasonScores.map((score) => (score === null ? '-' : fmt(score))).join(' | ')
+function formatSeasonDate(date: string) {
+  return new Date(`${date}T00:00:00Z`).toLocaleDateString('de-DE', {
+    day: '2-digit',
+    month: '2-digit',
+    year: 'numeric',
+  })
+}
+
+function formatSeasonScoreCell(score: number | null, season: { startMs: number, startDate: string }) {
+  if (season.startMs > Date.now()) return formatSeasonDate(season.startDate)
+  return score === null ? '-' : fmt(score)
 }
 
 function fmtLooster(n: number | null | undefined): string {

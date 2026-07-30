@@ -1043,7 +1043,11 @@ import { extractArchidektDeckId } from '~/utils/archidekt'
 import { buildCommanderMMRTimeline, buildCommanderPlacementTimeline, type CommanderMMRTimelinePoint, type PlacementTimelinePoint } from '~/utils/commanderTimeline'
 import { buildPlayerLeagueTimeline } from '~/utils/playerLeagueTimeline'
 import { buildPlayerMatchTimeline } from '~/utils/playerMatchTimeline'
-import { buildPlayerRatingDetail } from '~/composables/usePlayerRating'
+import {
+  buildPlayerRatingDetail,
+  type PlayerRatingBreakdownKey,
+  type PlayerRatingDetail,
+} from '~/composables/usePlayerRating'
 import { buildAveragePlayerRatingSeries } from '~/utils/playerRatingTimeline'
 import { buildPlacementPrognosis } from '~/utils/placementPrognosis'
 import { formatPlayerName } from '~/utils/playerNames'
@@ -1147,7 +1151,9 @@ const placementPrognosis = computed(() =>
   buildPlacementPrognosis(playerId.value, chronologicalGames.value, gameRecords.value, players.value, commanders.value),
 )
 const playerSuggestion = computed(() =>
-  buildPlayerSuggestion(playerId.value, chronologicalGames.value, gameRecords.value, players.value),
+  playerRankingSystem.value === 'player_rating_based' && !leagueSettings.value.playerRating.simpleMmr.enabled
+    ? buildRatingFocusSuggestion(playerRatingDetail.value, allPlayerRatingDetails.value)
+    : buildPlayerSuggestion(playerId.value, chronologicalGames.value, gameRecords.value, players.value),
 )
 const playerAchievements = computed(() => {
   const counts = new Map<string, number>()
@@ -1357,6 +1363,91 @@ const averageCommanderMmrInsight = computed(() => {
     entries,
   }
 })
+
+function buildRatingFocusSuggestion(
+  detail: PlayerRatingDetail | null,
+  leagueDetails: PlayerRatingDetail[],
+) {
+  const current = detail?.current
+  if (!detail || !current) return null
+
+  const leagueAverage = (key: PlayerRatingBreakdownKey, field: 'normalizedScore' | 'rawValue') => {
+    const values = leagueDetails
+      .map((leagueDetail) => leagueDetail.current?.factors[key]?.[field])
+      .filter((value): value is number => typeof value === 'number')
+    return values.length > 0 ? values.reduce((sum, value) => sum + value, 0) / values.length : 0
+  }
+  const factorGap = (key: PlayerRatingBreakdownKey) =>
+    leagueAverage(key, 'normalizedScore') - current.factors[key].normalizedScore
+  const avgMmrInsight = averageCommanderMmrInsight.value
+
+  if (avgMmrInsight && avgMmrInsight.fallbackSlots > 0) {
+    const needed = avgMmrInsight.fallbackSlots
+    return {
+      title: 'Make more commanders eligible for your rating',
+      summary: `Your Avg Commander MMR still has ${needed} fallback slot${needed === 1 ? '' : 's'}. Reaching the minimum play count with stronger commanders replaces those fallback values in the rating calculation.`,
+      reasons: [
+        `${avgMmrInsight.countedCommanders}/${avgMmrInsight.topCount} counted commander slots are currently filled.`,
+        `A commander becomes eligible after ${avgMmrInsight.minimumGames} games.`,
+        `Your counted commander average is ${fmt(avgMmrInsight.averageCommanderMmr)} MMR versus the league average of ${fmt(leagueAverage('averageCommanderMMR', 'rawValue'))}.`,
+      ],
+    }
+  }
+
+  if (factorGap('averageCommanderMMR') > 8) {
+    const eligibleOutsideTop = avgMmrInsight
+      ? Object.values(avgMmrInsight.entries).find((entry) => entry.status === 'eligible')
+      : null
+    return {
+      title: 'Raise the strength of your counted commander pool',
+      summary: 'Your regular commander pool is below the league average. Prioritize commanders that can improve the top eligible MMR slots rather than adding low-MMR reps that do not help this factor.',
+      reasons: [
+        `Your Avg Commander MMR is ${fmt(current.factors.averageCommanderMMR.rawValue)} versus the league average of ${fmt(leagueAverage('averageCommanderMMR', 'rawValue'))}.`,
+        `Only the best ${avgMmrInsight?.topCount ?? 0} eligible commanders are counted in this rating factor.`,
+        eligibleOutsideTop
+          ? `${eligibleOutsideTop.commander} is eligible at ${fmt(eligibleOutsideTop.usedMmr)} MMR but is currently outside the counted slots.`
+          : 'Build results with commanders that can enter the counted slots at a higher MMR.',
+      ],
+    }
+  }
+
+  if (factorGap('commanderMMRContext') > 8) {
+    return {
+      title: 'Convert high-MMR picks into stronger finishes',
+      summary: 'Your results are falling below the placement expectation created by your commander MMR. High-MMR commanders help only when you keep pace with the tougher pods they create.',
+      reasons: [
+        `Your average result versus commander-MMR expectation is ${fmt(current.factors.commanderMMRContext.rawValue)}; the league average is ${fmt(leagueAverage('commanderMMRContext', 'rawValue'))}.`,
+        'Repeatedly bringing a strong commander into weaker pods and finishing below expectation drags this factor down.',
+        'Choose your high-MMR picks when you can reliably convert their expected advantage into top-half finishes.',
+      ],
+    }
+  }
+
+  const lowestWeightedFactor = (['recentPerformance', 'allTimePerformance', 'seasonPoints', 'winRate', 'commanderDiversity'] as PlayerRatingBreakdownKey[])
+    .map((key) => ({ key, gap: factorGap(key) * current.factors[key].weight }))
+    .sort((left, right) => right.gap - left.gap)[0]
+
+  if (lowestWeightedFactor?.key === 'commanderDiversity' && lowestWeightedFactor.gap > 0) {
+    return {
+      title: 'Broaden your viable commander pool',
+      summary: 'Your commander diversity factor trails the league. Add commanders that can become eligible and competitive, instead of repeatedly leaning on one line that is no longer improving your rating profile.',
+      reasons: [
+        `Your diversity score is ${fmt(current.factors.commanderDiversity.normalizedScore)} versus the league average of ${fmt(leagueAverage('commanderDiversity', 'normalizedScore'))}.`,
+        'New commanders are most valuable when they can reach eligibility and maintain a useful MMR.',
+      ],
+    }
+  }
+
+  return {
+    title: 'Target your weakest weighted rating factor',
+    summary: 'Your rating improves most efficiently by lifting the factor that currently trails the league after its configured weight is applied.',
+    reasons: [
+      `Recent form: ${fmt(current.factors.recentPerformance.normalizedScore)} versus league ${fmt(leagueAverage('recentPerformance', 'normalizedScore'))}.`,
+      `Win rate: ${fmt(current.factors.winRate.normalizedScore)} versus league ${fmt(leagueAverage('winRate', 'normalizedScore'))}.`,
+      `Season points: ${fmt(current.factors.seasonPoints.normalizedScore)} versus league ${fmt(leagueAverage('seasonPoints', 'normalizedScore'))}.`,
+    ],
+  }
+}
 
 const clutchRating = computed(() => {
   const recs = allRecords.value

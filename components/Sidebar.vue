@@ -100,8 +100,10 @@
               <ChartsPerformanceTimeline
                 :labels="comparisonHistoryLabels"
                 :series="factor.series"
-                :title="`${factor.label} Comparison`"
-                subtitle="Weighted contribution across the shared league timeline."
+                :title="factor.key === 'seasonPoints' ? 'Season Score Comparison' : `${factor.label} Comparison`"
+                :subtitle="factor.key === 'seasonPoints'
+                  ? 'Combined season score and each individual season over the shared league timeline.'
+                  : 'Rating-point contribution across the shared league timeline.'"
                 class="rating-sidebar__chart rating-sidebar__chart--factor"
               />
             </article>
@@ -196,11 +198,9 @@
                   <p class="rating-sidebar__factor-description">{{ factor.current.description }}</p>
                 </div>
                 <div class="rating-sidebar__factor-stats">
-                  <span class="rating-sidebar__factor-pill">raw {{ fmt(factor.current.rawValue) }}</span>
-                  <span class="rating-sidebar__factor-pill">norm {{ fmt(factor.current.normalizedScore) }}</span>
                   <span class="rating-sidebar__factor-pill">weight {{ Math.round(factor.current.weight * 100) }}%</span>
                   <span class="rating-sidebar__factor-pill rating-sidebar__factor-pill--accent">
-                    +{{ fmt(factor.current.weightedContribution) }}
+                    +{{ fmt(factor.ratingContribution) }} rating
                   </span>
                 </div>
               </div>
@@ -214,8 +214,10 @@
               <ChartsPerformanceTimeline
                 :labels="historyLabels"
                 :series="factor.series"
-                :title="`${factor.current.label} Over Time`"
-                subtitle="Weighted contribution across the shared league timeline."
+                :title="factor.key === 'seasonPoints' ? 'Season Scores Over Time' : `${factor.current.label} Over Time`"
+                :subtitle="factor.key === 'seasonPoints'
+                  ? 'Combined season score and each individual season over the league timeline.'
+                  : 'Rating-point contribution across the shared league timeline.'"
                 class="rating-sidebar__chart rating-sidebar__chart--factor"
               />
             </article>
@@ -378,6 +380,7 @@ import { buildPlayerRatingDetail } from '~/composables/usePlayerRating'
 import { useLeagueSettings } from '~/composables/useLeagueSettings'
 import { getCommanderLevelProgress } from '~/utils/commanderExperience'
 import { buildAveragePlayerRatingSeries } from '~/utils/playerRatingTimeline'
+import { buildLeagueSeasonRanges, hasActiveSeasonalRanking } from '~/utils/leagueSettings'
 import { useImageCache } from '~/composables/useImageCache'
 
 const props = defineProps<{
@@ -494,6 +497,7 @@ const overallSeries = computed(() => {
 const factorKeyOrder: PlayerRatingBreakdownKey[] = [
   'recentPerformance',
   'allTimePerformance',
+  'seasonPoints',
   'winRate',
   'commanderMMRContext',
   'averageCommanderMMR',
@@ -503,13 +507,22 @@ const factorKeyOrder: PlayerRatingBreakdownKey[] = [
   'commanderDiversity',
 ]
 
-const factorKeys = computed(() =>
-  factorKeyOrder.filter((key) => (settings.value.playerRating.weights[key] ?? 0) > 0),
+function getFactorWeight(key: PlayerRatingBreakdownKey) {
+  return key === 'activityPoints'
+    ? settings.value.playerRating.weights.commanderPoints ?? 0
+    : settings.value.playerRating.weights[key] ?? 0
+}
+
+const factorKeys = computed(() => factorKeyOrder.filter((key) => getFactorWeight(key) > 0))
+
+const totalFactorWeight = computed(() =>
+  Object.values(settings.value.playerRating.weights).reduce((sum, weight) => sum + weight, 0) || 1,
 )
 
 const factorColors: Record<PlayerRatingBreakdownKey, string> = {
   recentPerformance: '#fb7185',
   allTimePerformance: '#f97316',
+  seasonPoints: '#14b8a6',
   winRate: '#facc15',
   commanderMMRContext: '#38bdf8',
   averageCommanderMMR: '#0ea5e9',
@@ -533,6 +546,11 @@ const PLAYER_RATING_FACTOR_META: Record<PlayerRatingBreakdownKey, {
     label: 'Long-Term Performance',
     note: 'deeper full-history scoring base',
     tip: 'Build a longer stretch of above-average finishes so your long-term rating floor rises too.',
+  },
+  seasonPoints: {
+    label: 'Season Points',
+    note: 'average score across played league seasons',
+    tip: 'Keep your average score strong in each season; seasons without games are not included.',
   },
   winRate: {
     label: 'Win Rate',
@@ -670,6 +688,101 @@ function buildAlignedRatingSeries(
   return { data, tooltipData }
 }
 
+function toRatingContribution(
+  factor: Pick<PlayerRatingFactorDetail, 'weightedContribution'>,
+  confidenceMultiplier: number,
+) {
+  const ratingSpan = Math.max(0, settings.value.playerRating.maxRating - settings.value.playerRating.minRating)
+  return round3(
+    (factor.weightedContribution / totalFactorWeight.value)
+    * (0.2 + confidenceMultiplier)
+    / 100
+    * ratingSpan,
+  )
+}
+
+function buildAverageFactorContributionSeries(key: PlayerRatingBreakdownKey): Array<number | null> {
+  const historyMaps = allPlayerRatingDetails.value.map((playerDetail) =>
+    new Map(playerDetail.history.map((entry) => [entry.gameId, entry])),
+  )
+  const lastContributions = new Array<number | null>(historyMaps.length).fill(null)
+  const started = new Array<boolean>(historyMaps.length).fill(false)
+
+  return leagueTimeline.value.map((timelineEntry) => {
+    const activeContributions: number[] = []
+
+    historyMaps.forEach((historyMap, index) => {
+      const snapshot = historyMap.get(timelineEntry.gameId)
+      if (snapshot) {
+        started[index] = true
+        lastContributions[index] = toRatingContribution(snapshot.factors[key], snapshot.confidenceMultiplier)
+      }
+      if (started[index] && lastContributions[index] !== null) {
+        activeContributions.push(lastContributions[index])
+      }
+    })
+
+    if (activeContributions.length === 0) return null
+    return activeContributions.reduce((sum, contribution) => sum + contribution, 0) / activeContributions.length
+  })
+}
+
+const SEASON_SCORE_COLORS = ['#38bdf8', '#a78bfa', '#f97316', '#f472b6', '#facc15', '#34d399']
+
+function buildSeasonScoreSeries(playerName: string, totalColor: string) {
+  if (!hasActiveSeasonalRanking(settings.value.standings.seasonalRanking)) return []
+
+  const seasons = buildLeagueSeasonRanges(settings.value.standings.seasonalRanking)
+  const recordsByGameId = gameRecords.value[playerName] ?? {}
+  const scoresBySeason = seasons.map(() => [] as number[])
+  const totalData: Array<number | null> = []
+  const seasonData = seasons.map(() => [] as Array<number | null>)
+
+  for (const game of chronologicalGames.value) {
+    const gameMs = new Date(game.date).getTime()
+    const record = recordsByGameId[game.gameId]
+    const seasonIndex = record && Number.isFinite(gameMs)
+      ? seasons.findIndex((season) => gameMs >= season.startMs && gameMs <= season.endMs)
+      : -1
+    if (seasonIndex >= 0 && record) scoresBySeason[seasonIndex].push(record.finalPoints)
+
+    const seasonScores = scoresBySeason
+      .map((scores, index) => {
+        const isWithinSeason = Number.isFinite(gameMs)
+          && gameMs >= seasons[index].startMs
+          && gameMs <= seasons[index].endMs
+        const score = scores.length > 0 ? scores.reduce((sum, value) => sum + value, 0) / scores.length : null
+        seasonData[index].push(isWithinSeason ? score : null)
+        return score
+      })
+      .filter((score): score is number => score !== null)
+    totalData.push(seasonScores.length > 0
+      ? seasonScores.reduce((sum, score) => sum + score, 0) / seasonScores.length
+      : null)
+  }
+
+  return [
+    { name: 'Season Score', color: totalColor, data: totalData },
+    ...seasons.map((season, index) => ({
+      name: season.label,
+      color: SEASON_SCORE_COLORS[index % SEASON_SCORE_COLORS.length],
+      data: seasonData[index],
+    })),
+  ]
+}
+
+function buildAverageSeasonScoreSeries(): Array<number | null> {
+  const playerTotalSeries = Object.keys(players.value)
+    .map((playerName) => buildSeasonScoreSeries(playerName, '')[0]?.data ?? [])
+
+  return leagueTimeline.value.map((_entry, index) => {
+    const scores = playerTotalSeries
+      .map((series) => series[index])
+      .filter((score): score is number => typeof score === 'number')
+    return scores.length > 0 ? scores.reduce((sum, score) => sum + score, 0) / scores.length : null
+  })
+}
+
 const comparisonDetail = computed(() => {
   if (!detail.value || !compareDetail.value) return null
 
@@ -684,9 +797,12 @@ const comparisonDetail = computed(() => {
         label: PLAYER_RATING_FACTOR_META[key].label,
         note: PLAYER_RATING_FACTOR_META[key].note,
         tip: PLAYER_RATING_FACTOR_META[key].tip,
-        delta: round3(targetCurrent.weightedContribution - viewerCurrent.weightedContribution),
-        targetContribution: targetCurrent.weightedContribution,
-        viewerContribution: viewerCurrent.weightedContribution,
+        delta: round3(
+          toRatingContribution(targetCurrent, detail.value.current?.confidenceMultiplier ?? 0)
+          - toRatingContribution(viewerCurrent, compareDetail.value.current?.confidenceMultiplier ?? 0),
+        ),
+        targetContribution: toRatingContribution(targetCurrent, detail.value.current?.confidenceMultiplier ?? 0),
+        viewerContribution: toRatingContribution(viewerCurrent, compareDetail.value.current?.confidenceMultiplier ?? 0),
       }
     })
     .filter((entry): entry is NonNullable<typeof entry> => entry !== null)
@@ -745,39 +861,60 @@ const comparisonFactorPanels = computed(() => {
       const targetCurrent = comparisonDetail.value?.target.current?.factors[key]
       const viewerCurrent = comparisonDetail.value?.viewer.current?.factors[key]
       if (!targetCurrent || !viewerCurrent) return null
+      const targetContribution = toRatingContribution(
+        targetCurrent,
+        comparisonDetail.value.target.current?.confidenceMultiplier ?? 0,
+      )
+      const viewerContribution = toRatingContribution(
+        viewerCurrent,
+        comparisonDetail.value.viewer.current?.confidenceMultiplier ?? 0,
+      )
 
       return {
         key,
         label: PLAYER_RATING_FACTOR_META[key].label,
         note: PLAYER_RATING_FACTOR_META[key].note,
         tip: PLAYER_RATING_FACTOR_META[key].tip,
-        delta: round3(targetCurrent.weightedContribution - viewerCurrent.weightedContribution),
-        targetContribution: targetCurrent.weightedContribution,
-        viewerContribution: viewerCurrent.weightedContribution,
-        series: [
-          {
-            name: comparisonDetail.value.target.playerName,
-            color: COMPARISON_TARGET_COLOR,
-            ...buildAlignedRatingSeries(
-              comparisonDetail.value.target.history,
-              (entry) => entry.factors[key].weightedContribution,
-              (entry) => formatRawFactorValue(key, entry.factors[key].rawValue, entry.factors[key].detailLines),
-            ),
-          },
-          {
-            name: comparisonDetail.value.viewer.playerName,
-            color: COMPARISON_VIEWER_COLOR,
-            ...buildAlignedRatingSeries(
-              comparisonDetail.value.viewer.history,
-              (entry) => entry.factors[key].weightedContribution,
-              (entry) => formatRawFactorValue(key, entry.factors[key].rawValue, entry.factors[key].detailLines),
-            ),
-          },
-        ],
+        delta: round3(targetContribution - viewerContribution),
+        targetContribution,
+        viewerContribution,
+        totalContribution: targetContribution + viewerContribution,
+        series: key === 'seasonPoints'
+          ? [
+              ...buildSeasonScoreSeries(comparisonDetail.value.target.playerName, COMPARISON_TARGET_COLOR)
+                .map((series) => ({ ...series, name: `${comparisonDetail.value.target.playerName} · ${series.name}` })),
+              ...buildSeasonScoreSeries(comparisonDetail.value.viewer.playerName, COMPARISON_VIEWER_COLOR)
+                .map((series) => ({ ...series, name: `${comparisonDetail.value.viewer.playerName} · ${series.name}` })),
+              {
+                name: 'League Avg',
+                color: 'rgba(148, 163, 184, 0.3)',
+                data: buildAverageSeasonScoreSeries(),
+              },
+            ]
+          : [
+              {
+                name: comparisonDetail.value.target.playerName,
+                color: COMPARISON_TARGET_COLOR,
+                ...buildAlignedRatingSeries(
+                  comparisonDetail.value.target.history,
+                  (entry) => toRatingContribution(entry.factors[key], entry.confidenceMultiplier),
+                  (entry) => formatRawFactorValue(key, entry.factors[key].rawValue, entry.factors[key].detailLines),
+                ),
+              },
+              {
+                name: comparisonDetail.value.viewer.playerName,
+                color: COMPARISON_VIEWER_COLOR,
+                ...buildAlignedRatingSeries(
+                  comparisonDetail.value.viewer.history,
+                  (entry) => toRatingContribution(entry.factors[key], entry.confidenceMultiplier),
+                  (entry) => formatRawFactorValue(key, entry.factors[key].rawValue, entry.factors[key].detailLines),
+                ),
+              },
+            ],
       }
     })
     .filter((entry): entry is NonNullable<typeof entry> => entry !== null)
-    .sort((left, right) => Math.abs(right.delta) - Math.abs(left.delta))
+    .sort((left, right) => right.totalContribution - left.totalContribution)
 })
 
 const factorPanels = computed(() =>
@@ -789,17 +926,32 @@ const factorPanels = computed(() =>
       return {
         key,
         current,
-        series: [
-          {
-            name: 'Contribution',
-            color: factorColors[key],
-            ...buildAlignedRatingSeries(
-              detail.value?.history ?? [],
-              (entry) => entry.factors[key].weightedContribution,
-              (entry) => formatRawFactorValue(key, entry.factors[key].rawValue, entry.factors[key].detailLines),
-            ),
-          },
-        ],
+        ratingContribution: toRatingContribution(current, detail.value?.current?.confidenceMultiplier ?? 0),
+        series: key === 'seasonPoints'
+          ? [
+              ...buildSeasonScoreSeries(props.playerName, factorColors[key]),
+              {
+                name: 'League Avg',
+                color: 'rgba(148, 163, 184, 0.3)',
+                data: buildAverageSeasonScoreSeries(),
+              },
+            ]
+          : [
+              {
+                name: 'Contribution',
+                color: factorColors[key],
+                ...buildAlignedRatingSeries(
+                  detail.value?.history ?? [],
+                  (entry) => toRatingContribution(entry.factors[key], entry.confidenceMultiplier),
+                  (entry) => formatRawFactorValue(key, entry.factors[key].rawValue, entry.factors[key].detailLines),
+                ),
+              },
+              {
+                name: 'League Avg',
+                color: 'rgba(148, 163, 184, 0.3)',
+                data: buildAverageFactorContributionSeries(key),
+              },
+            ],
       }
     })
     .filter((entry): entry is {
@@ -811,7 +963,8 @@ const factorPanels = computed(() =>
         data: Array<number | null>
         tooltipData?: Array<string | null>
       }[]
-    } => Boolean(entry)),
+    } => Boolean(entry))
+    .sort((left, right) => right.ratingContribution - left.ratingContribution),
 )
 
 const playerRecords = computed(() =>

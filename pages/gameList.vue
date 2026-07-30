@@ -14,6 +14,7 @@ const { games, loading, loaded, error, init, refresh: refreshLeagueState, progre
 const hasMounted = ref(false)
 
 const selectedPlayer = ref<string | null>(null)
+const selectedCommander = ref<string | null>(null)
 const randomExportCount = ref(35)
 const exportBusy = ref(false)
 const testActionBusy = ref(false)
@@ -66,10 +67,26 @@ const playerNames = computed(() =>
   ).sort((a, b) => a.localeCompare(b)),
 )
 
+const selectedPlayerCommanders = computed(() => {
+  if (!selectedPlayer.value) return []
+  return Array.from(new Set(
+    displayGames.value.flatMap((game) => game.players
+      .filter((player) => formatPlayerName(player.name) === selectedPlayer.value)
+      .map((player) => player.commander)),
+  )).sort((a, b) => a.localeCompare(b))
+})
+
+watch(selectedPlayer, () => {
+  selectedCommander.value = null
+})
+
 const filteredGames = computed(() => {
   if (!selectedPlayer.value) return displayGames.value
   return displayGames.value.filter((game) =>
-    game.players.some((player) => formatPlayerName(player.name) === selectedPlayer.value),
+    game.players.some((player) =>
+      formatPlayerName(player.name) === selectedPlayer.value
+      && (!selectedCommander.value || player.commander === selectedCommander.value),
+    ),
   )
 })
 
@@ -260,6 +277,18 @@ function sampleGames<T>(items: T[], count: number) {
                 <option :value="null">All players</option>
                 <option v-for="name in playerNames" :key="name" :value="name">{{ name }}</option>
               </select>
+              <select
+                v-model="selectedCommander"
+                class="game-list__player-filter"
+                :disabled="!selectedPlayer"
+              >
+                <option :value="null">All commanders</option>
+                <option
+                  v-for="commander in selectedPlayerCommanders"
+                  :key="commander"
+                  :value="commander"
+                >{{ commander }}</option>
+              </select>
             </div>
           </div>
 
@@ -353,6 +382,11 @@ function sampleGames<T>(items: T[], count: number) {
     &:focus {
       outline: none;
       border-color: $color-primary-light;
+    }
+
+    &:disabled {
+      cursor: not-allowed;
+      opacity: 0.5;
     }
   }
 
