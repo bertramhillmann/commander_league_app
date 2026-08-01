@@ -22,7 +22,7 @@ const playerOptions = computed(() =>
 
 const selectedPlayers = ref<string[]>([])
 const selectedCommanderByPlayer = ref<Record<string, string>>({})
-const showCommanderOptionsByPlayer = ref<Record<string, boolean>>({})
+const showStatsByPlayer = ref<Record<string, boolean>>({})
 const placementByPlayer = ref<Record<string, number>>({})
 const gameDate = ref(new Date().toISOString().slice(0, 10))
 const submitting = ref(false)
@@ -61,7 +61,6 @@ watch(
     if (!result) return
 
     const nextSelections = { ...selectedCommanderByPlayer.value }
-    const nextCommanderOptions = { ...showCommanderOptionsByPlayer.value }
     const nextPlacements = { ...placementByPlayer.value }
     let changed = false
 
@@ -83,12 +82,6 @@ watch(
         changed = true
       }
     }
-    for (const playerName of Object.keys(nextCommanderOptions)) {
-      if (!allowedPlayers.has(playerName)) {
-        delete nextCommanderOptions[playerName]
-        changed = true
-      }
-    }
     for (const playerName of Object.keys(nextPlacements)) {
       if (!allowedPlayers.has(playerName)) {
         delete nextPlacements[playerName]
@@ -98,7 +91,6 @@ watch(
 
     if (changed) {
       selectedCommanderByPlayer.value = nextSelections
-      showCommanderOptionsByPlayer.value = nextCommanderOptions
       placementByPlayer.value = nextPlacements
     }
   },
@@ -137,10 +129,18 @@ function selectCommander(playerName: string, commanderName: string) {
   }
 }
 
-function toggleCommanderOptions(playerName: string) {
-  showCommanderOptionsByPlayer.value = {
-    ...showCommanderOptionsByPlayer.value,
-    [playerName]: !showCommanderOptionsByPlayer.value[playerName],
+function cycleCommander(playerName: string, commanders: Array<{ commander: string }>, direction: -1 | 1) {
+  if (commanders.length < 2) return
+  const currentCommander = selectedCommanderByPlayer.value[playerName] ?? commanders[0].commander
+  const currentIndex = Math.max(0, commanders.findIndex((entry) => entry.commander === currentCommander))
+  const nextIndex = (currentIndex + direction + commanders.length) % commanders.length
+  selectCommander(playerName, commanders[nextIndex].commander)
+}
+
+function toggleStats(playerName: string) {
+  showStatsByPlayer.value = {
+    ...showStatsByPlayer.value,
+    [playerName]: !showStatsByPlayer.value[playerName],
   }
 }
 
@@ -241,8 +241,7 @@ watch(
   <div class="mm">
     <div v-if="showHeader" class="mm__head">
       <div class="mm__title-block">
-        <span class="mm__label">Matchmaking</span>
-        <h2 class="mm__title">MMR Pod Finder</h2>
+        <h2 class="mm__title">Matchmaking</h2>
       </div>
       <span class="mm__counter">{{ selectedPlayers.length }}<span class="mm__counter-max">/5</span></span>
     </div>
@@ -275,39 +274,37 @@ watch(
         </button>
       </div>
 
-      <div v-if="matchmaking" class="mm__bar">
-        <div class="mm__bar-stat">
-          <span class="mm__bar-val">{{ fmt(matchmaking.averageMMR) }}</span>
-          <span class="mm__bar-key">Pod avg MMR</span>
-        </div>
-        <div class="mm__bar-divider" />
-        <div class="mm__bar-stat">
-          <span class="mm__bar-val">{{ fmt(matchmaking.fairnessSpreadBefore) }}</span>
-          <span class="mm__bar-key">Player spread</span>
-        </div>
-        <div class="mm__bar-divider" />
-        <div class="mm__bar-stat">
-          <span
-            class="mm__bar-val mm__bar-val--after"
-            :class="matchmaking.fairnessSpreadAfter < matchmaking.fairnessSpreadBefore ? 'mm__bar-val--good' : 'mm__bar-val--bad'"
-          >{{ fmt(matchmaking.fairnessSpreadAfter) }}</span>
-          <span class="mm__bar-key">Commander spread</span>
-        </div>
-      </div>
-
-      <div v-if="matchmaking && canCreateGame" class="mm__create">
-        <div class="mm__create-head">
-          <div>
-            <div class="mm__create-title">Create game from this pod</div>
-            <div class="mm__create-subtitle">Enter placements, keep the selected commanders, and save directly.</div>
+      <div v-if="matchmaking" class="mm__layout">
+        <aside class="mm__bar" aria-label="Pod overview">
+          <div class="mm__bar-stat">
+            <span class="mm__bar-val">{{ fmt(matchmaking.averageMMR) }}</span>
+            <span class="mm__bar-key">Pod avg MMR</span>
           </div>
-          <label class="mm__date-field">
-            <span class="mm__date-label">Date</span>
-            <input v-model="gameDate" type="date" class="mm__date-input">
-          </label>
-        </div>
+          <div class="mm__bar-divider" />
+          <div class="mm__bar-stat">
+            <span class="mm__bar-val">{{ fmt(matchmaking.fairnessSpreadBefore) }}</span>
+            <span class="mm__bar-key">Player spread</span>
+          </div>
+          <div class="mm__bar-divider" />
+          <div class="mm__bar-stat">
+            <span
+              class="mm__bar-val mm__bar-val--after"
+              :class="matchmaking.fairnessSpreadAfter < matchmaking.fairnessSpreadBefore ? 'mm__bar-val--good' : 'mm__bar-val--bad'"
+            >{{ fmt(matchmaking.fairnessSpreadAfter) }}</span>
+            <span class="mm__bar-key">Commander spread</span>
+          </div>
+        </aside>
 
-        <div class="mm__placement-grid">
+        <div class="mm__main">
+          <div v-if="canCreateGame" class="mm__create">
+            <div class="mm__create-head">
+              <label class="mm__date-field">
+                <span class="mm__date-label">Date</span>
+                <input v-model="gameDate" type="date" class="mm__date-input">
+              </label>
+            </div>
+
+            <div class="mm__placement-grid">
           <label
             v-for="suggestion in matchmaking.suggestions"
             :key="`placement-${suggestion.playerName}`"
@@ -324,9 +321,9 @@ watch(
               @input="setPlacement(suggestion.playerName, Number(($event.target as HTMLInputElement).value))"
             >
           </label>
-        </div>
+            </div>
 
-        <div class="mm__create-actions">
+            <div class="mm__create-actions">
           <button
             type="button"
             class="mm__create-btn"
@@ -337,10 +334,10 @@ watch(
           </button>
           <span v-if="successMsg" class="mm__create-msg mm__create-msg--success">{{ successMsg }}</span>
           <span v-if="errorMsg" class="mm__create-msg mm__create-msg--error">{{ errorMsg }}</span>
-        </div>
-      </div>
+            </div>
+          </div>
 
-      <div v-if="matchmaking" class="mm__cards">
+          <div class="mm__cards">
         <article
           v-for="suggestion in matchmaking.suggestions"
           :key="suggestion.playerName"
@@ -356,6 +353,20 @@ watch(
             />
             <div v-else class="mm__art-placeholder" />
             <div class="mm__art-scrim" />
+            <button
+              type="button"
+              class="mm__art-cycle mm__art-cycle--previous"
+              :disabled="suggestion.availableCommanders.length < 2"
+              aria-label="Show previous commander"
+              @click.stop="cycleCommander(suggestion.playerName, suggestion.availableCommanders, -1)"
+            >‹</button>
+            <button
+              type="button"
+              class="mm__art-cycle mm__art-cycle--next"
+              :disabled="suggestion.availableCommanders.length < 2"
+              aria-label="Show next commander"
+              @click.stop="cycleCommander(suggestion.playerName, suggestion.availableCommanders, 1)"
+            >›</button>
           </div>
 
             <div class="mm__content">
@@ -363,33 +374,7 @@ watch(
                 <div class="mm__player-block">
                   <div class="mm__player-row">
                     <div class="mm__player">{{ suggestion.playerName }}</div>
-                    <button
-                      type="button"
-                      class="mm__toggle-commanders"
-                      @click="toggleCommanderOptions(suggestion.playerName)"
-                    >
-                      {{ showCommanderOptionsByPlayer[suggestion.playerName] ? 'Hide commanders' : 'Show commanders' }}
-                    </button>
                   </div>
-                  <label
-                    v-if="showCommanderOptionsByPlayer[suggestion.playerName]"
-                    class="mm__select-wrap"
-                  >
-                    <span class="mm__select-label">Commander</span>
-                    <select
-                      class="mm__select"
-                      :value="suggestion.selectedCommander"
-                      @change="selectCommander(suggestion.playerName, ($event.target as HTMLSelectElement).value)"
-                  >
-                    <option
-                      v-for="commander in suggestion.availableCommanders"
-                      :key="commander.commander"
-                      :value="commander.commander"
-                    >
-                      {{ commander.commander }} · {{ fmt(commander.currentMMR) }} MMR
-                    </option>
-                  </select>
-                </label>
               </div>
 
               <div
@@ -401,19 +386,39 @@ watch(
             </div>
 
             <div class="mm__commander-row">
-              <span class="mm__commander">{{ suggestion.selectedCommander }}</span>
+              <label class="mm__commander-select">
+                <select
+                  :value="suggestion.selectedCommander"
+                  @change="selectCommander(suggestion.playerName, ($event.target as HTMLSelectElement).value)"
+                >
+                  <option
+                    v-for="commander in suggestion.availableCommanders"
+                    :key="commander.commander"
+                    :value="commander.commander"
+                  >{{ commander.commander }}</option>
+                </select>
+                <span class="mm__commander-select-arrow" aria-hidden="true">▾</span>
+              </label>
               <span class="mm__tier" :class="`tier-text--${suggestion.tier}`">
                 <IconsTierIcon :tier="suggestion.tier" :size="12" />
                 {{ suggestion.tierLabel }}
               </span>
               <span class="mm__mmr">{{ fmt(suggestion.selectedMMR) }} MMR</span>
+              <button
+                type="button"
+                class="mm__stats-toggle"
+                :class="{ 'mm__stats-toggle--active': showStatsByPlayer[suggestion.playerName] }"
+                :aria-expanded="Boolean(showStatsByPlayer[suggestion.playerName])"
+                aria-label="Toggle commander details"
+                @click="toggleStats(suggestion.playerName)"
+              >⚙</button>
             </div>
 
             <div v-if="suggestion.isOverride" class="mm__recommended">
               Recommended: {{ suggestion.recommendedCommander }}
             </div>
 
-            <div class="mm__stats">
+            <div v-if="showStatsByPlayer[suggestion.playerName]" class="mm__stats">
               <div class="mm__stat">
                 <span class="mm__stat-v">{{ fmt(suggestion.overallMMR) }}</span>
                 <span class="mm__stat-k">Player MMR</span>
@@ -432,7 +437,7 @@ watch(
               </div>
             </div>
 
-            <div class="mm__stats">
+            <div v-if="showStatsByPlayer[suggestion.playerName]" class="mm__stats">
               <div class="mm__stat">
                 <span class="mm__stat-v">{{ fmt(suggestion.commanderAvgPoints) }}</span>
                 <span class="mm__stat-k">Avg pts</span>
@@ -483,6 +488,8 @@ watch(
             </div>
           </div>
         </article>
+      </div>
+        </div>
       </div>
 
       <div v-else class="mm__notice">Select 3-5 players to generate a matchup.</div>
@@ -587,25 +594,30 @@ watch(
 
   &__bar {
     display: flex;
-    align-items: center;
-    gap: $spacing-3;
-    padding: $spacing-3 $spacing-4;
+    position: absolute;
+    top: 0;
+    left: calc(100% + #{$spacing-3});
+    width: 170px;
+    flex-direction: column;
+    align-items: stretch;
+    gap: $spacing-2;
+    padding: $spacing-3;
     background: rgba($color-bg-elevated, 0.45);
     border: 1px solid rgba($border-color, 0.7);
     border-radius: $border-radius-lg;
   }
 
   &__bar-stat {
-    flex: 1;
     display: flex;
     flex-direction: column;
-    align-items: center;
+    align-items: flex-start;
     gap: 2px;
+    padding: $spacing-1 $spacing-2;
   }
 
   &__bar-divider {
-    width: 1px;
-    height: 28px;
+    width: 100%;
+    height: 1px;
     background: rgba($border-color, 0.7);
     flex-shrink: 0;
   }
@@ -633,6 +645,17 @@ watch(
     gap: $spacing-3;
   }
 
+  &__layout {
+    position: relative;
+  }
+
+  &__main {
+    display: flex;
+    flex-direction: column;
+    gap: $spacing-4;
+    min-width: 0;
+  }
+
   &__counter-label {
     font-size: $font-size-xs;
     text-transform: uppercase;
@@ -642,12 +665,14 @@ watch(
   }
 
   &__cards {
+    order: 1;
     display: grid;
     grid-template-columns: repeat(auto-fill, minmax(280px, 1fr));
     gap: $spacing-3;
   }
 
   &__create {
+    order: 2;
     display: flex;
     flex-direction: column;
     gap: $spacing-3;
@@ -844,6 +869,36 @@ watch(
     background: linear-gradient(to bottom, transparent 40%, rgba(12, 10, 18, 0.85));
   }
 
+  &__art-cycle {
+    position: absolute;
+    z-index: 2;
+    top: 50%;
+    width: 28px;
+    height: 36px;
+    border: 0;
+    border-radius: $border-radius-sm;
+    background: rgba(7, 5, 13, 0.58);
+    color: $color-text;
+    font-size: 28px;
+    line-height: 1;
+    cursor: pointer;
+    transform: translateY(-50%);
+    transition: background $transition-fast, color $transition-fast, opacity $transition-fast;
+
+    &:hover:not(:disabled) {
+      background: rgba($color-primary, 0.82);
+      color: white;
+    }
+
+    &:disabled {
+      cursor: default;
+      opacity: 0.25;
+    }
+
+    &--previous { left: $spacing-2; }
+    &--next { right: $spacing-2; }
+  }
+
   &__content {
     flex: 1;
     min-width: 0;
@@ -944,11 +999,47 @@ watch(
     gap: 8px;
   }
 
-  &__commander {
+  &__commander-select {
+    position: relative;
     width: 100%;
-    font-size: $font-size-base;
-    font-weight: $font-weight-semibold;
-    color: $color-accent;
+    min-width: 0;
+
+    select {
+      width: 100%;
+      padding: 0 16px 0 0;
+      border: 0;
+      appearance: none;
+      background: transparent;
+      color: $color-accent;
+      color-scheme: dark;
+      cursor: pointer;
+      font: inherit;
+      font-size: $font-size-base;
+      font-weight: $font-weight-semibold;
+      overflow: hidden;
+      text-overflow: ellipsis;
+      white-space: nowrap;
+
+      &:focus-visible {
+        outline: 1px solid rgba($color-primary-light, 0.75);
+        outline-offset: 3px;
+      }
+
+      option {
+        background: $color-bg-elevated;
+        color: $color-text;
+      }
+    }
+  }
+
+  &__commander-select-arrow {
+    position: absolute;
+    top: 50%;
+    right: 2px;
+    color: rgba($color-accent, 0.8);
+    font-size: 10px;
+    pointer-events: none;
+    transform: translateY(-45%);
   }
 
   &__tier {
@@ -963,6 +1054,30 @@ watch(
     font-size: $font-size-sm;
     color: $color-text;
     font-variant-numeric: tabular-nums;
+  }
+
+  &__stats-toggle {
+    display: inline-grid;
+    place-items: center;
+    width: 22px;
+    height: 22px;
+    padding: 0;
+    border: 0;
+    border-radius: 50%;
+    background: transparent;
+    color: $color-text-muted;
+    cursor: pointer;
+    font-size: 14px;
+    line-height: 1;
+    transition: color $transition-fast, background $transition-fast, transform $transition-fast;
+
+    &:hover,
+    &--active {
+      background: rgba($color-primary, 0.18);
+      color: $color-primary-light;
+    }
+
+    &--active { transform: rotate(45deg); }
   }
 
   &__recommended {
@@ -1093,6 +1208,31 @@ watch(
     font-size: $font-size-sm;
 
     &--err { color: $color-danger; }
+  }
+
+  @media (max-width: 720px) {
+    &__layout {
+      grid-template-columns: 1fr;
+    }
+
+    &__bar {
+      position: static;
+      width: auto;
+      flex-direction: row;
+      align-items: center;
+      padding: $spacing-3 $spacing-4;
+    }
+
+    &__bar-stat {
+      flex: 1;
+      align-items: center;
+      padding: 0;
+    }
+
+    &__bar-divider {
+      width: 1px;
+      height: 28px;
+    }
   }
 }
 </style>

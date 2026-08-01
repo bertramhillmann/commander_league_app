@@ -175,7 +175,7 @@
               @click="openRatingSidebar(row.name)"
             >
               <IconsPlayerRatingIcon :size="20" style="margin-right: 3px" />
-              {{ fmt(row.totalScore) }}
+              {{ Math.round(row.totalScore) }}
             </button>
             <template v-else>
               {{ fmt(row.totalScore) }}
@@ -277,13 +277,13 @@
             <tr>
               <th class="looster-table__th looster-table__th--name">Player</th>
               <th class="looster-table__th looster-table__th--num">Loosters Available</th>
-              <th class="looster-table__th looster-table__th--num">Looster Points Right Now</th>
-              <th class="looster-table__th looster-table__th--num">Looster Points Spent</th>
+              <th class="looster-table__th looster-table__th--num">Looster Points</th>
+              <th v-if="showLoosterDetailColumns" class="looster-table__th looster-table__th--num">Looster Points Spent</th>
               <th class="looster-table__th looster-table__th--num">Bought Loosters</th>
               <th class="looster-table__th looster-table__th--set">Most Bought Set</th>
-              <th class="looster-table__th looster-table__th--num">LP Over Games</th>
-              <th class="looster-table__th looster-table__th--num">LP Over Missed</th>
-              <th class="looster-table__th looster-table__th--num">Looster Points Total</th>
+              <th v-if="showLoosterDetailColumns" class="looster-table__th looster-table__th--num">LP Over Games</th>
+              <th v-if="showLoosterDetailColumns" class="looster-table__th looster-table__th--num">LP Over Missed</th>
+              <th v-if="showLoosterDetailColumns" class="looster-table__th looster-table__th--num">Looster Points Total</th>
             </tr>
           </thead>
           <tbody>
@@ -297,10 +297,13 @@
                 class="looster-table__td looster-table__td--num looster-table__td--available"
                 :class="row.availableLoosters > 0 ? 'looster-table__td--available-yes' : 'looster-table__td--available-no'"
               >
-                {{ row.availableLoosters }}
+                <NuxtLink v-if="row.availableLoosters > 0" class="looster-table__available-link" to="/shop">
+                  {{ row.availableLoosters }}
+                </NuxtLink>
+                <template v-else>{{ row.availableLoosters }}</template>
               </td>
-              <td class="looster-table__td looster-table__td--num">{{ fmtLooster(row.currentLoosterPoints) }}</td>
-              <td class="looster-table__td looster-table__td--num looster-table__td--spent">{{ fmtLooster(row.spentLoosterPoints) }}</td>
+              <td class="looster-table__td looster-table__td--num">{{ fmtLoosterOneDecimal(row.currentLoosterPoints) }}</td>
+              <td v-if="showLoosterDetailColumns" class="looster-table__td looster-table__td--num looster-table__td--spent">{{ fmtLooster(row.spentLoosterPoints) }}</td>
               <td class="looster-table__td looster-table__td--num">{{ row.boughtLoosters }}</td>
               <td class="looster-table__td looster-table__td--set">
                 <a
@@ -321,6 +324,7 @@
                 <span v-else>-</span>
               </td>
               <td
+                v-if="showLoosterDetailColumns"
                 class="looster-table__td looster-table__td--num looster-table__td--hoverable"
                 @mouseenter="onLoosterEnter(row, 'games', $event)"
                 @mousemove="onMouseMove($event)"
@@ -329,6 +333,7 @@
                 {{ fmtLooster(row.gameLoosterPoints) }}
               </td>
               <td
+                v-if="showLoosterDetailColumns"
                 class="looster-table__td looster-table__td--num looster-table__td--hoverable"
                 @mouseenter="onLoosterEnter(row, 'missed', $event)"
                 @mousemove="onMouseMove($event)"
@@ -336,7 +341,7 @@
               >
                 {{ fmtLooster(row.missedGameLoosterPoints) }}
               </td>
-              <td class="looster-table__td looster-table__td--num">{{ fmtLooster(row.totalLoosterPoints) }}</td>
+              <td v-if="showLoosterDetailColumns" class="looster-table__td looster-table__td--num">{{ fmtLooster(row.totalLoosterPoints) }}</td>
             </tr>
           </tbody>
         </table>
@@ -586,13 +591,13 @@
               <td class="mult-tooltip__label">Target</td>
               <td class="mult-tooltip__op"></td>
               <td class="mult-tooltip__detail">current rating</td>
-              <td class="mult-tooltip__value">{{ catchupHover.targetName }} · {{ fmt(catchupHover.targetRating) }}</td>
+              <td class="mult-tooltip__value">{{ catchupHover.targetName }} · {{ Math.round(catchupHover.targetRating) }}</td>
             </tr>
             <tr>
               <td class="mult-tooltip__label">You</td>
               <td class="mult-tooltip__op"></td>
               <td class="mult-tooltip__detail">current rating</td>
-              <td class="mult-tooltip__value">{{ catchupHover.viewerName }} · {{ fmt(catchupHover.viewerRating) }}</td>
+              <td class="mult-tooltip__value">{{ catchupHover.viewerName }} · {{ Math.round(catchupHover.viewerRating) }}</td>
             </tr>
             <tr
               v-for="entry in catchupHover.strongerFactors"
@@ -750,39 +755,25 @@
         class="floating-panel mult-tooltip"
         :style="{ top: `${ratingHover.y}px`, left: `${ratingHover.x}px` }"
       >
-        <div class="mult-tooltip__title">Player Rating</div>
-        <table class="mult-tooltip__table">
-          <tbody>
-            <tr>
-              <td class="mult-tooltip__label">Model</td>
-              <td class="mult-tooltip__op"></td>
-              <td class="mult-tooltip__detail">{{ ratingHoverModelDescription }}</td>
-              <td class="mult-tooltip__value">{{ ratingHover.playerName }}</td>
-            </tr>
-          <tr>
-            <td class="mult-tooltip__label">Missed games</td>
-            <td class="mult-tooltip__op"></td>
-            <td class="mult-tooltip__detail">free-game points excluded</td>
-            <td class="mult-tooltip__value">off</td>
-          </tr>
-          <tr
-            v-for="(entry, index) in ratingHoverRows"
-            :key="entry.key"
-            :class="{ 'mult-tooltip__row--sep': index === 0 }"
+        <div class="mult-tooltip__title">{{ ratingHover.playerName }}'s Player Rating</div>
+        <div v-if="ratingHoverRows.length" class="rating-hover">
+          <div
+            class="rating-hover__pie"
+            :style="{ background: ratingHoverPieBackground }"
+            aria-label="Player rating points by factor"
           >
-            <td class="mult-tooltip__label">{{ entry.label }}</td>
-            <td class="mult-tooltip__op"></td>
-            <td class="mult-tooltip__detail">{{ entry.detail }}</td>
-            <td class="mult-tooltip__value">{{ fmt(entry.value) }}</td>
-          </tr>
-          <tr v-if="ratingHover.provisional" class="mult-tooltip__row--sep">
-            <td class="mult-tooltip__label">Status</td>
-            <td class="mult-tooltip__op"></td>
-            <td class="mult-tooltip__detail">sample size still stabilizing</td>
-            <td class="mult-tooltip__value">Provisional</td>
-          </tr>
-          </tbody>
-        </table>
+            <span class="rating-hover__pie-value">+{{ Math.round(ratingHoverTotal) }}</span>
+          </div>
+          <div class="rating-hover__legend">
+            <div v-for="entry in ratingHoverRows" :key="entry.key" class="rating-hover__legend-row">
+              <span class="rating-hover__swatch" :style="{ backgroundColor: entry.color }"></span>
+              <span class="rating-hover__label">{{ entry.label }}</span>
+              <span class="rating-hover__value">+{{ Math.round(entry.value) }}</span>
+            </div>
+          </div>
+        </div>
+        <div v-else class="mult-tooltip__summary">No factor breakdown is available for this rating.</div>
+        <div v-if="ratingHover.provisional" class="rating-hover__status">Provisional rating</div>
       </div>
     </Teleport>
 
@@ -1038,6 +1029,7 @@ type DashboardSetMeta = {
 const sortKey = ref<SortKey>('totalScore')
 const sortDirection = ref<'desc' | 'asc'>('desc')
 const hasMounted = ref(false)
+const showLoosterDetailColumns = false
 const purchases = ref<LoosterPurchaseRecord[]>([])
 const loosterSetMeta = ref<Record<string, DashboardSetMeta>>({})
 const pageLoading = computed(() => !hasMounted.value || loading.value || !loaded.value)
@@ -2317,6 +2309,10 @@ function fmtLooster(n: number | null | undefined): string {
   return formatLoosterPoints(n)
 }
 
+function fmtLoosterOneDecimal(n: number | null | undefined): string {
+  return roundLoosterPoints(typeof n === 'number' && !Number.isNaN(n) ? n : 0).toFixed(1)
+}
+
 function placementLabel(placement: number): string {
   const suffix = placement === 1 ? 'st' : placement === 2 ? 'nd' : placement === 3 ? 'rd' : 'th'
   return `${placement}${suffix} place`
@@ -2487,6 +2483,7 @@ const ratingHover = reactive<{
   visible: boolean
   playerName: string
   provisional: boolean
+  gamesPlayed: number
   breakdown: Record<PlayerRatingBreakdownKey, RatingBreakdownEntry> | null
   x: number
   y: number
@@ -2494,6 +2491,7 @@ const ratingHover = reactive<{
   visible: false,
   playerName: '',
   provisional: false,
+  gamesPlayed: 0,
   breakdown: null,
   x: 0,
   y: 0,
@@ -2512,10 +2510,11 @@ function calcRatingPosition(e: MouseEvent) {
   return { x: x + window.scrollX, y: y + window.scrollY }
 }
 
-function onRatingEnter(row: { rankingSystem?: string, name: string, provisional?: boolean, ratingBreakdown?: any }, e: MouseEvent) {
+function onRatingEnter(row: { rankingSystem?: string, name: string, provisional?: boolean, gamesPlayed: number, ratingBreakdown?: any }, e: MouseEvent) {
   if (row.rankingSystem !== 'player_rating_based') return
   ratingHover.playerName = row.name
   ratingHover.provisional = Boolean(row.provisional)
+  ratingHover.gamesPlayed = row.gamesPlayed
   ratingHover.breakdown = row.ratingBreakdown ?? null
   ratingHover.visible = true
   const pos = calcRatingPosition(e)
@@ -2630,38 +2629,80 @@ type PlayerRatingComparisonEntry = {
 const dashboardRatingFactorRows: Array<{
   key: PlayerRatingBreakdownKey
   label: string
-  detail: string
 }> = [
-  { key: 'recentPerformance', label: 'Recent', detail: 'weighted contribution' },
-  { key: 'allTimePerformance', label: 'All-time', detail: 'weighted contribution' },
-  { key: 'seasonPoints', label: 'Season points', detail: 'weighted contribution' },
-  { key: 'winRate', label: 'Win rate', detail: 'weighted contribution' },
-  { key: 'commanderMMRContext', label: 'Finishes vs stronger opponents', detail: 'weighted contribution' },
-  { key: 'averageCommanderMMR', label: 'Average commander MMR', detail: 'weighted contribution' },
-  { key: 'activityPoints', label: 'Activity', detail: 'total points as a small signal' },
-  { key: 'achievements', label: 'Achv.', detail: 'weighted contribution' },
-  { key: 'clutch', label: 'Clutch', detail: 'weighted contribution' },
-  { key: 'commanderDiversity', label: 'Diversity', detail: 'weighted contribution' },
+  { key: 'recentPerformance', label: 'Recent' },
+  { key: 'allTimePerformance', label: 'All-time' },
+  { key: 'seasonPoints', label: 'Season points' },
+  { key: 'winRate', label: 'Win rate' },
+  { key: 'commanderMMRContext', label: 'Finishes vs stronger opponents' },
+  { key: 'averageCommanderMMR', label: 'Average commander MMR' },
+  { key: 'activityPoints', label: 'Activity' },
+  { key: 'achievements', label: 'Achv.' },
+  { key: 'clutch', label: 'Clutch' },
+  { key: 'commanderDiversity', label: 'Diversity' },
 ]
 
-const enabledDashboardRatingFactorRows = computed(() =>
-  dashboardRatingFactorRows.filter((entry) => (settings.value.playerRating.weights[entry.key] ?? 0) > 0),
-)
+const ratingFactorColors: Record<PlayerRatingBreakdownKey, string> = {
+  recentPerformance: '#9b6ee8',
+  allTimePerformance: '#6c3fc5',
+  seasonPoints: '#e8a030',
+  winRate: '#ffd36a',
+  commanderMMRContext: '#72b7ff',
+  averageCommanderMMR: '#4a8edb',
+  activityPoints: '#3cb87a',
+  achievements: '#d2a8ff',
+  clutch: '#e05050',
+  commanderDiversity: '#c27be8',
+}
 
-const ratingHoverModelDescription = computed(() =>
-  enabledDashboardRatingFactorRows.value.length > 0
-    ? enabledDashboardRatingFactorRows.value.map((entry) => entry.label.toLowerCase()).join(', ')
-    : 'no active weighted factors',
+function dashboardRatingFactorWeight(key: PlayerRatingBreakdownKey) {
+  return key === 'activityPoints'
+    ? settings.value.playerRating.weights.commanderPoints ?? 0
+    : settings.value.playerRating.weights[key] ?? 0
+}
+
+const enabledDashboardRatingFactorRows = computed(() =>
+  dashboardRatingFactorRows.filter((entry) => dashboardRatingFactorWeight(entry.key) > 0),
 )
 
 const ratingHoverRows = computed(() => {
   const breakdown = ratingHover.breakdown
   if (!breakdown) return []
 
+  const totalFactorWeight = Object.values(settings.value.playerRating.weights)
+    .reduce((sum, weight) => sum + weight, 0) || 1
+  const confidenceMultiplier = Math.min(1, Math.max(0.45, ratingHover.gamesPlayed / 12))
+  const ratingSpan = Math.max(0, settings.value.playerRating.maxRating - settings.value.playerRating.minRating)
+
   return enabledDashboardRatingFactorRows.value.map((entry) => ({
     ...entry,
-    value: breakdown[entry.key]?.weightedContribution ?? 0,
+    color: ratingFactorColors[entry.key],
+    value: r3(
+      ((breakdown[entry.key]?.weightedContribution ?? 0) / totalFactorWeight)
+      * (0.2 + confidenceMultiplier)
+      / 100
+      * ratingSpan,
+    ),
   }))
+})
+
+const ratingHoverTotal = computed(() => r3(
+  ratingHoverRows.value.reduce((sum, entry) => sum + entry.value, 0),
+))
+
+const ratingHoverPieBackground = computed(() => {
+  if (ratingHoverTotal.value <= 0) return 'rgba(255, 255, 255, 0.08)'
+
+  let currentAngle = 0
+  const segments = ratingHoverRows.value.map((entry) => {
+    const startAngle = currentAngle
+    const segmentAngle = (entry.value / ratingHoverTotal.value) * 360
+    const gapAngle = Math.min(3.5, segmentAngle * 0.38)
+    const endAngle = startAngle + Math.max(0, segmentAngle - gapAngle)
+    currentAngle += segmentAngle
+    return `${entry.color} ${startAngle}deg ${endAngle}deg, rgba(12, 8, 21, 0.98) ${endAngle}deg ${currentAngle}deg`
+  })
+  return `conic-gradient(${segments.join(', ')})`
 })
 
 const compHover = reactive<CompensationHoverData>({
@@ -3183,7 +3224,7 @@ function onCompLeave() {
 
 .looster-table {
   width: 100%;
-  min-width: 1100px;
+  min-width: 720px;
   border-collapse: collapse;
 
   &__th,
@@ -3280,6 +3321,17 @@ function onCompLeave() {
 
   &__td--available-no {
     color: $color-danger;
+  }
+
+  &__available-link {
+    color: inherit;
+    text-decoration: underline dotted rgba($color-success, 0.72);
+    text-underline-offset: 0.16em;
+
+    &:hover {
+      color: $color-success;
+      text-decoration-style: solid;
+    }
   }
 
   &__td--spent {
@@ -3830,7 +3882,7 @@ function onCompLeave() {
   font-size: $font-size-sm;
 
   &__th {
-    text-align: left;
+    text-align: center;
     padding: $spacing-2 $spacing-3;
     color: $color-text-muted;
     font-size: $font-size-xs;
@@ -3840,9 +3892,10 @@ function onCompLeave() {
     border-bottom: 1px solid $border-color;
     white-space: nowrap;
 
-    &--num  { text-align: right; }
+    &--num  { text-align: center; }
     &--rank { width: 2.5rem; text-align: center; }
     &--commander {
+      text-align: left;
       white-space: nowrap;
       width: 1%;
     }
@@ -3868,7 +3921,7 @@ function onCompLeave() {
 
     &--num {
       width: 100%;
-      justify-content: flex-end;
+      justify-content: center;
     }
   }
 
@@ -3910,9 +3963,11 @@ function onCompLeave() {
     padding: $spacing-2 $spacing-3;
     color: $color-text;
     vertical-align: middle;
+    text-align: center;
 
-    &--num { text-align: right; font-variant-numeric: tabular-nums; }
+    &--num { text-align: center; font-variant-numeric: tabular-nums; }
     &--rank { text-align: center; }
+    &--commander { text-align: left; }
     &--total { font-weight: $font-weight-bold; color: $color-secondary; }
     &--avg-mmr { white-space: nowrap; }
     &--achv  { color: $color-accent; }
@@ -3978,8 +4033,8 @@ function onCompLeave() {
     color: $color-secondary;
     letter-spacing: 0.04em;
     width: 100%;
-    text-align: left;
-    margin-left:10px;
+    text-align: center;
+    margin-left: 0;
   }
 
   &__muted {
@@ -4135,6 +4190,87 @@ function onCompLeave() {
     color: $color-primary-light;
     text-decoration-color: rgba($color-primary-light, 0.65);
   }
+}
+
+.rating-hover {
+  display: flex;
+  align-items: center;
+  gap: $spacing-4;
+}
+
+.rating-hover__pie {
+  position: relative;
+  display: grid;
+  place-content: center;
+  flex: 0 0 112px;
+  width: 112px;
+  aspect-ratio: 1;
+  border-radius: 50%;
+  text-align: center;
+
+  &::after {
+    content: '';
+    position: absolute;
+    inset: 24px;
+    border-radius: 50%;
+    background: rgba(12, 8, 21, 0.98);
+  }
+}
+
+.rating-hover__pie-value {
+  position: relative;
+  z-index: 1;
+}
+
+.rating-hover__pie-value {
+  font-size: $font-size-sm;
+  font-weight: $font-weight-bold;
+  color: $color-text;
+  font-variant-numeric: tabular-nums;
+  text-shadow: 0 1px 4px rgba(0, 0, 0, 0.9);
+}
+
+.rating-hover__legend {
+  display: grid;
+  gap: 4px;
+  min-width: 170px;
+}
+
+.rating-hover__legend-row {
+  display: grid;
+  grid-template-columns: 8px minmax(0, 1fr) auto;
+  align-items: center;
+  gap: 6px;
+  font-size: 11px;
+}
+
+.rating-hover__swatch {
+  width: 8px;
+  height: 8px;
+  border-radius: 50%;
+}
+
+.rating-hover__label {
+  overflow: hidden;
+  color: $color-text-muted;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.rating-hover__value {
+  color: $color-text;
+  font-variant-numeric: tabular-nums;
+}
+
+.rating-hover__status {
+  margin-top: $spacing-3;
+  padding-top: $spacing-2;
+  border-top: 1px solid rgba($color-primary-light, 0.2);
+  color: $color-text-muted;
+  font-size: 10px;
+  text-align: center;
+  text-transform: uppercase;
+  letter-spacing: 0.1em;
 }
 
 .mult-tooltip {

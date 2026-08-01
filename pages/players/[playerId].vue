@@ -97,7 +97,7 @@
             title="Click for full rating breakdown"
             @click="openRatingSidebar"
           >
-            <IconsPlayerRatingIcon :size="28" style="margin-right: 3px" />{{ fmt(totalScore) }}
+            <IconsPlayerRatingIcon :size="28" style="margin-right: 3px" />{{ Math.round(totalScore) }}
           </button>
           <span v-else class="player__stat-val player__stat-val--total" :title="playerRatingTooltip">
             <IconsPlayerRatingIcon :size="28" style="margin-right: 3px" />{{ fmt(totalScore) }}

@@ -43,7 +43,7 @@
 
           <div class="player-card__stats">
             <div class="player-card__stat">
-              <span class="player-card__stat-val player-card__stat-val--score">{{ fmt(player.totalScore) }}</span>
+              <span class="player-card__stat-val player-card__stat-val--score">{{ settings.playerRankingSystem === 'player_rating_based' ? Math.round(player.totalScore) : fmt(player.totalScore) }}</span>
               <span class="player-card__stat-lbl">{{ scoreLabel }}</span>
             </div>
             <div class="player-card__stat">

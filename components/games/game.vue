@@ -93,6 +93,11 @@
         >
           <span class="game-card__placement">{{ placementLabel(player.placement) }}</span>
           <span class="game-card__name-cell">
+            <span
+              v-if="settings.playerRankingSystem === 'player_rating_based' && playerRatingAfter(player.name) !== null"
+              class="game-card__player-rating"
+              :title="`Player Rating after this game: ${Math.round(playerRatingAfter(player.name)!)}`"
+            ><IconsPlayerRatingIcon :size="11" />{{ Math.round(playerRatingAfter(player.name)!) }}</span>
             <NuxtLink
               class="game-card__name"
               :to="`/players/${encodeURIComponent(player.name)}`"
@@ -130,7 +135,9 @@
               v-for="ach in gameAchievements(player.name)"
               :key="ach.id"
               class="game-card__achievement"
-              :title="ach.name + ': ' + ach.description"
+              @mouseenter="onAchievementEnter(ach, $event)"
+              @mousemove="onMouseMove($event)"
+              @mouseleave="onAchievementLeave"
             >{{ ach.icon }}</span>
           </span>
         </div>
@@ -234,6 +241,23 @@
       />
     </div>
   </Teleport>
+
+  <Teleport to="body">
+    <div
+      v-if="achievementHover.visible && achievementHover.achievement && !isEditing"
+      class="floating-panel"
+      :style="{ top: `${achievementHover.y}px`, left: `${achievementHover.x}px` }"
+    >
+      <div class="game-card__achievement-tooltip">
+        <span class="game-card__achievement-tooltip-icon">{{ achievementHover.achievement.icon }}</span>
+        <div>
+          <div class="game-card__achievement-tooltip-title">{{ achievementHover.achievement.name }}</div>
+          <div class="game-card__achievement-tooltip-description">{{ achievementHover.achievement.description }}</div>
+          <div class="game-card__achievement-tooltip-meta">+{{ fmt(achievementHover.achievement.points) }} points · {{ achievementHover.achievement.rarity }}</div>
+        </div>
+      </div>
+    </div>
+  </Teleport>
 </template>
 
 <script setup lang="ts">
@@ -242,6 +266,7 @@ import { getFreeGameAwardsForGame, type ProcessedGame, type ProcessedGamePlayer 
 import type { EditableGamePlayer, GameDocument } from '~/utils/gameTypes'
 import { TIER_META, type Tier } from '~/utils/tiers'
 import { getAchievementDefinition } from '~/utils/achievements'
+import type { AchievementDef } from '~/utils/scoringDefaults'
 import { getCommanderTierFromMMR } from '~/composables/useCommanderMMR'
 import { formatPlayerName } from '~/utils/playerNames'
 
@@ -322,6 +347,10 @@ function getTierMeta(playerName: string, commander: string) {
 
 function playerCommanderMmr(playerName: string): number | null {
   return gameRecords.value[playerName]?.[props.game.gameId]?.commanderMMRAfter ?? null
+}
+
+function playerRatingAfter(playerName: string): number | null {
+  return gameRecords.value[playerName]?.[props.game.gameId]?.ratingAfter ?? null
 }
 
 function gameAchievements(playerName: string) {
@@ -408,6 +437,11 @@ function onMouseMove(e: MouseEvent) {
     commanderHover.x = pos.x
     commanderHover.y = pos.y
   }
+  if (achievementHover.visible) {
+    const pos = calcPosition(e, 250, 120)
+    achievementHover.x = pos.x
+    achievementHover.y = pos.y
+  }
 }
 
 const playerHover = reactive({ visible: false, name: '', x: 0, y: 0 })
@@ -443,6 +477,30 @@ function onCommanderEnter(playerName: string, commanderName: string, e: MouseEve
 
 function onCommanderLeave() {
   commanderHover.visible = false
+}
+
+const achievementHover = reactive<{
+  visible: boolean
+  achievement: AchievementDef | null
+  x: number
+  y: number
+}>({
+  visible: false,
+  achievement: null,
+  x: 0,
+  y: 0,
+})
+
+function onAchievementEnter(achievement: AchievementDef, e: MouseEvent) {
+  achievementHover.achievement = achievement
+  achievementHover.visible = true
+  const pos = calcPosition(e, 250, 120)
+  achievementHover.x = pos.x
+  achievementHover.y = pos.y
+}
+
+function onAchievementLeave() {
+  achievementHover.visible = false
 }
 
 function rankBefore(playerName: string): number {
@@ -816,7 +874,7 @@ function fmt(n: number): string {
 
   &__player {
     display: grid;
-    grid-template-columns: 2rem 5rem 1fr;
+    grid-template-columns: 2rem 7rem 1fr;
     align-items: center;
     gap: $spacing-3;
     font-size: $font-size-sm;
@@ -881,6 +939,17 @@ function fmt(n: number): string {
     opacity: 0.8;
   }
 
+  &__player-rating {
+    display: inline-flex;
+    align-items: center;
+    gap: 2px;
+    flex-shrink: 0;
+    color: $color-primary-light;
+    font-size: $font-size-xs;
+    font-variant-numeric: tabular-nums;
+    opacity: 0.9;
+  }
+
   &__commander {
     color: $color-text;
     font-size: $font-size-sm;
@@ -908,7 +977,45 @@ function fmt(n: number): string {
     font-size: 11px;
     line-height: 1;
     flex-shrink: 0;
-    cursor: default;
+    cursor: help;
+  }
+
+  &__achievement-tooltip {
+    display: flex;
+    gap: $spacing-2;
+    width: 250px;
+    padding: $spacing-2 $spacing-3;
+    border: 1px solid rgba($color-accent, 0.45);
+    border-radius: $border-radius-md;
+    background: $color-bg-elevated;
+    box-shadow: $shadow-lg;
+    color: $color-text;
+    font-size: $font-size-xs;
+  }
+
+  &__achievement-tooltip-icon {
+    flex: 0 0 auto;
+    font-size: $font-size-base;
+    line-height: 1.2;
+  }
+
+  &__achievement-tooltip-title {
+    color: $color-accent;
+    font-weight: $font-weight-bold;
+  }
+
+  &__achievement-tooltip-description {
+    margin-top: 2px;
+    color: $color-text-muted;
+    line-height: 1.35;
+  }
+
+  &__achievement-tooltip-meta {
+    margin-top: 4px;
+    color: $color-secondary;
+    font-size: 10px;
+    font-weight: $font-weight-semibold;
+    text-transform: capitalize;
   }
 
   &__editor {
@@ -972,7 +1079,7 @@ function fmt(n: number): string {
     }
 
     &__player {
-      grid-template-columns: 1.8rem 4rem 1fr;
+      grid-template-columns: 1.8rem 6rem 1fr;
       gap: $spacing-2;
     }
 

@@ -145,7 +145,7 @@
                 {{ fmt(row.peakCommanderMMR) }}
               </span>
             </td>
-            <td class="standings__td standings__td--num standings__td--total">{{ fmt(row.totalScore) }}</td>
+            <td class="standings__td standings__td--num standings__td--total">{{ settings.playerRankingSystem === 'player_rating_based' ? Math.round(row.totalScore) : fmt(row.totalScore) }}</td>
             <td
               v-if="settings.standings.usePerformanceModifier"
               class="standings__td standings__td--num standings__td--mult standings__td--hoverable-mult"

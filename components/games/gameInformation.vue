@@ -14,26 +14,14 @@
       </span>
     </div>
 
-    <div class="game-info__section">
+    <div v-if="showDetailedHoverContent" class="game-info__section">
       <div class="game-info__row">
         <span class="game-info__label">Base points</span>
         <span class="game-info__value game-info__value--pts">{{ fmt(record.basePoints) }}</span>
       </div>
-      <div class="game-info__row">
-        <span class="game-info__label">L-Points</span>
-        <span
-          class="game-info__value"
-          :class="record.lPoints > 0 ? 'game-info__value--lp' : 'game-info__value--muted'"
-        >{{ fmt(record.lPoints) }}</span>
-      </div>
-      <div v-if="lPointModifierSummary" class="game-info__row game-info__row--stacked">
-        <span class="game-info__label">L-Points modifier</span>
-        <span class="game-info__value" :class="lPointModifierClass">{{ lPointModifierSummary }}</span>
-        <span class="game-info__subvalue">{{ lPointModifierDetail }}</span>
-      </div>
     </div>
 
-    <div class="game-info__section">
+    <div v-if="showDetailedHoverContent" class="game-info__section">
       <div class="game-info__section-title">Modifiers</div>
       <div v-if="record.modifiers.length === 0" class="game-info__muted">None</div>
       <div v-for="mod in record.modifiers" :key="mod.name" class="game-info__row">
@@ -50,16 +38,19 @@
       </div>
     </div>
 
-    <div class="game-info__divider" />
+    <div v-if="showDetailedHoverContent" class="game-info__divider" />
 
     <div class="game-info__section">
-      <div class="game-info__row">
+      <div class="game-info__row game-info__row--rating">
         <span class="game-info__label">{{ rankingValueLabel }} before game</span>
-        <span class="game-info__value">{{ fmt(record.ratingBefore) }}</span>
+        <span class="game-info__rating-value game-info__rating-value--before">{{ displayRating(record.ratingBefore) }}</span>
       </div>
-      <div class="game-info__row">
+      <div class="game-info__row game-info__row--rating">
         <span class="game-info__label">{{ rankingValueLabel }} after game</span>
-        <span class="game-info__value">{{ fmt(record.ratingAfter) }}</span>
+        <span class="game-info__rating-value" :class="ratingDeltaClass">
+          {{ displayRating(record.ratingAfter) }}
+          <small v-if="ratingDelta !== 0">({{ fmtSigned(ratingDelta) }})</small>
+        </span>
       </div>
       <div class="game-info__row game-info__row--stacked">
         <span class="game-info__label">Commander MMR change</span>
@@ -67,7 +58,20 @@
           <IconsMmrIcon :size="11" />{{ fmtSigned(record.commanderMMRDelta) }} ({{ fmt(record.commanderMMRBefore) }} → {{ fmt(record.commanderMMRAfter) }})
         </span>
       </div>
+      <div class="game-info__divider" />
       <div class="game-info__row">
+        <span class="game-info__label">L-Points</span>
+        <span
+          class="game-info__value"
+          :class="record.lPoints > 0 ? 'game-info__value--lp' : 'game-info__value--muted'"
+        >{{ fmt(record.lPoints) }}</span>
+      </div>
+      <div v-if="lPointModifierSummary" class="game-info__row game-info__row--stacked">
+        <span class="game-info__label">L-Points modifier</span>
+        <span class="game-info__value" :class="lPointModifierClass">{{ lPointModifierSummary }}</span>
+        <span class="game-info__subvalue">{{ lPointModifierDetail }}</span>
+      </div>
+      <div v-if="showDetailedHoverContent" class="game-info__row">
         <span class="game-info__label">Rank at that time</span>
         <span class="game-info__rank-change">
           <span class="game-info__rank-before">#{{ record.rankBefore }}</span>
@@ -78,15 +82,15 @@
           </span>
         </span>
       </div>
-      <div class="game-info__row">
+      <div v-if="showDetailedHoverContent" class="game-info__row">
         <span class="game-info__label">Current rank</span>
         <span class="game-info__value">{{ currentRank > 0 ? `#${currentRank}` : '—' }}</span>
       </div>
     </div>
 
-    <div class="game-info__divider" />
+    <div v-if="showDetailedHoverContent" class="game-info__divider" />
 
-    <div class="game-info__section">
+    <div v-if="showDetailedHoverContent" class="game-info__section">
       <div class="game-info__section-title">Achievements</div>
       <div v-if="gameAchievements.length === 0" class="game-info__muted">None</div>
       <div v-for="ach in gameAchievements" :key="ach.id" class="game-info__achievement">
@@ -96,12 +100,12 @@
       </div>
     </div>
 
-    <div class="game-info__divider" />
+    <div v-if="showDetailedHoverContent" class="game-info__divider" />
 
-    <div class="game-info__section">
+    <div v-if="showDetailedHoverContent" class="game-info__section">
       <div class="game-info__row">
         <span class="game-info__label">Current rating</span>
-        <span class="game-info__value game-info__value--pts">{{ fmt(currentRating) }}</span>
+        <span class="game-info__value game-info__value--pts">{{ settings.playerRankingSystem === 'player_rating_based' ? Math.round(currentRating) : fmt(currentRating) }}</span>
       </div>
       <div class="game-info__row">
         <span class="game-info__label">Avg per game</span>
@@ -128,6 +132,7 @@ const props = defineProps<{
 
 const { players, gameRecords, standings } = useLeagueState()
 const { settings } = useLeagueSettings()
+const showDetailedHoverContent = false
 
 const record = computed(() => gameRecords.value[props.playerName]?.[props.gameId])
 
@@ -212,6 +217,13 @@ const commanderMmrDeltaClass = computed(() => {
   return 'game-info__value--muted'
 })
 
+const ratingDelta = computed(() => (record.value?.ratingAfter ?? 0) - (record.value?.ratingBefore ?? 0))
+const ratingDeltaClass = computed(() => {
+  if (ratingDelta.value > 0) return 'game-info__rating-value--up'
+  if (ratingDelta.value < 0) return 'game-info__rating-value--down'
+  return 'game-info__rating-value--same'
+})
+
 const lPointModifierClass = computed(() => {
   const percent = record.value?.lPointModifier?.percent ?? 0
   if (percent > 0) return 'game-info__value--lp-mod-up'
@@ -228,6 +240,10 @@ function fmtSigned(n: number): string {
   return n > 0 ? `+${fmt(n)}` : fmt(n)
 }
 
+function displayRating(n: number): string {
+  return settings.value.playerRankingSystem === 'player_rating_based' ? String(Math.round(n)) : fmt(n)
+}
+
 function round3(n: number): number {
   return Math.round(n * 1000) / 1000
 }
@@ -235,9 +251,9 @@ function round3(n: number): number {
 
 <style lang="scss" scoped>
 .game-info {
-  background: $color-bg-elevated;
-  border: 1px solid $color-primary;
-  border-radius: $border-radius-md;
+  background: linear-gradient(155deg, rgba(18, 12, 30, 0.97), rgba(7, 5, 13, 0.98));
+  border: 1px solid rgba($color-primary-light, 0.3);
+  border-radius: $border-radius-lg;
   padding: $spacing-3 $spacing-4;
   width: 260px;
   font-size: $font-size-xs;
@@ -333,6 +349,32 @@ function round3(n: number): number {
       align-items: flex-start;
       gap: 1px;
     }
+
+    &--rating {
+      align-items: center;
+      padding: $spacing-1 0;
+    }
+  }
+
+  &__rating-value {
+    padding: 3px 7px;
+    border-radius: $border-radius-sm;
+    background: rgba($color-bg, 0.5);
+    color: $color-text;
+    font-size: $font-size-sm;
+    font-weight: $font-weight-bold;
+    font-variant-numeric: tabular-nums;
+
+    small {
+      margin-left: 3px;
+      font-size: 10px;
+      font-weight: $font-weight-semibold;
+    }
+
+    &--before { color: $color-text-muted; }
+    &--up { color: $color-success; background: rgba($color-success, 0.14); }
+    &--down { color: $color-danger; background: rgba($color-danger, 0.14); }
+    &--same { color: $color-text-muted; }
   }
 
   &__value--mmr {

@@ -124,11 +124,11 @@ function buildConfig(): ChartConfiguration<'line'> {
             },
             label(item: TooltipItem<'line'>) {
               if (item.dataset.label === 'League Avg Rating') {
-                return `League Avg Rating ${fmt(item.parsed.y)}`
+                return `League Avg Rating ${Math.round(item.parsed.y)}`
               }
               const point = props.points[item.dataIndex]
               if (!point) return ''
-              const bits = [`Rating ${fmt(point.rating)}`]
+              const bits = [`Rating ${Math.round(point.rating)}`]
               if (point.provisional) bits.push('Provisional')
               if (point.commander) bits.push(point.commander)
               return bits.join(' • ')

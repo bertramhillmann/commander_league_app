@@ -31,11 +31,11 @@
           <section class="rating-sidebar__overview">
             <div class="rating-sidebar__stats">
               <div class="rating-sidebar__stat">
-                <span class="rating-sidebar__stat-value"><IconsPlayerRatingIcon :size="13" />{{ fmt(comparisonDetail.target.rating) }}</span>
+                <span class="rating-sidebar__stat-value"><IconsPlayerRatingIcon :size="13" />{{ Math.round(comparisonDetail.target.rating) }}</span>
                 <span class="rating-sidebar__stat-label">{{ comparisonDetail.target.playerName }} Rating</span>
               </div>
               <div class="rating-sidebar__stat">
-                <span class="rating-sidebar__stat-value"><IconsPlayerRatingIcon :size="13" />{{ fmt(comparisonDetail.viewer.rating) }}</span>
+                <span class="rating-sidebar__stat-value"><IconsPlayerRatingIcon :size="13" />{{ Math.round(comparisonDetail.viewer.rating) }}</span>
                 <span class="rating-sidebar__stat-label">{{ comparisonDetail.viewer.playerName }} Rating</span>
               </div>
               <div class="rating-sidebar__stat">
@@ -119,7 +119,7 @@
           <section class="rating-sidebar__overview">
             <div class="rating-sidebar__stats">
               <div class="rating-sidebar__stat">
-                <span class="rating-sidebar__stat-value"><IconsPlayerRatingIcon :size="13" />{{ fmt(detail?.rating ?? 0) }}</span>
+                <span class="rating-sidebar__stat-value"><IconsPlayerRatingIcon :size="13" />{{ Math.round(detail?.rating ?? 0) }}</span>
                 <span class="rating-sidebar__stat-label">{{ detail?.system === 'simple_mmr' ? 'Current MMR' : 'Current Rating' }}</span>
               </div>
               <div class="rating-sidebar__stat">
@@ -169,7 +169,7 @@
                 -
                 <strong>{{ detail.maxRating }}</strong>
                 to produce
-                <strong>{{ fmt(detail.rating) }}</strong>.
+                <strong>{{ Math.round(detail.rating) }}</strong>.
               </div>
               </template>
               <div v-if="detail.provisional" class="rating-sidebar__formula-note">
