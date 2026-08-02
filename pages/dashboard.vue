@@ -1,6 +1,14 @@
 <template>
   <div class="page page--dashboard">
-    <h1 class="dashboard__title">Standings</h1>
+    <div class="dashboard__heading">
+      <h1 class="dashboard__title">Standings</h1>
+      <div v-if="isAdmin && isPlayerRatingMode" class="dashboard__simulation-actions">
+        <button type="button" class="dashboard__simulation-button" @click="simulationMode = !simulationMode">
+          {{ simulationMode ? 'Exit simulation' : 'Simulation mode' }}
+        </button>
+        <button v-if="simulationMode" type="button" class="dashboard__simulation-button" @click="resetSimulation">Reset</button>
+      </div>
+    </div>
 
     <div v-if="pageLoading" class="dash-loader" aria-live="polite" aria-busy="true">
       <div class="dash-loader__inner">
@@ -228,10 +236,28 @@
             </button>
           </td>
           <td class="standings__td standings__td--num">{{ isPlayerRatingMode ? `${row.participationRate}%` : row.gamesPlayed }}</td>
-          <td class="standings__td standings__td--num">{{ row.winRate }}%</td>
+          <td class="standings__td standings__td--num">
+            <input
+              v-if="simulationMode && isPlayerRatingMode"
+              class="standings__simulation-input"
+              type="number"
+              min="0"
+              max="100"
+              :value="simulatedWinRate(row)"
+              @input="setSimulatedWinRate(row.name, Number(($event.target as HTMLInputElement).value))"
+            />
+            <template v-else>{{ row.winRate }}%</template>
+          </td>
           <td v-show="showAveragePerGameColumn" class="standings__td standings__td--num">{{ fmt(row.avgPerGame) }}</td>
           <td class="standings__td standings__td--num standings__td--avg-mmr" :title="`Avg Commander MMR: ${Math.round(row.averageCommanderMmr)}`">
-            <span class="standings__avg-mmr"><IconsMmrIcon :size="11" />{{ Math.round(row.averageCommanderMmr) }}</span>
+            <input
+              v-if="simulationMode && isPlayerRatingMode"
+              class="standings__simulation-input"
+              type="number"
+              :value="simulatedAverageCommanderMmr(row)"
+              @input="setSimulatedAverageCommanderMmr(row.name, Number(($event.target as HTMLInputElement).value))"
+            />
+            <span v-else class="standings__avg-mmr"><IconsMmrIcon :size="11" />{{ Math.round(row.averageCommanderMmr) }}</span>
           </td>
           <td
             v-for="season in displayedLeagueSeasons"
@@ -964,7 +990,10 @@ import type { LoosterPurchaseRecord } from '~/utils/loosterPurchases'
 
 const { gameRecords, games, leagueSnapshots, players, standings, loading, loaded, progress } = useLeagueState()
 const { settings } = useLeagueSettings()
-const { user, ensureSession } = useAuth()
+const { user, isAdmin, ensureSession } = useAuth()
+const simulationMode = ref(false)
+const simulatedAverageCommanderMmrs = reactive<Record<string, number>>({})
+const simulatedWinRates = reactive<Record<string, number>>({})
 
 type SortKey =
   | 'totalScore'
@@ -1651,7 +1680,11 @@ const table = computed(() => {
     }
   })
 
-  const rankedRows = [...rows]
+  const simulatedRows = simulationMode.value
+    ? rows.map((row) => applyRatingSimulation(row))
+    : rows
+
+  const rankedRows = [...simulatedRows]
     .sort((a, b) => {
       if (a.rank !== b.rank) return a.rank - b.rank
       return a.name.localeCompare(b.name)
@@ -1809,6 +1842,62 @@ const spotlightStatTiles = computed<SpotlightStatTile[]>(() => {
 })
 
 function r3(n: number): number { return Math.round(n * 1000) / 1000 }
+
+function simulatedAverageCommanderMmr(row: { name: string, averageCommanderMmr: number }) {
+  return simulatedAverageCommanderMmrs[row.name] ?? row.averageCommanderMmr
+}
+
+function simulatedWinRate(row: { name: string, winRate: number }) {
+  return simulatedWinRates[row.name] ?? row.winRate
+}
+
+function setSimulatedAverageCommanderMmr(playerName: string, value: number) {
+  if (Number.isFinite(value)) simulatedAverageCommanderMmrs[playerName] = value
+}
+
+function setSimulatedWinRate(playerName: string, value: number) {
+  if (Number.isFinite(value)) simulatedWinRates[playerName] = Math.max(0, Math.min(100, value))
+}
+
+function resetSimulation() {
+  for (const name of Object.keys(simulatedAverageCommanderMmrs)) delete simulatedAverageCommanderMmrs[name]
+  for (const name of Object.keys(simulatedWinRates)) delete simulatedWinRates[name]
+}
+
+function applyRatingSimulation<T extends { name: string, averageCommanderMmr: number, winRate: number, gamesPlayed: number, totalScore: number, playerRating: number | null, ratingBreakdown: Record<string, RatingBreakdownEntry> | null }>(row: T) {
+  const simulatedMmr = simulatedAverageCommanderMmr(row)
+  const simulatedWinRateValue = simulatedWinRate(row)
+  if ((simulatedMmr === row.averageCommanderMmr && simulatedWinRateValue === row.winRate) || !row.ratingBreakdown) return row
+
+  const breakdown = structuredClone(row.ratingBreakdown) as Record<string, RatingBreakdownEntry>
+  const factor = breakdown.averageCommanderMMR
+  if (!factor) return row
+
+  factor.rawValue = simulatedMmr
+  factor.normalizedScore = Math.max(0, Math.min(100, ((simulatedMmr - 1000) / 1600) * 100))
+  factor.weightedContribution = factor.normalizedScore * factor.weight
+  const winRateFactor = breakdown.winRate
+  if (winRateFactor) {
+    winRateFactor.rawValue = simulatedWinRateValue / 100
+    winRateFactor.normalizedScore = Math.max(0, Math.min(100, (winRateFactor.rawValue / 0.45) * 100))
+    winRateFactor.weightedContribution = winRateFactor.normalizedScore * winRateFactor.weight
+  }
+  const totalWeight = Object.values(breakdown).reduce((sum, entry) => sum + entry.weight, 0) || 1
+  const weightedScore = Object.values(breakdown).reduce((sum, entry) => sum + entry.weightedContribution, 0) / totalWeight
+  const confidence = Math.max(0.45, Math.min(1, row.gamesPlayed / 12))
+  const rating = settings.value.playerRating.minRating
+    + (Math.max(0, Math.min(100, weightedScore * confidence + weightedScore * 0.2)) / 100)
+      * (settings.value.playerRating.maxRating - settings.value.playerRating.minRating)
+
+  return {
+    ...row,
+    averageCommanderMmr: simulatedMmr,
+    winRate: simulatedWinRateValue,
+    totalScore: rating,
+    playerRating: rating,
+    ratingBreakdown: breakdown,
+  }
+}
 
 // ── Performance timeline chart ────────────────────────────────────────────────
 
@@ -2306,11 +2395,11 @@ function formatSeasonScoreCell(score: number | null, season: { startMs: number, 
 }
 
 function fmtLooster(n: number | null | undefined): string {
-  return formatLoosterPoints(n)
+  return formatLoosterPoints(Math.round(typeof n === 'number' && !Number.isNaN(n) ? n : 0))
 }
 
 function fmtLoosterOneDecimal(n: number | null | undefined): string {
-  return roundLoosterPoints(typeof n === 'number' && !Number.isNaN(n) ? n : 0).toFixed(1)
+  return fmtLooster(n)
 }
 
 function placementLabel(placement: number): string {
@@ -2634,11 +2723,11 @@ const dashboardRatingFactorRows: Array<{
   { key: 'allTimePerformance', label: 'All-time' },
   { key: 'seasonPoints', label: 'Season points' },
   { key: 'winRate', label: 'Win rate' },
-  { key: 'commanderMMRContext', label: 'Finishes vs stronger opponents' },
+  { key: 'commanderMMRContext', label: 'Finishes vs stronger commanders' },
   { key: 'averageCommanderMMR', label: 'Average commander MMR' },
   { key: 'activityPoints', label: 'Activity' },
   { key: 'achievements', label: 'Achv.' },
-  { key: 'clutch', label: 'Clutch' },
+  { key: 'clutch', label: 'Finishes vs stronger players' },
   { key: 'commanderDiversity', label: 'Diversity' },
 ]
 
@@ -3229,7 +3318,7 @@ function onCompLeave() {
 
   &__th,
   &__td {
-    padding: $spacing-3 $spacing-4;
+    padding: $spacing-2 $spacing-3;
     border-bottom: 1px solid rgba($border-color, 0.42);
     text-align: left;
     vertical-align: middle;
@@ -3873,6 +3962,39 @@ function onCompLeave() {
 .standings-wrap {
   overflow-x: auto;
   -webkit-overflow-scrolling: touch;
+  border: 1px solid $border-color;
+  border-radius: $border-radius-lg;
+}
+
+.dashboard__heading {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: $spacing-3;
+}
+
+.dashboard__simulation-actions { display: inline-flex; gap: $spacing-2; }
+.dashboard__simulation-button {
+  padding: $spacing-2 $spacing-3;
+  border: 1px solid rgba($color-primary-light, .5);
+  border-radius: $border-radius-md;
+  background: rgba($color-primary, .14);
+  color: $color-text;
+  font: inherit;
+  font-size: $font-size-xs;
+  font-weight: $font-weight-semibold;
+  cursor: pointer;
+}
+.standings__simulation-input {
+  width: 74px;
+  padding: 3px 5px;
+  border: 1px solid rgba($color-primary-light, .65);
+  border-radius: $border-radius-sm;
+  background: rgba($color-primary, .12);
+  color: $color-text;
+  font: inherit;
+  font-size: $font-size-xs;
+  text-align: center;
 }
 
 .standings {

@@ -265,6 +265,7 @@
           <div
             v-for="cmd in sortedCommanders"
             :key="cmd.name"
+            :id="commanderAnchorId(cmd.name)"
             class="cmd-row"
           >
             <!-- Full card image + level under it -->
@@ -461,10 +462,10 @@
                     class="cmd-row__slot"
                     :class="{
                       'cmd-row__slot--filled': getCommanderSlotCards(cmd.name, slotNumber - 1).length > 0,
-                      'cmd-row__slot--editable': isOwnProfile,
+                      'cmd-row__slot--editable': canEditCommanderSlots,
                       'cmd-row__slot--active': isCommanderSlotEditorOpen(cmd.name, slotNumber - 1),
                     }"
-                    :disabled="!isOwnProfile"
+                    :disabled="!canEditCommanderSlots"
                     :data-slot-trigger-id="getCommanderSlotTriggerId(cmd.name, slotNumber - 1)"
                     @click="openCommanderSlotEditor(cmd.name, slotNumber - 1, $event)"
                   >
@@ -484,7 +485,7 @@
                       </a>
                     </div>
                     <span class="cmd-row__slot-text">
-                      {{ getCommanderSlotValue(cmd.name, slotNumber - 1) || (isOwnProfile ? 'Add a card or combo' : 'Empty') }}
+                      {{ getCommanderSlotValue(cmd.name, slotNumber - 1) || (canEditCommanderSlots ? 'Add a card or combo' : 'Empty') }}
                     </span>
                   </button>
                 </div>
@@ -598,14 +599,14 @@
                         class="cmd-row__slot cmd-row__slot--compact"
                         :class="{
                           'cmd-row__slot--filled': getCommanderSlotCards(cmd.name, slotNumber - 1).length > 0,
-                          'cmd-row__slot--editable': isOwnProfile,
+                          'cmd-row__slot--editable': canEditCommanderSlots,
                           'cmd-row__slot--active': isCommanderSlotEditorOpen(cmd.name, slotNumber - 1),
                         }"
                       >
                         <button
                           type="button"
                           class="cmd-row__slot-btn"
-                          :disabled="!isOwnProfile"
+                          :disabled="!canEditCommanderSlots"
                           :data-slot-trigger-id="getCommanderSlotTriggerId(cmd.name, slotNumber - 1)"
                           @click="openCommanderSlotEditor(cmd.name, slotNumber - 1, $event)"
                         >
@@ -626,11 +627,11 @@
                           </div>
                           <span class="cmd-row__slot-eyebrow">Slot {{ slotNumber }}</span>
                           <span class="cmd-row__slot-text">
-                            {{ getCommanderSlotValue(cmd.name, slotNumber - 1) || (isOwnProfile ? 'Add a card or combo' : 'Empty') }}
+                            {{ getCommanderSlotValue(cmd.name, slotNumber - 1) || (canEditCommanderSlots ? 'Add a card or combo' : 'Empty') }}
                           </span>
                         </button>
                         <button
-                          v-if="isOwnProfile && getCommanderSlotCards(cmd.name, slotNumber - 1).length > 0"
+                          v-if="canEditCommanderSlots && getCommanderSlotCards(cmd.name, slotNumber - 1).length > 0"
                           type="button"
                           class="cmd-row__slot-clear"
                           title="Clear slot"
@@ -1067,7 +1068,7 @@ const route = useRoute()
 const leagueSettings = computed(() => getResolvedLeagueSettings())
 const playerId = computed(() => route.params.playerId as string)
 const displayPlayerName = computed(() => formatPlayerName(playerId.value))
-const { user, ensureSession } = useAuth()
+const { user, isAdmin, ensureSession } = useAuth()
 
 await ensureSession()
 
@@ -1092,8 +1093,14 @@ const { preloadCommanderImages, getCachedCommanderImage } = useImageCache()
 const isOwnProfile = computed(() =>
   Boolean(user.value) && formatPlayerName(user.value ?? '').toLowerCase() === displayPlayerName.value.toLowerCase(),
 )
+const canEditCommanderSlots = computed(() => isOwnProfile.value || isAdmin.value)
 
 const player = computed(() => players.value[playerId.value] ?? null)
+
+function commanderAnchorId(commanderName: string) {
+  return 'commander-' + normalizeDeckIdentityKey(commanderName)
+}
+
 const playerStanding = computed(() => standings.value.find((entry) => entry.name === playerId.value) ?? null)
 const chronologicalGames = computed(() => [...games.value].sort(compareGamesChronological))
 const leagueTimeline = computed(() =>
@@ -1714,7 +1721,7 @@ function isCommanderSlotEditorOpen(commanderName: string, slotIndex: number) {
 }
 
 function openCommanderSlotEditor(commanderName: string, slotIndex: number, event: MouseEvent) {
-  if (!isOwnProfile.value) return
+  if (!canEditCommanderSlots.value) return
 
   const trigger = event.currentTarget as HTMLElement | null
   if (trigger && import.meta.client) {
@@ -1988,6 +1995,17 @@ watch(
 
     artUrls.value = nextArtUrls
     previewUrls.value = nextPreviewUrls
+  },
+  { immediate: true },
+)
+
+watch(
+  [commanderRows, () => route.hash],
+  () => {
+    if (!import.meta.client || !route.hash.startsWith('#commander-')) return
+    nextTick(() => {
+      document.getElementById(route.hash.slice(1))?.scrollIntoView({ behavior: 'smooth', block: 'start' })
+    })
   },
   { immediate: true },
 )
@@ -2466,7 +2484,7 @@ async function saveCommanderSlot(commanderName: string, slotIndex: number) {
 
 async function clearCommanderSlot(commanderName: string, slotIndex: number, event: MouseEvent) {
   event.stopPropagation()
-  if (!isOwnProfile.value) return
+  if (!canEditCommanderSlots.value) return
 
   try {
     const result = await $fetch<{ ok: boolean; entry: CommanderDeckLinkRecord | null }>('/api/commander-slots', {

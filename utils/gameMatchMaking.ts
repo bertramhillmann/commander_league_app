@@ -1,5 +1,5 @@
 import { type PlayerGameRecord, type PlayerState, type ProcessedGame, compareGamesChronological } from '~/composables/useLeagueState'
-import { calculateCommanderMMRChanges, getCommanderTierFromMMR, type CommanderMMRTier } from '~/composables/useCommanderMMR'
+import { COMMANDER_MMR_CONFIG, calculateCommanderMMRChanges, getCommanderTierFromMMR, type CommanderMMRTier } from '~/composables/useCommanderMMR'
 import { calculateSimplePlayerMmrRatings, calculateSimplePlayerMmrUpdates } from '~/composables/usePlayerRating'
 
 const MIN_PLAYERS = 3
@@ -31,6 +31,18 @@ export interface MatchmakingPlacementOutcome {
   newMMR: number
   tier: CommanderMMRTier
   tierLabel: string
+  pairwiseBase: number
+  matchups: Array<{
+    opponent: string
+    opponentMMR: number
+    result: 'win' | 'loss'
+    ratingMultiplier: number
+    delta: number
+  }>
+  draws: Array<{
+    opponent: string
+    opponentMMR: number
+  }>
   playerMmrDelta?: number | null
   playerMmrAfter?: number | null
 }
@@ -104,6 +116,7 @@ export function buildFairMatchmakingResult(
   games: ProcessedGame[],
   gameRecords: Record<string, Record<string, PlayerGameRecord>>,
   includePlayerMmrPreview = false,
+  placementsByPlayer: Record<string, number> = {},
 ): MatchmakingResult | null {
   if (selectedPlayers.length < MIN_PLAYERS || selectedPlayers.length > MAX_PLAYERS) return null
 
@@ -151,7 +164,12 @@ export function buildFairMatchmakingResult(
     : null
 
   const suggestions = selectedProfiles.map((player) => {
-    const placementOutcomes = buildPlacementOutcomes(player.playerName, selectedProfiles, currentPlayerMmrRatings)
+    const placementOutcomes = buildPlacementOutcomes(
+      player.playerName,
+      selectedProfiles,
+      currentPlayerMmrRatings,
+      placementsByPlayer,
+    )
 
     return {
       playerName: player.playerName,
@@ -233,6 +251,7 @@ function buildPlacementOutcomes(
     selected: CommanderProfile
   }>,
   currentPlayerMmrRatings: Record<string, number> | null = null,
+  placementsByPlayer: Record<string, number> = {},
 ): MatchmakingPlacementOutcome[] {
   const podSize = selectedProfiles.length
   if (podSize < MIN_PLAYERS) return []
@@ -240,40 +259,15 @@ function buildPlacementOutcomes(
   const target = selectedProfiles.find((entry) => entry.playerName === targetPlayerName)
   if (!target) return []
 
-  const opponents = selectedProfiles
-    .filter((entry) => entry.playerName !== targetPlayerName)
-    .sort((left, right) =>
-      right.selected.currentMMR - left.selected.currentMMR ||
-      left.playerName.localeCompare(right.playerName),
-    )
-
   const outcomes: MatchmakingPlacementOutcome[] = []
 
   for (let placement = 1; placement <= podSize; placement++) {
-    const podResults = []
-    let opponentIndex = 0
-
-    for (let slot = 1; slot <= podSize; slot++) {
-      if (slot === placement) {
-        podResults.push({
-          commanderId: `${target.playerName}::${target.selected.commander}`,
-          commanderName: target.selected.commander,
-          currentMMR: target.selected.currentMMR,
-          placement: slot,
-        })
-        continue
-      }
-
-      const opponent = opponents[opponentIndex++]
-      if (!opponent) continue
-
-      podResults.push({
-        commanderId: `${opponent.playerName}::${opponent.selected.commander}`,
-        commanderName: opponent.selected.commander,
-        currentMMR: opponent.selected.currentMMR,
-        placement: slot,
-      })
-    }
+    const podResults = buildPodResultsForPlacement(
+      targetPlayerName,
+      placement,
+      selectedProfiles,
+      placementsByPlayer,
+    )
 
     const changes = calculateCommanderMMRChanges(podResults)
     const targetChange = changes.find((entry) => entry.commanderId === `${target.playerName}::${target.selected.commander}`)
@@ -296,12 +290,67 @@ function buildPlacementOutcomes(
       newMMR: round2(targetChange.newMMR),
       tier,
       tierLabel: tierLabel(tier),
+      pairwiseBase: round2(COMMANDER_MMR_CONFIG.baseChange / Math.max(podSize - 1, 1)),
+      matchups: targetChange.matchups.map((matchup) => ({
+        opponent: matchup.opponentCommanderName ?? matchup.opponentCommanderId,
+        opponentMMR: round2(matchup.opponentMMR),
+        result: matchup.result,
+        ratingMultiplier: matchup.ratingMultiplier,
+        delta: round2(matchup.scaledDelta),
+      })),
+      draws: podResults
+        .filter((result) =>
+          result.commanderId !== `${target.playerName}::${target.selected.commander}`
+          && result.placement === placement,
+        )
+        .map((result) => ({
+          opponent: result.commanderName ?? result.commanderId,
+          opponentMMR: round2(result.currentMMR ?? COMMANDER_MMR_CONFIG.initialMMR),
+        })),
       playerMmrDelta: playerMmrUpdate ? round2(playerMmrUpdate.delta) : null,
       playerMmrAfter: playerMmrUpdate ? round2(playerMmrUpdate.newRating) : null,
     })
   }
 
   return outcomes
+}
+
+function buildPodResultsForPlacement(
+  targetPlayerName: string,
+  targetPlacement: number,
+  selectedProfiles: Array<{
+    playerName: string
+    selected: CommanderProfile
+  }>,
+  placementsByPlayer: Record<string, number>,
+) {
+  const podSize = selectedProfiles.length
+  const fallbackPlacementByPlayer = new Map(
+    [...selectedProfiles]
+      .sort((left, right) =>
+        right.selected.currentMMR - left.selected.currentMMR ||
+        left.playerName.localeCompare(right.playerName),
+      )
+      .map((entry, index) => [entry.playerName, index + 1]),
+  )
+
+  return selectedProfiles.map((entry) => ({
+    commanderId: `${entry.playerName}::${entry.selected.commander}`,
+    commanderName: entry.selected.commander,
+    currentMMR: entry.selected.currentMMR,
+    placement: entry.playerName === targetPlayerName
+      ? targetPlacement
+      : normalizedPlacement(
+          placementsByPlayer[entry.playerName],
+          podSize,
+          fallbackPlacementByPlayer.get(entry.playerName) ?? podSize,
+        ),
+  }))
+}
+
+function normalizedPlacement(value: number | undefined, podSize: number, fallback: number) {
+  if (!Number.isFinite(value)) return fallback
+  return Math.min(Math.max(Math.round(value as number), 1), podSize)
 }
 
 function getOrderedPlayerRecords(

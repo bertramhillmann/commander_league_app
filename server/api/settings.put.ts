@@ -95,6 +95,7 @@ function isEmptySettings(settings: LeagueSettingsDocument) {
     && settings.standings?.seasonalRanking?.leagueStartDate === undefined
     && settings.standings?.seasonalRanking?.leagueEndDate === undefined
     && settings.standings?.seasonalRanking?.seasonCount === undefined
+    && settings.standings?.seasonalRanking?.seasonStartDates === undefined
     && settings.shop?.loosterCost === undefined
     && settings.shop?.commanderSlot2Cost === undefined
     && settings.shop?.commanderSlot3Cost === undefined

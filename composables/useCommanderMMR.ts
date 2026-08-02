@@ -176,12 +176,12 @@ export function getCommanderMMRMultiplierBreakdown(
   }
 
   const ratingMultiplier = getCommanderMMRMultiplier(commanderMMR, opponentMMR, result)
-  const placementMultiplier = getPlacementClosenessMultiplier(
-    commander.placement,
-    opponent.placement,
-    podSize,
-  )
-  const clutchMultiplier = getClutchMultiplier(commander, opponent, podSize, result)
+  // A higher finish must never be worth less than a lower finish against the
+  // same pod. Placement determines the pairwise win/loss; rating determines
+  // its value. Distance and clutch bonuses made an adjacent lower placement
+  // occasionally outscore a first-place finish.
+  const placementMultiplier = 1
+  const clutchMultiplier = 1
   const podSizeScaling = getPodSizeScaling(podSize)
 
   return {

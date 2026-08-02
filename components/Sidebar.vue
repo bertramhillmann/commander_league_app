@@ -558,8 +558,8 @@ const PLAYER_RATING_FACTOR_META: Record<PlayerRatingBreakdownKey, {
     tip: 'Convert more top-table appearances into actual wins to close the cleanest rating gap.',
   },
   commanderMMRContext: {
-    label: 'Finishes Against Stronger Opponents',
-    note: 'beating stronger pods and expectations',
+    label: 'Finishes Against Stronger Commanders',
+    note: 'beating stronger commanders and expectations',
     tip: 'Gain here by outperforming the expected finish when your commander enters tougher MMR pods.',
   },
   averageCommanderMMR: {
@@ -578,9 +578,9 @@ const PLAYER_RATING_FACTOR_META: Record<PlayerRatingBreakdownKey, {
     tip: 'Target repeatable and high-rarity achievements that fit your normal play patterns.',
   },
   clutch: {
-    label: 'Clutch',
-    note: 'closing out strong results from live pods',
-    tip: 'Push more close games into wins and second places when the pod gets tight.',
+    label: 'Finishes Against Stronger Players',
+    note: 'outperforming stronger-rated players',
+    tip: 'Finish above the placement expected from the player ratings in your pod.',
   },
   commanderDiversity: {
     label: 'Commander Diversity',

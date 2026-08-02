@@ -15,7 +15,7 @@
 
     <!-- Desktop auth -->
     <div class="top-menu__auth">
-      <div v-if="user" class="top-menu__user">
+      <NuxtLink v-if="user" :to="profileRoute" class="top-menu__user" :aria-label="`View ${user}'s profile`">
         <img
           v-if="userImageUrl"
           :src="userImageUrl"
@@ -23,7 +23,7 @@
           class="top-menu__user-avatar"
         />
         <span class="top-menu__user-name">{{ user }}</span>
-      </div>
+      </NuxtLink>
       <NuxtLink
         v-if="isAdmin"
         to="/admin/createGame"
@@ -47,7 +47,7 @@
 
     <!-- Mobile: compact header row (avatar + name + hamburger) -->
     <div class="top-menu__mobile-bar">
-      <div v-if="user" class="top-menu__user">
+      <NuxtLink v-if="user" :to="profileRoute" class="top-menu__user" :aria-label="`View ${user}'s profile`">
         <img
           v-if="userImageUrl"
           :src="userImageUrl"
@@ -55,7 +55,7 @@
           class="top-menu__user-avatar"
         />
         <span class="top-menu__user-name">{{ user }}</span>
-      </div>
+      </NuxtLink>
       <button
         type="button"
         class="top-menu__hamburger"
@@ -108,10 +108,16 @@
 </template>
 
 <script setup lang="ts">
+import { formatPlayerName } from '~/utils/playerNames'
+
 const route = useRoute()
 const { user, isAdmin, logout } = useAuth()
 
 const menuOpen = ref(false)
+
+const profileRoute = computed(() =>
+  user.value ? `/players/${encodeURIComponent(formatPlayerName(user.value))}` : '/players',
+)
 
 // Close drawer on route change
 watch(() => route.path, () => { menuOpen.value = false })
@@ -130,6 +136,7 @@ const items = [
   { label: 'Matchmaking', to: '/mmr-pod-finder', match: ['/mmr-pod-finder'] },
   { label: 'Players', to: '/players', match: ['/players'] },
   { label: 'Commanders', to: '/commanders/pairings', match: ['/commanders', '/commanders/pairings'] },
+  { label: 'Rules', to: '/rules', match: ['/rules'] },
   { label: 'Achievements', to: '/achievements', match: ['/achievements'] },
   { label: 'Shop', to: '/shop', match: ['/shop'] },
 ] as const
@@ -227,6 +234,14 @@ async function signOut() {
   display: inline-flex;
   align-items: center;
   gap: $spacing-2;
+  color: inherit;
+  text-decoration: none;
+  border-radius: $border-radius-sm;
+  transition: opacity $transition-fast;
+
+  &:hover {
+    opacity: 0.8;
+  }
 }
 
 .top-menu__user-avatar {

@@ -1,8 +1,8 @@
 // "Looster Points" — the in-app currency/scoring system
 
-export const MISSED_GAME_LPOINTS_3_PLAYER = 0.5
-export const MISSED_GAME_LPOINTS_4_PLAYER = 0.6
-export const MISSED_GAME_LPOINTS_5_PLAYER = 0.55
+export const MISSED_GAME_LPOINTS_3_PLAYER = 50
+export const MISSED_GAME_LPOINTS_4_PLAYER = 60
+export const MISSED_GAME_LPOINTS_5_PLAYER = 55
 
 export const MISSED_GAME_LPOINTS_BY_PLAYER_COUNT: Record<number, number> = {
   3: MISSED_GAME_LPOINTS_3_PLAYER,
@@ -17,15 +17,14 @@ export interface LoosterPointTransaction {
 }
 
 export function roundLoosterPoints(value: number): number {
-  // L-Points can legitimately produce 4-decimal values from tied placement splits
-  // (for example 0.1375), so we preserve 4 decimals while removing float drift.
-  return Math.round(value * 10000) / 10000
+  // Tied placements can create fractional L-Points (for example 13.75).
+  return Math.round(value * 100) / 100
 }
 
 export function formatLoosterPoints(value: number | null | undefined): string {
   if (typeof value !== 'number' || Number.isNaN(value)) return '0'
   if (value === 0) return '0'
-  return roundLoosterPoints(value).toFixed(4).replace(/\.?0+$/, '')
+  return roundLoosterPoints(value).toFixed(2).replace(/\.?0+$/, '')
 }
 
 export function calcGameLoosterPoints(params: {

@@ -43,6 +43,7 @@ export interface ISettings extends Document {
       leagueStartDate?: string
       leagueEndDate?: string
       seasonCount?: number
+      seasonStartDates?: string[]
     }
   }
   shop?: {

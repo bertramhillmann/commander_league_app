@@ -127,7 +127,7 @@
           <label class="form-field">
             <span class="form-label">Number Of Seasons</span>
             <input v-model.number="form.standings.seasonalRanking.seasonCount" type="number" step="1" min="1" class="form-input" />
-            <span class="form-help">The league window is split into equal-length seasons automatically.</span>
+            <span class="form-help">The league window is split into equal-length seasons unless a manual start date is set below.</span>
           </label>
         </div>
 
@@ -137,13 +137,14 @@
             :key="season.label"
             class="form-field"
           >
-            <span class="form-label">{{ season.label }}</span>
+            <span class="form-label">{{ season.label }} start</span>
             <input
-              :value="`${season.startDate} - ${season.endDate}`"
-              type="text"
+              v-model="form.standings.seasonalRanking.seasonStartDates[season.index]"
+              type="date"
               class="form-input"
-              readonly
+              :placeholder="season.startDate"
             />
+            <span class="form-help">Auto: {{ season.startDate }}. Ends {{ season.endDate }}.</span>
           </label>
         </div>
 
@@ -264,7 +265,7 @@
               >
                 <span>{{ ordinal(index + 1) }}</span>
                 <input v-model.number="rating.points" type="number" step="0.001" class="form-input" />
-                <input v-model.number="rating.lPoints" type="number" step="0.001" class="form-input" />
+                <input v-model.number="rating.lPoints" type="number" step="0.01" class="form-input" />
               </div>
             </div>
           </article>
@@ -343,15 +344,15 @@
         <div class="settings-subgrid">
           <label class="form-field">
             <span class="form-label">Looster Cost (L-Points)</span>
-            <input v-model.number="form.shop.loosterCost" type="number" step="0.001" min="0" class="form-input" />
+            <input v-model.number="form.shop.loosterCost" type="number" step="1" min="0" class="form-input" />
           </label>
           <label class="form-field">
             <span class="form-label">Second Slot Cost (L-Points)</span>
-            <input v-model.number="form.shop.commanderSlot2Cost" type="number" step="0.001" min="0" class="form-input" />
+            <input v-model.number="form.shop.commanderSlot2Cost" type="number" step="1" min="0" class="form-input" />
           </label>
           <label class="form-field">
             <span class="form-label">Third Slot Cost (L-Points)</span>
-            <input v-model.number="form.shop.commanderSlot3Cost" type="number" step="0.001" min="0" class="form-input" />
+            <input v-model.number="form.shop.commanderSlot3Cost" type="number" step="1" min="0" class="form-input" />
           </label>
         </div>
       </section>
@@ -461,11 +462,12 @@ type EditableSettingsState = {
     freeGamesMinimumAvg: number
     freeGamesGraceMisses: number
     penaltyFactor: number
-    seasonalRanking: {
-      enabled: boolean
-      leagueStartDate: string
-      leagueEndDate: string
-      seasonCount: number
+      seasonalRanking: {
+        enabled: boolean
+        leagueStartDate: string
+        leagueEndDate: string
+        seasonCount: number
+        seasonStartDates: string[]
     }
   }
   shop: {
@@ -671,6 +673,7 @@ function createEditableSettings(source: ReturnType<typeof getResolvedLeagueSetti
         leagueStartDate: source.standings.seasonalRanking.leagueStartDate,
         leagueEndDate: source.standings.seasonalRanking.leagueEndDate,
         seasonCount: source.standings.seasonalRanking.seasonCount,
+        seasonStartDates: [...source.standings.seasonalRanking.seasonStartDates],
       },
     },
     shop: {
@@ -729,6 +732,7 @@ function applyEditableSettings(target: EditableSettingsState, source: ReturnType
   target.standings.seasonalRanking.leagueStartDate = source.standings.seasonalRanking.leagueStartDate
   target.standings.seasonalRanking.leagueEndDate = source.standings.seasonalRanking.leagueEndDate
   target.standings.seasonalRanking.seasonCount = source.standings.seasonalRanking.seasonCount
+  target.standings.seasonalRanking.seasonStartDates = [...source.standings.seasonalRanking.seasonStartDates]
   target.shop.loosterCost = source.shop.loosterCost
   target.shop.commanderSlot2Cost = source.shop.commanderSlot2Cost
   target.shop.commanderSlot3Cost = source.shop.commanderSlot3Cost
@@ -807,6 +811,7 @@ function toDocument(source: EditableSettingsState): LeagueSettingsDocument {
         leagueStartDate: source.standings.seasonalRanking.leagueStartDate,
         leagueEndDate: source.standings.seasonalRanking.leagueEndDate,
         seasonCount: Math.max(1, sanitizeInteger(source.standings.seasonalRanking.seasonCount)),
+        seasonStartDates: source.standings.seasonalRanking.seasonStartDates.map((date) => date.trim()),
       },
     },
     shop: {

@@ -1,7 +1,7 @@
 import { connectToDatabase } from '../utils/mongoose'
 import { Player } from '../models/Player'
 import { buildPlayerLookup, ensurePlayerExists } from '../utils/playerData'
-import { getPlayerSession } from '../utils/playerAuth'
+import { getPlayerSession, isAdminUser } from '../utils/playerAuth'
 import { fetchCardsByName } from '~/services/scryfallService'
 import { normalizeDeckIdentityKey } from '~/utils/deckLinks'
 
@@ -21,6 +21,7 @@ function normalizeSlotNames(input: string) {
 }
 
 export default defineEventHandler(async (event) => {
+  const config = useRuntimeConfig()
   const session = getPlayerSession(event)
   if (!session) {
     throw createError({ statusCode: 401, statusMessage: 'Authentication required' })
@@ -42,7 +43,9 @@ export default defineEventHandler(async (event) => {
     throw createError({ statusCode: 400, statusMessage: 'slotIndex must be 0, 1, or 2' })
   }
 
-  if (normalizeDeckIdentityKey(session.user) !== playerNameKey) {
+  const isOwner = normalizeDeckIdentityKey(session.user) === playerNameKey
+  const isAdmin = isAdminUser(config.admins, session.user)
+  if (!isOwner && !isAdmin) {
     throw createError({ statusCode: 403, statusMessage: 'You can only edit your own commander slots' })
   }
 

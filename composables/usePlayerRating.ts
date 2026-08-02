@@ -91,6 +91,7 @@ export type PlayerRatingRecord = {
   playerCount: number
   commanderMMRBefore: number
   commanderMMRAfter: number
+  ratingBefore?: number
   achievements: EarnedAchievement[]
 }
 
@@ -142,6 +143,10 @@ type RatingGameContext = {
   performanceDelta: number
   mmrGap: number
   averageOpponentCommanderMMR: number
+  expectedPlayerPlacement: number
+  playerPerformanceDelta: number
+  playerRatingGap: number
+  averageOpponentPlayerRating: number
 }
 
 type ScoreResult = {
@@ -614,9 +619,9 @@ export function calculateAchievementScore(
 export function calculateClutchScore(gameContexts: RatingGameContext[]) {
   const clutchValues = gameContexts.map((context) => {
     const winBonus = context.ownRecord.placement === 1
-      ? Math.max(0, context.mmrGap / 250) + Math.max(0, context.performanceDelta * 0.4)
+      ? Math.max(0, context.playerRatingGap / 250) + Math.max(0, context.playerPerformanceDelta * 0.4)
       : 0
-    const outperformBonus = Math.max(0, context.performanceDelta) * (1 + Math.max(0, context.mmrGap) / 600)
+    const outperformBonus = Math.max(0, context.playerPerformanceDelta) * (1 + Math.max(0, context.playerRatingGap) / 600)
     return { winBonus, outperformBonus, total: winBonus + outperformBonus }
   })
   const rawValue = average(clutchValues.map((entry) => entry.total))
@@ -625,6 +630,8 @@ export function calculateClutchScore(gameContexts: RatingGameContext[]) {
     normalizedScore: normalizeScore(rawValue, 0, 2.5),
     averageWinBonus: round3(average(clutchValues.map((entry) => entry.winBonus))),
     averageOutperformBonus: round3(average(clutchValues.map((entry) => entry.outperformBonus))),
+    averagePlayerRatingGap: round3(average(gameContexts.map((context) => context.playerRatingGap))),
+    averagePlayerPerformanceDelta: round3(average(gameContexts.map((context) => context.playerPerformanceDelta))),
   }
 }
 
@@ -722,7 +729,8 @@ function buildFactorDetails(
       [
         `avg win bonus: ${round3(factors.clutch.averageWinBonus ?? 0)}`,
         `avg outperform bonus: ${round3(factors.clutch.averageOutperformBonus ?? 0)}`,
-        'rewards wins and overperforming against stronger pods',
+        `avg player-rating gap vs pod: ${round3(factors.clutch.averagePlayerRatingGap ?? 0)}`,
+        'rewards wins and overperforming against stronger-rated players',
       ],
     ),
     commanderDiversity: buildFactorDetail(
@@ -940,7 +948,7 @@ const FACTOR_META: Record<PlayerRatingBreakdownKey, { label: string, description
     formula: 'Normalize(wins / games played) × weight',
   },
   commanderMMRContext: {
-    label: 'Finishes Against Stronger Opponents',
+    label: 'Finishes Against Stronger Commanders',
     description: 'Rewards beating the placement your commander MMR predicted against the pod you faced.',
     formula: 'Normalize(avg(expected placement - actual placement)) × weight',
   },
@@ -960,9 +968,9 @@ const FACTOR_META: Record<PlayerRatingBreakdownKey, { label: string, description
     formula: 'Normalize(min(weighted achievement value, 18)) × weight',
   },
   clutch: {
-    label: 'Clutch',
-    description: 'Captures spikes where you win or outperform expectations in tougher pods.',
-    formula: 'Normalize(avg(win bonus + outperform bonus)) × weight',
+    label: 'Finishes Against Stronger Players',
+    description: 'Rewards wins and better-than-expected finishes against players with a higher pre-game rating.',
+    formula: 'Normalize(avg(player win bonus + player outperform bonus)) × weight',
   },
   commanderDiversity: {
     label: 'Commander Diversity',
@@ -1004,6 +1012,11 @@ function buildGameContexts(
       const adjustedBaselinePoints = round3(record.basePoints * (1 + modifierPercent / 100))
       const expectedPlacement = getExpectedPlacementFromCommanderMMR(record.commanderMMRBefore, podRecords)
       const performanceDelta = expectedPlacement - record.placement
+      const averageOpponentPlayerRating = average(opponents.map((entry) => entry.ratingBefore ?? 0))
+      const ownPlayerRating = record.ratingBefore ?? 0
+      const playerRatingGap = averageOpponentPlayerRating - ownPlayerRating
+      const expectedPlayerPlacement = getExpectedPlacementFromPlayerRating(record, podRecords)
+      const playerPerformanceDelta = expectedPlayerPlacement - record.placement
 
       return {
         ownRecord: record,
@@ -1013,6 +1026,10 @@ function buildGameContexts(
         performanceDelta,
         mmrGap,
         averageOpponentCommanderMMR,
+        expectedPlayerPlacement,
+        playerPerformanceDelta,
+        playerRatingGap,
+        averageOpponentPlayerRating,
       } satisfies RatingGameContext
     })
     .filter((entry): entry is RatingGameContext => entry !== null)
@@ -1035,6 +1052,16 @@ function getExpectedPlacementFromCommanderMMR(
   if (podRecords.length === 0) return 1
   const higher = podRecords.filter((record) => record.commanderMMRBefore > ownMmr).length
   const tied = podRecords.filter((record) => record.commanderMMRBefore === ownMmr).length
+  return 1 + higher + Math.max(0, tied - 1) / 2
+}
+
+function getExpectedPlacementFromPlayerRating(
+  ownRecord: PlayerRatingRecord,
+  podRecords: PlayerRatingRecord[],
+) {
+  const ownRating = ownRecord.ratingBefore ?? 0
+  const higher = podRecords.filter((record) => (record.ratingBefore ?? 0) > ownRating).length
+  const tied = podRecords.filter((record) => (record.ratingBefore ?? 0) === ownRating).length
   return 1 + higher + Math.max(0, tied - 1) / 2
 }
 

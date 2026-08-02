@@ -3,8 +3,9 @@
     <div class="page-inner">
       <header class="finder-head">
         <div>
-          <div class="finder-head__eyebrow">Matchmaking</div>
-          <h1 class="finder-head__title">Pod Finder</h1>
+          <!--<div class="finder-head__eyebrow">Matchmaking</div>
+          <h1 class="finder-head__title">Pod Finder</h1>-->
+          <h4 class="finder-head__title">Matchmaking</h4>
           <p class="finder-head__subtitle">
             Build balanced pods from current commander ratings, swap decks freely, preview each placement outcome, and create the game directly when you are ready.
           </p>

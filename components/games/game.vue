@@ -126,6 +126,7 @@
             ><IconsMmrIcon :size="11" />{{ fmt(playerCommanderMmr(player.name)!) }}</span>
             <NuxtLink
               class="game-card__commander"
+              @click.prevent="goToPlayerCommander(player.name, player.commander)"
               :to="`/commanders/${encodeURIComponent(player.commander)}`"
               @mouseenter="onCommanderEnter(player.name, player.commander, $event)"
               @mousemove="onMouseMove($event)"
@@ -332,6 +333,13 @@ const sortedPlayers = computed(() =>
 
 function placementLabel(p: number) {
   return ['🥇', '🥈', '🥉'][p - 1] ?? `${p}.`
+}
+
+function goToPlayerCommander(playerName: string, commanderName: string) {
+  return navigateTo({
+    path: '/players/' + encodeURIComponent(playerName),
+    hash: '#commander-' + commanderName.trim().toLowerCase().replace(/[\s,]+/g, ''),
+  })
 }
 
 function playerTier(playerName: string, commander: string): Tier | null {

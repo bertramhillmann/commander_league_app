@@ -20,21 +20,21 @@ export interface PlacementRating {
 export const DEFAULT_BASE_RATINGS: Record<number, PlacementRating[]> = {
   3: [
     { points: 1, lPoints: 0 },
-    { points: 0.5, lPoints: 0.5 },
-    { points: 0, lPoints: 1 },
+    { points: 0.5, lPoints: 50 },
+    { points: 0, lPoints: 100 },
   ],
   4: [
     { points: 1.2, lPoints: 0 },
-    { points: 0.8, lPoints: 0.4 },
-    { points: 0.4, lPoints: 0.8 },
-    { points: 0, lPoints: 1.2 },
+    { points: 0.8, lPoints: 40 },
+    { points: 0.4, lPoints: 80 },
+    { points: 0, lPoints: 120 },
   ],
   5: [
     { points: 1.1, lPoints: 0 },
-    { points: 0.825, lPoints: 0.275 },
-    { points: 0.55, lPoints: 0.55 },
-    { points: 0.275, lPoints: 0.825 },
-    { points: 0, lPoints: 1.1 },
+    { points: 0.825, lPoints: 27.5 },
+    { points: 0.55, lPoints: 55 },
+    { points: 0.275, lPoints: 82.5 },
+    { points: 0, lPoints: 110 },
   ],
 }
 

@@ -1,5 +1,5 @@
 <script setup lang="ts">
-import { buildFairMatchmakingResult, buildMatchmakingPlayerOptions } from '~/utils/gameMatchMaking'
+import { buildFairMatchmakingResult, buildMatchmakingPlayerOptions, type MatchmakingPlacementOutcome } from '~/utils/gameMatchMaking'
 
 const props = withDefaults(defineProps<{
   allowCreate?: boolean
@@ -28,6 +28,17 @@ const gameDate = ref(new Date().toISOString().slice(0, 10))
 const submitting = ref(false)
 const successMsg = ref('')
 const errorMsg = ref('')
+const outcomeHover = reactive<{
+  visible: boolean
+  x: number
+  y: number
+  outcome: MatchmakingPlacementOutcome | null
+}>({
+  visible: false,
+  x: 0,
+  y: 0,
+  outcome: null,
+})
 
 watch(
   playerOptions,
@@ -52,6 +63,7 @@ const matchmaking = computed(() =>
     games.value,
     gameRecords.value,
     settings.value.playerRating.simpleMmr.enabled,
+    placementByPlayer.value,
   ),
 )
 
@@ -137,6 +149,16 @@ function cycleCommander(playerName: string, commanders: Array<{ commander: strin
   selectCommander(playerName, commanders[nextIndex].commander)
 }
 
+function adjacentCommander(
+  selectedCommander: string,
+  commanders: Array<{ commander: string }>,
+  direction: -1 | 1,
+) {
+  if (commanders.length < 2) return ''
+  const currentIndex = Math.max(0, commanders.findIndex((entry) => entry.commander === selectedCommander))
+  return commanders[(currentIndex + direction + commanders.length) % commanders.length].commander
+}
+
 function toggleStats(playerName: string) {
   showStatsByPlayer.value = {
     ...showStatsByPlayer.value,
@@ -149,6 +171,26 @@ function setPlacement(playerName: string, placement: number) {
     ...placementByPlayer.value,
     [playerName]: placement,
   }
+}
+
+function updateOutcomeHoverPosition(event: MouseEvent) {
+  outcomeHover.x = Math.max(12, Math.min(event.clientX + 14, window.innerWidth - 320))
+  outcomeHover.y = Math.max(12, Math.min(event.clientY + 14, window.innerHeight - 260))
+}
+
+function onOutcomeEnter(outcome: MatchmakingPlacementOutcome, event: MouseEvent) {
+  outcomeHover.outcome = outcome
+  outcomeHover.visible = true
+  updateOutcomeHoverPosition(event)
+}
+
+function onOutcomeLeave() {
+  outcomeHover.visible = false
+}
+
+function selectedOutcome(playerName: string, outcomes: MatchmakingPlacementOutcome[]) {
+  const placement = placementByPlayer.value[playerName]
+  return outcomes.find((outcome) => outcome.placement === placement) ?? outcomes[0] ?? null
 }
 
 function fmt(value: number) {
@@ -192,15 +234,6 @@ async function createGameFromPod() {
       eliminations: null,
       commanderCasts: null,
     }))
-    const uniquePlacements = new Set(normalizedPlayers.map((player) => player.placement))
-
-    if (uniquePlacements.size !== normalizedPlayers.length) {
-      throw createError({
-        statusCode: 400,
-        statusMessage: 'Each player needs a unique placement before the game can be created.',
-      })
-    }
-
     await $fetch('/api/games', {
       method: 'POST',
       body: {
@@ -221,9 +254,11 @@ async function createGameFromPod() {
 const artUrls = ref(new Map<string, string>())
 
 watch(
-  () => matchmaking.value?.suggestions?.map((suggestion) => suggestion.selectedCommander) ?? [],
+  () => matchmaking.value?.suggestions.flatMap((suggestion) =>
+    suggestion.availableCommanders.map((entry) => entry.commander),
+  ) ?? [],
   async (commanders) => {
-    const names = commanders.filter(Boolean)
+    const names = [...new Set(commanders.filter(Boolean))]
     if (!names.length) return
     await preloadCommanderImages(names, ['art_crop'])
     const next = new Map<string, string>()
@@ -346,12 +381,24 @@ watch(
         >
           <div class="mm__art">
             <img
+              v-if="artUrls.get(adjacentCommander(suggestion.selectedCommander, suggestion.availableCommanders, -1))"
+              :src="artUrls.get(adjacentCommander(suggestion.selectedCommander, suggestion.availableCommanders, -1))"
+              :alt="`Previous commander: ${adjacentCommander(suggestion.selectedCommander, suggestion.availableCommanders, -1)}`"
+              class="mm__art-preview mm__art-preview--previous"
+            />
+            <img
+              v-if="artUrls.get(adjacentCommander(suggestion.selectedCommander, suggestion.availableCommanders, 1))"
+              :src="artUrls.get(adjacentCommander(suggestion.selectedCommander, suggestion.availableCommanders, 1))"
+              :alt="`Next commander: ${adjacentCommander(suggestion.selectedCommander, suggestion.availableCommanders, 1)}`"
+              class="mm__art-preview mm__art-preview--next"
+            />
+            <img
               v-if="artUrls.get(suggestion.selectedCommander)"
               :src="artUrls.get(suggestion.selectedCommander)"
               :alt="suggestion.selectedCommander"
-              class="mm__art-img"
+              class="mm__art-img mm__art-img--current"
             />
-            <div v-else class="mm__art-placeholder" />
+            <div v-else class="mm__art-placeholder mm__art-img--current" />
             <div class="mm__art-scrim" />
             <button
               type="button"
@@ -463,27 +510,31 @@ watch(
               </div>
               <div class="mm__outcomes-grid">
                 <div
-                  v-for="outcome in suggestion.placementOutcomes"
-                  :key="`${suggestion.playerName}-${outcome.placement}`"
-                  class="mm__outcome"
-                  :class="{ 'mm__outcome--active': canCreateGame && placementByPlayer[suggestion.playerName] === outcome.placement }"
-                  @click="canCreateGame && setPlacement(suggestion.playerName, outcome.placement)"
+                   v-for="outcome in suggestion.placementOutcomes"
+                   :key="`${suggestion.playerName}-${outcome.placement}`"
+                   class="mm__outcome"
+                   :class="{
+                     'mm__outcome--active': placementByPlayer[suggestion.playerName] === outcome.placement,
+                     'mm__outcome--gold': outcome.placement === 1,
+                     'mm__outcome--silver': outcome.placement === 2,
+                     'mm__outcome--bronze': outcome.placement === 3,
+                   }"
+                    @click="setPlacement(suggestion.playerName, outcome.placement)"
                 >
                   <div class="mm__outcome-place">{{ ordinal(outcome.placement) }}</div>
-                  <div class="mm__outcome-delta" :class="outcome.delta >= 0 ? 'mm__outcome-delta--up' : 'mm__outcome-delta--down'">
-                    {{ fmtAdj(outcome.delta) }}
-                  </div>
-                  <div class="mm__outcome-next">{{ fmt(outcome.newMMR) }} MMR</div>
-                  <template v-if="settings.playerRating.simpleMmr.enabled && outcome.playerMmrAfter !== null">
-                    <div
-                      class="mm__outcome-player-delta"
-                      :class="(outcome.playerMmrDelta ?? 0) >= 0 ? 'mm__outcome-player-delta--up' : 'mm__outcome-player-delta--down'"
-                    >
-                      Player {{ fmtAdj(outcome.playerMmrDelta ?? 0) }}
-                    </div>
-                    <div class="mm__outcome-player-next">{{ fmt(outcome.playerMmrAfter ?? 0) }} player MMR</div>
-                  </template>
                 </div>
+              </div>
+              <div
+                v-if="selectedOutcome(suggestion.playerName, suggestion.placementOutcomes)"
+                class="mm__outcome-summary-field"
+                :class="selectedOutcome(suggestion.playerName, suggestion.placementOutcomes)!.delta >= 0
+                  ? 'mm__outcome-summary-field--up'
+                  : 'mm__outcome-summary-field--down'"
+                @mouseenter="onOutcomeEnter(selectedOutcome(suggestion.playerName, suggestion.placementOutcomes)!, $event)"
+                @mousemove="updateOutcomeHoverPosition($event)"
+                @mouseleave="onOutcomeLeave"
+              >
+                {{ fmtAdj(selectedOutcome(suggestion.playerName, suggestion.placementOutcomes)!.delta) }} MMR
               </div>
             </div>
           </div>
@@ -494,6 +545,32 @@ watch(
 
       <div v-else class="mm__notice">Select 3-5 players to generate a matchup.</div>
     </template>
+
+    <div
+      v-if="outcomeHover.visible && outcomeHover.outcome"
+      class="mm__outcome-tooltip"
+      role="tooltip"
+      :style="{ top: `${outcomeHover.y}px`, left: `${outcomeHover.x}px` }"
+    >
+      <div class="mm__outcome-tooltip-title">{{ ordinal(outcomeHover.outcome.placement) }} place MMR breakdown</div>
+      <div class="mm__outcome-tooltip-summary">
+        Each matchup starts at {{ fmt(outcomeHover.outcome.pairwiseBase) }} MMR; rating strength adjusts that amount.
+      </div>
+      <div v-for="matchup in outcomeHover.outcome.matchups" :key="`${matchup.opponent}-${matchup.result}`" class="mm__outcome-tooltip-row">
+        <span class="mm__outcome-tooltip-opponent">{{ matchup.opponent }} · {{ fmt(matchup.opponentMMR) }}</span>
+        <span>{{ matchup.result === 'win' ? 'Win' : 'Loss' }} ×{{ fmt(matchup.ratingMultiplier) }}</span>
+        <strong :class="matchup.delta >= 0 ? 'mm__outcome-tooltip-delta--up' : 'mm__outcome-tooltip-delta--down'">{{ fmtAdj(matchup.delta) }}</strong>
+      </div>
+      <div v-for="draw in outcomeHover.outcome.draws" :key="`draw-${draw.opponent}`" class="mm__outcome-tooltip-row mm__outcome-tooltip-row--draw">
+        <span class="mm__outcome-tooltip-opponent">{{ draw.opponent }} · {{ fmt(draw.opponentMMR) }}</span>
+        <span>Draw</span>
+        <strong>±0</strong>
+      </div>
+      <div class="mm__outcome-tooltip-total">
+        <span>Total</span>
+        <strong :class="outcomeHover.outcome.delta >= 0 ? 'mm__outcome-tooltip-delta--up' : 'mm__outcome-tooltip-delta--down'">{{ fmtAdj(outcomeHover.outcome.delta) }}</strong>
+      </div>
+    </div>
   </div>
 </template>
 
@@ -847,31 +924,68 @@ watch(
     aspect-ratio: 4/3;
     position: relative;
     overflow: hidden;
+    isolation: isolate;
+    background: rgba(4, 3, 8, 0.85);
   }
 
   &__art-img {
-    width: 100%;
-    height: 100%;
     object-fit: cover;
     object-position: center 20%;
     display: block;
+
+    &--current {
+      position: absolute;
+      z-index: 2;
+      top: 5%;
+      left: 50%;
+      width: 72%;
+      height: 90%;
+      transform: translateX(-50%);
+      border: 1px solid rgba($color-primary-light, 0.32);
+      border-radius: $border-radius-sm;
+      box-shadow: 0 10px 20px rgba(0, 0, 0, 0.42);
+    }
+  }
+
+  &__art-preview {
+    position: absolute;
+    z-index: 1;
+    top: 10%;
+    width: 64%;
+    height: 80%;
+    object-fit: cover;
+    object-position: center 20%;
+    border: 1px solid rgba($border-color, 0.45);
+    border-radius: $border-radius-sm;
+    filter: blur(2px) saturate(0.7);
+    opacity: 0.48;
+    pointer-events: none;
+
+    &--previous {
+      left: -27%;
+      transform: rotate(-5deg);
+    }
+
+    &--next {
+      right: -27%;
+      transform: rotate(5deg);
+    }
   }
 
   &__art-placeholder {
-    width: 100%;
-    height: 100%;
     background: linear-gradient(160deg, rgba($color-primary-dark, 0.4), rgba(0, 0, 0, 0.6));
   }
 
   &__art-scrim {
     position: absolute;
+    z-index: 3;
     inset: 0;
     background: linear-gradient(to bottom, transparent 40%, rgba(12, 10, 18, 0.85));
   }
 
   &__art-cycle {
     position: absolute;
-    z-index: 2;
+    z-index: 4;
     top: 50%;
     width: 28px;
     height: 36px;
@@ -1123,6 +1237,7 @@ watch(
   }
 
   &__outcomes-title {
+    display: none;
     font-size: 10px;
     text-transform: uppercase;
     letter-spacing: 0.08em;
@@ -1137,15 +1252,38 @@ watch(
 
   &__outcomes-grid {
     display: grid;
-    grid-template-columns: repeat(auto-fit, minmax(88px, 1fr));
+    grid-template-columns: repeat(4, minmax(0, 1fr));
     gap: $spacing-2;
+  }
+
+  &__outcome-summary-field {
+    padding: $spacing-2 $spacing-3;
+    border: 1px solid rgba($color-primary-light, 0.38);
+    border-radius: $border-radius-md;
+    background: rgba($color-primary, 0.12);
+    color: $color-text;
+    font-size: $font-size-sm;
+    font-weight: $font-weight-semibold;
+    font-variant-numeric: tabular-nums;
+    text-align: center;
+    cursor: default;
+    transition: border-color $transition-fast, background $transition-fast;
+
+    &:hover {
+      border-color: $color-primary-light;
+      background: rgba($color-primary, 0.2);
+    }
+
+    &--up { color: $color-success; }
+    &--down { color: $color-danger; }
   }
 
   &__outcome {
     display: flex;
     flex-direction: column;
+    align-items: center;
     gap: 2px;
-    padding: $spacing-2;
+    padding: $spacing-2 $spacing-1;
     border-radius: $border-radius-md;
     background: rgba(0, 0, 0, 0.22);
     border: 1px solid rgba($border-color, 0.45);
@@ -1161,6 +1299,10 @@ watch(
       border-color: $color-primary-light;
       background: rgba($color-primary, 0.22);
     }
+
+    &--gold:not(&--active) &-place { color: #d6aa4a; }
+    &--silver:not(&--active) &-place { color: #c7ced8; }
+    &--bronze:not(&--active) &-place { color: #c78658; }
   }
 
   &__outcome-place {
@@ -1184,6 +1326,67 @@ watch(
     color: $color-text;
     font-variant-numeric: tabular-nums;
   }
+
+  &__outcome-tooltip {
+    position: fixed;
+    z-index: 30;
+    width: min(300px, calc(100vw - 24px));
+    padding: $spacing-3;
+    border: 1px solid rgba($color-primary-light, 0.28);
+    border-radius: $border-radius-md;
+    background: rgba(20, 16, 32, 0.97);
+    box-shadow: $shadow-lg;
+    color: $color-text;
+    font-size: $font-size-xs;
+    pointer-events: none;
+  }
+
+  &__outcome-tooltip-title {
+    color: $color-primary-light;
+    font-weight: $font-weight-semibold;
+    margin-bottom: $spacing-1;
+  }
+
+  &__outcome-tooltip-summary {
+    margin-bottom: $spacing-2;
+    color: $color-text-muted;
+    font-size: 11px;
+    line-height: 1.45;
+  }
+
+  &__outcome-tooltip-row,
+  &__outcome-tooltip-total {
+    display: grid;
+    grid-template-columns: minmax(0, 1fr) auto auto;
+    gap: $spacing-2;
+    align-items: center;
+    padding: 4px 0;
+    font-variant-numeric: tabular-nums;
+  }
+
+  &__outcome-tooltip-row {
+    border-top: 1px solid rgba($border-color, 0.35);
+
+    &--draw { color: $color-text-muted; }
+  }
+
+  &__outcome-tooltip-opponent {
+    overflow: hidden;
+    text-overflow: ellipsis;
+    white-space: nowrap;
+  }
+
+  &__outcome-tooltip-total {
+    margin-top: $spacing-1;
+    padding-top: $spacing-2;
+    border-top: 1px solid rgba($color-primary-light, 0.28);
+    font-weight: $font-weight-semibold;
+
+    span { grid-column: 1 / 3; }
+  }
+
+  &__outcome-tooltip-delta--up { color: $color-success; }
+  &__outcome-tooltip-delta--down { color: $color-danger; }
 
   &__outcome-player-delta {
     margin-top: 2px;

@@ -37,6 +37,8 @@ export interface StandingsSeasonalRankingConfig {
   leagueStartDate: string
   leagueEndDate: string
   seasonCount: number
+  /** Optional manually selected starts, indexed from Season 1. Empty entries use generated dates. */
+  seasonStartDates: string[]
 }
 
 export interface LeagueSeasonRange {
@@ -140,6 +142,7 @@ export interface LeagueSettingsDocument {
       leagueStartDate?: string
       leagueEndDate?: string
       seasonCount?: number
+      seasonStartDates?: string[]
     }
   }
   shop?: {
@@ -301,6 +304,8 @@ export function getResolvedLeagueSettings(settings?: LeagueSettingsDocument | nu
           source?.standings?.seasonalRanking?.seasonCount,
           DEFAULT_STANDINGS_SEASON_COUNT,
         ))),
+        seasonStartDates: (source?.standings?.seasonalRanking?.seasonStartDates ?? [])
+          .map((date) => normalizeDateInput(date)),
       },
     },
     shop: {
@@ -329,12 +334,20 @@ export function buildLeagueSeasonRanges(config?: Partial<StandingsSeasonalRankin
   const totalDays = Math.floor((end.getTime() - start.getTime()) / dayMs) + 1
   if (totalDays <= 0) return []
 
-  return Array.from({ length: seasonCount }, (_unused, index) => {
+  const generatedStarts = Array.from({ length: seasonCount }, (_unused, index) => {
     const startOffset = Math.floor((index * totalDays) / seasonCount)
-    const nextStartOffset = Math.floor(((index + 1) * totalDays) / seasonCount)
-    const seasonStart = new Date(start.getTime() + startOffset * dayMs)
-    const seasonEnd = new Date(start.getTime() + Math.max(startOffset, nextStartOffset - 1) * dayMs)
+    return new Date(start.getTime() + startOffset * dayMs)
+  })
+  const seasonStarts = generatedStarts.map((generatedStart, index) => {
+    const manualStart = parseDateInput(config?.seasonStartDates?.[index])
+    return manualStart && manualStart >= start && manualStart <= end ? manualStart : generatedStart
+  })
 
+  return seasonStarts.map((seasonStart, index) => {
+    const nextSeasonStart = seasonStarts[index + 1]
+    const seasonEnd = nextSeasonStart
+      ? new Date(Math.max(seasonStart.getTime(), nextSeasonStart.getTime() - dayMs))
+      : end
     return {
       index,
       label: `Season ${index + 1}`,
@@ -357,10 +370,16 @@ function resolvePoints(raw?: Partial<Record<number, PlacementRating[]>>) {
     const defaults = DEFAULT_BASE_RATINGS[playerCount] ?? []
     const rawRatings = raw?.[playerCount] ?? []
 
-    resolved[playerCount] = defaults.map((rating, index) => ({
-      points: toNumberOr(rawRatings[index]?.points, rating.points),
-      lPoints: toNumberOr(rawRatings[index]?.lPoints, rating.lPoints),
-    }))
+    resolved[playerCount] = defaults.map((rating, index) => {
+      const configuredLPoints = toNumberOr(rawRatings[index]?.lPoints, rating.lPoints)
+      return {
+        points: toNumberOr(rawRatings[index]?.points, rating.points),
+        // Existing leagues stored L-Points on the old 0–1.2 scale.
+        lPoints: configuredLPoints !== 0 && Math.abs(configuredLPoints) <= 2
+          ? configuredLPoints * 100
+          : configuredLPoints,
+      }
+    })
   }
 
   return resolved

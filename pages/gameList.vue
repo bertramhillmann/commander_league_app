@@ -15,6 +15,7 @@ const hasMounted = ref(false)
 
 const selectedPlayer = ref<string | null>(null)
 const selectedCommander = ref<string | null>(null)
+const selectedGameId = ref<string | null>(null)
 const randomExportCount = ref(35)
 const exportBusy = ref(false)
 const testActionBusy = ref(false)
@@ -89,6 +90,16 @@ const filteredGames = computed(() => {
     ),
   )
 })
+
+const selectedGame = computed(() =>
+  filteredGames.value.find((game) => game.gameId === selectedGameId.value) ?? filteredGames.value[0] ?? null,
+)
+
+watch(filteredGames, (gamesForView) => {
+  if (!gamesForView.some((game) => game.gameId === selectedGameId.value)) {
+    selectedGameId.value = gamesForView[0]?.gameId ?? null
+  }
+}, { immediate: true })
 
 const pageError = computed(() =>
   error.value || (isAdmin.value ? adminGamesError.value?.message ?? null : null),
@@ -327,6 +338,9 @@ function sampleGames<T>(items: T[], count: number) {
             v-for="game in filteredGames"
             :key="game.gameId"
             :id="`game-${game.gameId}`"
+            class="game-list__game-entry"
+            :class="{ 'game-list__game-entry--selected': selectedGame?.gameId === game.gameId }"
+            @click="selectedGameId = game.gameId"
           >
             <GamesGame
               :game="game"
@@ -341,7 +355,7 @@ function sampleGames<T>(items: T[], count: number) {
         </div>
 
         <aside class="game-list__sidebar">
-          <GamesGameMatchMaking />
+          <GamesGameRatingAnalysis :game="selectedGame" />
         </aside>
       </div>
     </template>
@@ -505,6 +519,16 @@ function sampleGames<T>(items: T[], count: number) {
     overflow-y: auto;
     scrollbar-width: thin;
     scrollbar-color: rgba($color-primary-light, 0.2) transparent;
+  }
+
+  &__game-entry {
+    cursor: pointer;
+    border-radius: $border-radius-lg;
+    transition: box-shadow $transition-fast;
+
+    &--selected {
+      box-shadow: 0 0 0 2px rgba($color-primary-light, .6);
+    }
   }
 }
 
