@@ -12,6 +12,7 @@ export interface FeaturedPlayerSignal {
   summary: string
   reasons: string[]
   score: number
+  relevantGameIds: string[]
 }
 
 export interface FeaturedPlayerCandidate extends FeaturedPlayerSignal {
@@ -118,6 +119,7 @@ function buildWinStreakSignal(playerName: string, records: FeaturedPlayerRecord[
       `Latest commander: ${records[records.length - 1]?.commander}.`,
     ],
     score: 88 + (streak * 6),
+    relevantGameIds: records.slice(-streak).map((record) => record.gameId),
   }
 }
 
@@ -142,6 +144,7 @@ function buildRecoverySignal(playerName: string, records: FeaturedPlayerRecord[]
       `${recentWins > 0 ? `${recentWins} recent win${recentWins === 1 ? '' : 's'}.` : `${recentTopTwos} recent top-2 finishes.`}`,
     ],
     score: 82 + Math.round((priorAvg - recentAvg) * 14),
+    relevantGameIds: [...prior, ...recent].map((record) => record.gameId),
   }
 }
 
@@ -163,6 +166,7 @@ function buildPlacementRepeatSignal(playerName: string, records: FeaturedPlayerR
         : 'The finish band has stayed almost perfectly fixed lately.',
     ],
     score: 70 + (streak * 5),
+    relevantGameIds: records.slice(-streak).map((record) => record.gameId),
   }
 }
 
@@ -180,6 +184,7 @@ function buildRotationSignal(playerName: string, records: FeaturedPlayerRecord[]
       `${uniqueCount} unique commanders across that run.`,
     ],
     score: 74 + Math.min(24, streak * 2),
+    relevantGameIds: records.slice(-streak).map((record) => record.gameId),
   }
 }
 
@@ -205,6 +210,7 @@ function buildComebackSignal(playerName: string, records: FeaturedPlayerRecord[]
       `Broke through with ${lastRecord.commander}.`,
     ],
     score: 80 + Math.min(18, droughtLength * 2),
+    relevantGameIds: records.slice(-(droughtLength + 1)).map((record) => record.gameId),
   }
 }
 
@@ -233,6 +239,7 @@ function buildRecentlyClimbedToTopSignal(playerName: string, records: FeaturedPl
         wasEverFirst ? 'Reclaimed the top position.' : 'First time leading the league.',
       ],
       score: wasEverFirst ? 86 : 96,
+      relevantGameIds: [record.gameId],
     }
   }
 
@@ -266,6 +273,7 @@ function buildDethronedKingSignal(
             `${otherName} dropped to rank ${kingRankAfter} after this result.`,
           ],
           score: 92,
+          relevantGameIds: [winRecord.gameId],
         }
       }
     }
@@ -307,6 +315,7 @@ function buildStreakBreakerSignal(
             `A win at exactly the right moment.`,
           ],
           score: 84 + Math.min(12, streak * 2),
+          relevantGameIds: [winRecord.gameId],
         }
       }
     }

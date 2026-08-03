@@ -115,11 +115,12 @@
       <div v-if="peakEntry.peakReachedAt || peakEntry.peakPod.length > 0 || peakEntry.peakGameId" class="top-commander__peak-context">
         <span v-if="peakEntry.peakReachedAt">Hit on {{ formatPeakDate(peakEntry.peakReachedAt) }}</span>
         <span v-if="peakEntry.peakPod.length > 0">Against pod: {{ peakEntry.peakPod.join(', ') }}</span>
-        <NuxtLink
+        <button
           v-if="peakEntry.peakGameId"
+          type="button"
           class="top-commander__peak-game-link"
-          :to="`/gameList?highlight=${encodeURIComponent(peakEntry.peakGameId)}`"
-        >View game →</NuxtLink>
+          @click="emit('open-game', peakEntry.peakGameId)"
+        >View game →</button>
       </div>
     </article>
 
@@ -222,6 +223,10 @@ type PairStats = {
   zeroPointAvoidanceDiff: number
   title: CommanderTitleResult
 }
+
+const emit = defineEmits<{
+  (e: 'open-game', gameId: string): void
+}>()
 
 const { gameRecords, games, commanderTitleSelections, standings } = useLeagueState()
 const { preloadCommanderImages, getCachedCommanderImage } = useImageCache()
@@ -678,6 +683,12 @@ function onTitleLeave() {
   }
 
   &__peak-game-link {
+    appearance: none;
+    border: 0;
+    padding: 0;
+    background: transparent;
+    font: inherit;
+    cursor: pointer;
     color: $color-primary-light;
     text-decoration: none;
     margin-left: auto;

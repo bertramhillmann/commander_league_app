@@ -25,7 +25,25 @@
     </div>
 
     <div v-if="props.series.length > 0" class="perf-chart__frame">
-      <canvas ref="canvasRef" class="perf-chart__canvas" />
+      <canvas
+        ref="canvasRef"
+        class="perf-chart__canvas"
+        @pointerdown="onPointerDown"
+        @pointermove="onPointerMove"
+        @pointerup="onPointerUp"
+        @pointercancel="onPointerCancel"
+      />
+      <div
+        v-if="isDragging"
+        class="perf-chart__drag-box"
+        :style="dragBoxStyle"
+      />
+      <button
+        v-if="selectionRange || props.seasonFiltered"
+        type="button"
+        class="perf-chart__reset-btn"
+        @click="resetZoom"
+      >Reset zoom</button>
     </div>
     <div v-else class="perf-chart__empty">{{ props.emptyLabel }}</div>
   </div>
@@ -48,12 +66,21 @@ const props = withDefaults(defineProps<{
   title?: string
   subtitle?: string
   emptyLabel?: string
+  seasonFiltered?: boolean
+  gameIds?: (string | null)[]
 }>(), {
   filled: false,
   title: 'Performance Trends',
   subtitle: 'Exponential weighted score - recent games count more',
   emptyLabel: 'No performance data yet.',
+  seasonFiltered: false,
+  gameIds: undefined,
 })
+
+const emit = defineEmits<{
+  reset: []
+  pointClick: [gameId: string]
+}>()
 
 const canvasRef = ref<HTMLCanvasElement | null>(null)
 const hiddenSet = ref<Set<string>>(new Set())
@@ -61,11 +88,118 @@ const soloedSeries = ref<string | null>(null)
 let chart: Chart | null = null
 let renderVersion = 0
 
+const selectionRange = ref<{ start: number; end: number } | null>(null)
+const isDragging = ref(false)
+const dragStartX = ref(0)
+const dragCurrentX = ref(0)
+
+const displayLabels = computed(() => {
+  if (!selectionRange.value) return props.labels
+  return props.labels.slice(selectionRange.value.start, selectionRange.value.end + 1)
+})
+
+const displaySeries = computed<PerformancePlayerSeries[]>(() => {
+  if (!selectionRange.value) return props.series
+  const { start, end } = selectionRange.value
+  return props.series.map((s) => ({
+    ...s,
+    data: s.data.slice(start, end + 1),
+    tooltipData: s.tooltipData?.slice(start, end + 1),
+  }))
+})
+
+const displayGameIds = computed(() => {
+  if (!props.gameIds) return null
+  if (!selectionRange.value) return props.gameIds
+  return props.gameIds.slice(selectionRange.value.start, selectionRange.value.end + 1)
+})
+
+const dragBoxStyle = computed(() => {
+  const left = Math.min(dragStartX.value, dragCurrentX.value)
+  const width = Math.abs(dragCurrentX.value - dragStartX.value)
+  return { left: `${left}px`, width: `${width}px` }
+})
+
+const DRAG_THRESHOLD_PX = 8
+
+function onPointerDown(event: PointerEvent) {
+  if (!chart || event.button !== 0) return
+  const canvas = canvasRef.value
+  if (!canvas) return
+  const rect = canvas.getBoundingClientRect()
+  isDragging.value = true
+  dragStartX.value = event.clientX - rect.left
+  dragCurrentX.value = dragStartX.value
+  canvas.setPointerCapture(event.pointerId)
+}
+
+function onPointerMove(event: PointerEvent) {
+  if (!isDragging.value) return
+  const canvas = canvasRef.value
+  if (!canvas) return
+  const rect = canvas.getBoundingClientRect()
+  dragCurrentX.value = Math.min(Math.max(event.clientX - rect.left, 0), rect.width)
+}
+
+function onPointerUp(event: PointerEvent) {
+  if (!isDragging.value || !chart) return
+  isDragging.value = false
+  const canvas = canvasRef.value
+  if (canvas) canvas.releasePointerCapture(event.pointerId)
+
+  const minPx = Math.min(dragStartX.value, dragCurrentX.value)
+  const maxPx = Math.max(dragStartX.value, dragCurrentX.value)
+  if (maxPx - minPx < DRAG_THRESHOLD_PX) {
+    handlePointClick(dragCurrentX.value)
+    return
+  }
+
+  const xScale = chart.scales.x
+  const rawStart = xScale.getValueForPixel(minPx)
+  const rawEnd = xScale.getValueForPixel(maxPx)
+  if (rawStart === undefined || rawEnd === undefined) return
+
+  const currentLength = displayLabels.value.length
+  const localStart = Math.max(0, Math.min(currentLength - 1, Math.round(rawStart)))
+  const localEnd = Math.max(0, Math.min(currentLength - 1, Math.round(rawEnd)))
+  if (localEnd <= localStart) return
+
+  const offset = selectionRange.value?.start ?? 0
+  selectionRange.value = { start: offset + localStart, end: offset + localEnd }
+}
+
+function handlePointClick(pixelX: number) {
+  if (!chart || !displayGameIds.value || displayGameIds.value.length === 0) return
+
+  const xScale = chart.scales.x
+  const rawIndex = xScale.getValueForPixel(pixelX)
+  if (rawIndex === undefined) return
+
+  const currentLength = displayLabels.value.length
+  const index = Math.max(0, Math.min(currentLength - 1, Math.round(rawIndex)))
+  const gameId = displayGameIds.value[index]
+  if (gameId) emit('pointClick', gameId)
+}
+
+function onPointerCancel() {
+  isDragging.value = false
+}
+
+function resetZoom() {
+  selectionRange.value = null
+  emit('reset')
+}
+
 watch(
   () => [props.labels, props.series],
-  async () => { await renderChart() },
+  async () => {
+    selectionRange.value = null
+    await renderChart()
+  },
   { deep: true },
 )
+
+watch(selectionRange, async () => { await renderChart() }, { deep: true })
 
 onMounted(async () => { await renderChart() })
 onBeforeUnmount(() => {
@@ -114,7 +248,7 @@ function toggleSeries(name: string, datasetIndex: number) {
 
 function applyOpacities() {
   if (!chart) return
-  props.series.forEach((s, i) => {
+  displaySeries.value.forEach((s, i) => {
     if (!chart) return
     const ds = chart.data.datasets[i]
     if (!soloedSeries.value || s.name === soloedSeries.value) {
@@ -138,8 +272,8 @@ function buildConfig(): ChartConfiguration<'line'> {
   return {
     type: 'line',
     data: {
-      labels: props.labels,
-      datasets: props.series.map((s) => ({
+      labels: displayLabels.value,
+      datasets: displaySeries.value.map((s) => ({
         label: s.name,
         data: s.data,
         borderColor: s.color,
@@ -183,7 +317,7 @@ function buildConfig(): ChartConfiguration<'line'> {
             label(item: TooltipItem<'line'>) {
               const val = item.parsed.y
               if (val === null || val === undefined) return ''
-              const detail = props.series[item.datasetIndex]?.tooltipData?.[item.dataIndex]
+              const detail = displaySeries.value[item.datasetIndex]?.tooltipData?.[item.dataIndex]
               return detail
                 ? `${item.dataset.label}: ${fmt(val)} (${detail})`
                 : `${item.dataset.label}: ${fmt(val)}`
@@ -329,6 +463,39 @@ function fmt(n: number) {
     inset: 0;
     width: 100% !important;
     height: 100% !important;
+    touch-action: none;
+    cursor: crosshair;
+  }
+
+  &__drag-box {
+    position: absolute;
+    top: 0;
+    bottom: 0;
+    background: rgba($color-primary-light, 0.18);
+    border-left: 1px solid rgba($color-primary-light, 0.6);
+    border-right: 1px solid rgba($color-primary-light, 0.6);
+    pointer-events: none;
+    z-index: 2;
+  }
+
+  &__reset-btn {
+    position: absolute;
+    top: 8px;
+    right: 8px;
+    z-index: 3;
+    padding: 4px 10px;
+    border: 1px solid rgba($border-color, 0.6);
+    border-radius: $border-radius-full;
+    background: rgba(20, 18, 36, 0.9);
+    color: $color-text;
+    font-size: 11px;
+    cursor: pointer;
+    transition: border-color $transition-fast, background $transition-fast;
+
+    &:hover {
+      border-color: rgba($color-primary-light, 0.5);
+      background: rgba(20, 18, 36, 1);
+    }
   }
 
   &__empty {

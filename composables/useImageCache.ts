@@ -1,4 +1,4 @@
-import { fetchCardByName, getCardImageUrl, type ScryfallCard } from '~/services/scryfallService'
+import { fetchCardByName, fetchCardsByIdentifiers, getCardImageUrl, type ScryfallCard } from '~/services/scryfallService'
 
 type ImageSize = keyof NonNullable<ScryfallCard['image_uris']>
 
@@ -56,9 +56,35 @@ export function useImageCache() {
 
   async function preloadCommanderImages(names: string[], sizes: ImageSize[] = ['art_crop']) {
     const uniqueNames = [...new Set(names.map((name) => name.trim()).filter(Boolean))]
-    await Promise.all(uniqueNames.map(async (name) => {
-      await Promise.all(sizes.map((size) => getCommanderImage(name, size)))
-    }))
+
+    const namesToFetch = uniqueNames.filter((name) => {
+      const key = normalizeCommanderName(name)
+      return sizes.some((size) => !imageCache.value[key]?.[size])
+    })
+
+    if (namesToFetch.length === 0) return
+
+    // Preloads happen for potentially dozens of cards at once (sidebar, dashboard,
+    // commander lists, ...). Fetch them through Scryfall's batched collection
+    // endpoint instead of one request per card to avoid tripping its rate limit.
+    const cardsByKey = await fetchCardsByIdentifiers(namesToFetch.map((name) => ({ name })))
+
+    const nextCache = { ...imageCache.value }
+
+    for (const name of namesToFetch) {
+      const key = normalizeCommanderName(name)
+      const card = cardsByKey.get(key)
+      if (!card) continue
+
+      const record: ImageCacheRecord = { ...nextCache[key] }
+      for (const size of sizes) {
+        const url = getCardImageUrl(card, size)
+        if (url) record[size] = url
+      }
+      nextCache[key] = record
+    }
+
+    imageCache.value = nextCache
   }
 
   return {

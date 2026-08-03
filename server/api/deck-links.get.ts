@@ -27,6 +27,7 @@ export default defineEventHandler(async (event) => {
       archidektDeckId: link.archidektDeckId,
       selectedTitle: link.selectedTitle || undefined,
       gameChangerSlots: Array.isArray(link.gameChangerSlots) ? link.gameChangerSlots : [],
+      retired: Boolean(link.retired),
       updatedAt: link.updatedAt,
     }))
     .sort((a, b) => a.commanderName.localeCompare(b.commanderName))

@@ -8,6 +8,11 @@ export interface IPlayerPurchase {
   set: string
   set_name: string
   cards: string[]
+  cardPrintings?: {
+    name: string
+    scryfallUrl: string
+    setCode: string
+  }[]
   date: Date
   priceEuro: number
   createdAt?: Date
@@ -21,6 +26,7 @@ export interface IPlayerCommanderDeck {
   archidektDeckId?: string
   selectedTitle?: CommanderTitleId
   gameChangerSlots?: string[]
+  retired?: boolean
   createdAt?: Date
   updatedAt?: Date
 }
@@ -43,6 +49,14 @@ const PlayerPurchaseSchema = new Schema<IPlayerPurchase>(
     set: { type: String, required: true, default: '' },
     set_name: { type: String, required: true, default: '' },
     cards: { type: [String], default: [] },
+    cardPrintings: {
+      type: [{
+        name: { type: String, required: true },
+        scryfallUrl: { type: String, required: true },
+        setCode: { type: String, default: '' },
+      }],
+      default: [],
+    },
     date: { type: Date, required: true, default: Date.now },
     priceEuro: { type: Number, required: true, default: 0 },
   },
@@ -57,6 +71,7 @@ const PlayerCommanderDeckSchema = new Schema<IPlayerCommanderDeck>(
     archidektDeckId: { type: String, default: '' },
     selectedTitle: { type: String, default: '' },
     gameChangerSlots: { type: [String], default: [] },
+    retired: { type: Boolean, default: false },
   },
   { _id: false, timestamps: true }
 )

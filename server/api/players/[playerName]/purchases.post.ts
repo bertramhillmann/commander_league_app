@@ -2,7 +2,8 @@ import { connectToDatabase } from '../../../utils/mongoose'
 import { Player } from '../../../models/Player'
 import { addCardsToPlayerCardpool, ensurePlayerExists } from '../../../utils/playerData'
 import { getPlayerSession, isAdminUser } from '../../../utils/playerAuth'
-import { flattenPlayerPurchases, normalizeEuroPrice, parsePurchaseDate, validateAndCanonicalizeCards } from '../../../utils/purchases'
+import { flattenPlayerPurchases, normalizeCardPrintings, normalizeEuroPrice, parseCardListInput, parsePurchaseDate } from '../../../utils/purchases'
+import { normalizeCardNames } from '../../../utils/playerData'
 import { Settings } from '../../../models/Settings'
 import { formatPlayerName } from '~/utils/playerNames'
 import { DEFAULT_LOOSTER_COST } from '~/utils/leagueSettings'
@@ -15,6 +16,7 @@ type PurchaseBody = {
   set?: string
   set_name?: string
   cards?: string[] | string
+  cardPrintings?: unknown
   date?: string
   priceEuro?: number
 }
@@ -58,10 +60,6 @@ export default defineEventHandler(async (event) => {
     throw createError({ statusCode: 400, statusMessage: 'Unknown shop item.' })
   }
 
-  if (shopItem.purchaseType === 'looster' && (!set || !setName)) {
-    throw createError({ statusCode: 400, statusMessage: 'Purchase name, type, set, and set name are required' })
-  }
-
   if (shopItem.requiredStartedSeasons > getStartedSeasonCount(settingsDoc)) {
     throw createError({
       statusCode: 400,
@@ -69,8 +67,13 @@ export default defineEventHandler(async (event) => {
     })
   }
 
+  // A Looster can be registered before its cards (or even its set) are known.
+  // Card art is resolved asynchronously by the client and scoped to its set where possible.
   const cards = shopItem.purchaseType === 'looster'
-    ? await validateAndCanonicalizeCards(body.cards, set)
+    ? normalizeCardNames(parseCardListInput(body.cards))
+    : []
+  const cardPrintings = shopItem.purchaseType === 'looster'
+    ? normalizeCardPrintings(body.cardPrintings, cards)
     : []
 
   if (shopItem.purchaseType !== 'looster') {
@@ -95,6 +98,7 @@ export default defineEventHandler(async (event) => {
           set,
           set_name: setName,
           cards,
+          cardPrintings,
           date: purchaseDate,
           priceEuro,
         },

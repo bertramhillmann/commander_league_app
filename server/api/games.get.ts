@@ -8,8 +8,14 @@ export default defineEventHandler(async (event) => {
   const isAdmin = Boolean(session && isAdminUser(config.admins, session.user))
   const query = getQuery(event)
   const includeHidden = isAdmin && String(query.includeHidden ?? '') === '1'
+  const afterId = String(query.afterId ?? '').trim()
+  const afterGameId = /^G\d+$/.test(afterId) ? afterId : ''
 
   await connectToDatabase()
-  const games = await Game.find(includeHidden ? {} : { hidden: { $ne: true } }).sort({ date: -1 }).lean()
+  const filter: Record<string, unknown> = includeHidden ? {} : { hidden: { $ne: true } }
+  if (afterGameId) {
+    filter.gameId = { $gt: afterGameId }
+  }
+  const games = await Game.find(filter).sort({ gameId: 1 }).lean()
   return games
 })

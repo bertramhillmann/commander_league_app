@@ -40,11 +40,11 @@ export const SHOP_ITEMS: ShopItem[] = [
   {
     id: 'commander_slot_3',
     name: 'Third Game Changer / Combo Slot',
-    description: 'Unlock a third slot for every commander you own. Available from the start of Season 3.',
+    description: 'Unlock a third slot for every commander you own. Available from the start of Season 4.',
     cost: 10,
     category: 'upgrade',
     purchaseType: 'commander_slot_3',
-    requiredStartedSeasons: 3,
+    requiredStartedSeasons: 4,
   },
 ]
 

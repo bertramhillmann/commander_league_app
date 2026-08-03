@@ -89,7 +89,7 @@
       </div>
 
       <div class="player__stats">
-        <div class="player__stat">
+        <div class="player__stat player__stat--rating">
           <button
             v-if="playerRankingSystem === 'player_rating_based'"
             type="button"
@@ -103,6 +103,16 @@
             <IconsPlayerRatingIcon :size="28" style="margin-right: 3px" />{{ fmt(totalScore) }}
           </span>
           <span class="player__stat-lbl">{{ totalScoreLabel }}</span>
+          <div v-if="profileRatingPieRows.length" class="player__rating-pie-popover">
+            <div class="player__rating-pie" :style="{ background: profileRatingPieBackground }">
+              <span>+{{ Math.round(profileRatingPieTotal) }}</span>
+            </div>
+            <div class="player__rating-pie-legend">
+              <span v-for="entry in profileRatingPieRows" :key="entry.key">
+                <i :style="{ background: entry.color }" />{{ entry.label }}
+              </span>
+            </div>
+          </div>
         </div>
         <div class="player__stat">
           <span class="player__stat-val">{{ fmt(player.totalPoints) }}</span>
@@ -200,15 +210,18 @@
           <ChartsLeagueRankTimeline
             v-if="activePlayerChart === 'league'"
             :points="leagueTimeline"
+            @point-click="openGameModal"
           />
           <ChartsPlayerRatingTimeline
             v-else-if="activePlayerChart === 'rating'"
             :points="playerRatingDetail?.history ?? []"
             :average-ratings="playerAverageRatingComparison"
+            @point-click="openGameModal"
           />
           <ChartsPlayerMatchTimeline
             v-else
             :points="playerMatchTimeline"
+            @point-click="openGameModal"
           />
         </div>
 
@@ -267,6 +280,7 @@
             :key="cmd.name"
             :id="commanderAnchorId(cmd.name)"
             class="cmd-row"
+            :class="{ 'cmd-row--retired': isCommanderRetired(cmd.name) }"
           >
             <!-- Full card image + level under it -->
             <div class="cmd-row__card-wrap">
@@ -391,6 +405,15 @@
                   @click.prevent="openCommanderDeck(cmd)"
                 >
                   View Deck
+                </button>
+                <button
+                  v-if="canEditCommanderSlots"
+                  type="button"
+                  class="cmd-row__deck-trigger"
+                  :class="{ 'cmd-row__deck-trigger--retired': isCommanderRetired(cmd.name) }"
+                  @click.prevent="setCommanderRetired(cmd.name, !isCommanderRetired(cmd.name))"
+                >
+                  {{ isCommanderRetired(cmd.name) ? 'Unretire' : 'Retire' }}
                 </button>
               </div>
 
@@ -669,6 +692,7 @@
                       :title="activeCommanderTimeline === 'mmr' ? 'MMR Rating Over Time' : 'Placements Over Time'"
                       class="cmd-row__timeline"
                       compact
+                      @point-click="openGameModal"
                     />
                   </div>
                 </div>
@@ -967,14 +991,29 @@
       top: `${commanderSlotEditor.popupY}px`,
     }"
   >
-    <input
+    <div class="cmd-row__slot-entry-toggle">
+      <button type="button" :class="{ 'is-active': commanderSlotEntryMode === 'manual' }" @click="setCommanderSlotEntryMode('manual')">Add cards</button>
+      <button type="button" :class="{ 'is-active': commanderSlotEntryMode === 'list' }" @click="setCommanderSlotEntryMode('list')">Comma list</button>
+    </div>
+    <textarea
+      v-if="commanderSlotEntryMode === 'list'"
       v-model="commanderSlotEditor.value"
-      type="text"
-      class="cmd-row__slot-input"
-      placeholder="Card name or card one, card two"
-      @keydown.enter.prevent="saveCommanderSlot(commanderSlotEditor.commanderName, commanderSlotEditor.slotIndex)"
+      class="cmd-row__slot-input cmd-row__slot-textarea"
+      placeholder="Card one, card two"
       @keydown.esc.prevent="closeCommanderSlotEditor()"
     />
+    <div v-else class="cmd-row__slot-manual-list">
+      <input
+        v-for="(cardName, index) in commanderSlotManualNames"
+        :key="index"
+        :value="cardName"
+        type="text"
+        class="cmd-row__slot-input"
+        placeholder="Card name"
+        @input="updateCommanderSlotManualName(index, ($event.target as HTMLInputElement).value)"
+        @keydown.esc.prevent="closeCommanderSlotEditor()"
+      />
+    </div>
     <div v-if="commanderSlotEditor.previewLoading" class="cmd-row__slot-preview-status">
       Checking Scryfall…
     </div>
@@ -1032,6 +1071,8 @@
     </span>
   </div>
 </Teleport>
+
+<GamesGameModal :game-id="openGameModalId" @close="closeGameModal" />
 </template>
 
 <script setup lang="ts">
@@ -1088,6 +1129,16 @@ const leagueChartLabel = computed(() => playerRankingSystem.value === 'player_ra
 const ratingSidebarOpen = ref(false)
 const detailSidebarMode = ref<'rating' | 'achievements' | 'xp'>('rating')
 
+const openGameModalId = ref<string | null>(null)
+
+function openGameModal(gameId: string) {
+  openGameModalId.value = gameId
+}
+
+function closeGameModal() {
+  openGameModalId.value = null
+}
+
 const { games, commanders, players, gameRecords, leagueSnapshots, commanderTitleSelections, standings } = useLeagueState()
 const { preloadCommanderImages, getCachedCommanderImage } = useImageCache()
 const isOwnProfile = computed(() =>
@@ -1118,6 +1169,46 @@ const playerRatingDetail = computed(() => {
     gameRecords: gameRecords.value,
     games: chronologicalGames.value,
   })
+})
+const profileRatingFactorColors: Partial<Record<PlayerRatingBreakdownKey, string>> = {
+  recentPerformance: '#9b6ee8',
+  allTimePerformance: '#6c3fc5',
+  seasonPoints: '#e8a030',
+  winRate: '#ffd36a',
+  commanderMMRContext: '#72b7ff',
+  averageCommanderMMR: '#4a8edb',
+  activityPoints: '#3cb87a',
+  achievements: '#d2a8ff',
+  clutch: '#e05050',
+  commanderDiversity: '#c27be8',
+}
+const profileRatingPieRows = computed(() => {
+  const factors = playerRatingDetail.value?.current?.factors
+  if (!factors || leagueSettings.value.playerRating.simpleMmr.enabled) return []
+  const totalWeight = Object.values(leagueSettings.value.playerRating.weights).reduce((sum, value) => sum + value, 0) || 1
+  const confidence = Math.min(1, Math.max(0.45, (player.value?.gamesPlayed ?? 0) / 12))
+  const span = leagueSettings.value.playerRating.maxRating - leagueSettings.value.playerRating.minRating
+  return Object.entries(factors)
+    .filter(([, factor]) => factor.weight > 0)
+    .map(([key, factor]) => ({
+      key,
+      label: key.replace(/([A-Z])/g, ' $1').trim(),
+      color: profileRatingFactorColors[key as PlayerRatingBreakdownKey] ?? '#aaa',
+      value: (factor.weightedContribution / totalWeight) * (0.2 + confidence) / 100 * span,
+    }))
+})
+const profileRatingPieTotal = computed(() => profileRatingPieRows.value.reduce((sum, row) => sum + row.value, 0))
+const profileRatingPieBackground = computed(() => {
+  if (profileRatingPieTotal.value <= 0) return 'rgba(255,255,255,.08)'
+  let angle = 0
+  return 'conic-gradient(' + profileRatingPieRows.value.map((row) => {
+    const segment = row.value / profileRatingPieTotal.value * 360
+    const gap = Math.min(3.5, segment * .38)
+    const end = angle + Math.max(0, segment - gap)
+    const value = row.color + ' ' + angle + 'deg ' + end + 'deg, rgba(12,8,21,.98) ' + end + 'deg ' + (angle + segment) + 'deg'
+    angle += segment
+    return value
+  }).join(',') + ')'
 })
 
 const allPlayerRatingDetails = computed(() => {
@@ -1154,9 +1245,13 @@ const currentLeagueRank = computed(() =>
 )
 const activePlayerChart = ref<'league' | 'rating' | 'results'>('league')
 const activeCommanderTimeline = ref<"mmr" | "placement">("mmr")
-const placementPrognosis = computed(() =>
-  buildPlacementPrognosis(playerId.value, chronologicalGames.value, gameRecords.value, players.value, commanders.value),
-)
+const placementPrognosis = computed(() => {
+  const prognosis = buildPlacementPrognosis(playerId.value, chronologicalGames.value, gameRecords.value, players.value, commanders.value)
+  return {
+    ...prognosis,
+    commanderSuggestions: prognosis.commanderSuggestions.filter((suggestion) => !isCommanderRetired(suggestion.commander)),
+  }
+})
 const playerSuggestion = computed(() =>
   playerRankingSystem.value === 'player_rating_based' && !leagueSettings.value.playerRating.simpleMmr.enabled
     ? buildRatingFocusSuggestion(playerRatingDetail.value, allPlayerRatingDetails.value)
@@ -1289,6 +1384,7 @@ type CommanderAverageMmrInsight = {
   plays: number
   currentMmr: number
   peakMmr: number
+  sourceMmr: number
   usedMmr: number
   contribution: number
   rank: number | null
@@ -1326,15 +1422,20 @@ const averageCommanderMmrInsight = computed(() => {
     .filter((entry) => entry.plays >= minimumGames)
     .map((entry) => ({
       ...entry,
-      usedMmr: usePeakCommanderMmr ? entry.peakMmr : entry.currentMmr,
+      sourceMmr: usePeakCommanderMmr ? entry.peakMmr : entry.currentMmr,
+      usedMmr: Math.max(
+        usePeakCommanderMmr ? entry.peakMmr : entry.currentMmr,
+        fallbackMmr,
+      ),
     }))
-    .sort((left, right) => right.usedMmr - left.usedMmr || left.commander.localeCompare(right.commander))
+    .sort((left, right) => right.sourceMmr - left.sourceMmr || left.commander.localeCompare(right.commander))
 
   const counted = eligible.slice(0, topCount)
   const countedNames = new Set(counted.map((entry) => entry.commander))
   const entries = Object.fromEntries(
     [...statsByCommander.values()].map((entry) => {
-      const usedMmr = usePeakCommanderMmr ? entry.peakMmr : entry.currentMmr
+      const sourceMmr = usePeakCommanderMmr ? entry.peakMmr : entry.currentMmr
+      const usedMmr = Math.max(sourceMmr, fallbackMmr)
       const rank = eligible.findIndex((eligibleEntry) => eligibleEntry.commander === entry.commander)
       const status: CommanderAverageMmrInsight['status'] = countedNames.has(entry.commander)
         ? 'counted'
@@ -1347,6 +1448,7 @@ const averageCommanderMmrInsight = computed(() => {
         plays: entry.plays,
         currentMmr: entry.currentMmr,
         peakMmr: entry.peakMmr,
+        sourceMmr,
         usedMmr,
         contribution: countedNames.has(entry.commander) ? usedMmr / topCount : 0,
         rank: rank >= 0 ? rank + 1 : null,
@@ -1500,9 +1602,13 @@ function getAverageCommanderMmrInsightText(commanderName: string) {
   const summary = averageCommanderMmrInsight.value
   if (!insight || !summary) return ''
 
-  if (insight.status === 'counted') {
-    return `Uses ${summary.usePeakCommanderMmr ? 'peak' : 'current'} commander MMR and contributes ${fmt(insight.contribution)} to the player's Avg Cmdr MMR.`
-  }
+ if (insight.status === 'counted') {
+    if (insight.sourceMmr < summary.fallbackMmr) {
+      return `Its ${summary.usePeakCommanderMmr ? 'peak' : 'current'} MMR is below the fallback, so the fallback MMR of ${fmt(summary.fallbackMmr)} is used for this slot.`
+    }
+
+   return `Uses ${summary.usePeakCommanderMmr ? 'peak' : 'current'} commander MMR and contributes ${fmt(insight.contribution)} to the player's Avg Cmdr MMR.`
+ }
 
   if (insight.status === 'eligible') {
     return `Eligible at ${insight.plays} games, but outside the top ${summary.topCount} commanders currently counted.`
@@ -1572,6 +1678,7 @@ type CommanderDeckLinkRecord = {
   archidektDeckId: string
   selectedTitle?: CommanderTitleId
   gameChangerSlots?: string[]
+  retired?: boolean
   updatedAt?: string
 }
 
@@ -1643,6 +1750,8 @@ const commanderSlotEditor = reactive({
   popupY: 0,
 })
 const commanderSlotPopupRef = ref<HTMLElement | null>(null)
+const commanderSlotEntryMode = ref<'manual' | 'list'>('manual')
+const commanderSlotManualNames = ref<string[]>([''])
 let commanderSlotPreviewTimer: ReturnType<typeof setTimeout> | null = null
 let commanderSlotPreviewToken = 0
 let commanderSlotPopupResizeObserver: ResizeObserver | null = null
@@ -1735,6 +1844,11 @@ function openCommanderSlotEditor(commanderName: string, slotIndex: number, event
   commanderSlotEditor.commanderName = commanderName
   commanderSlotEditor.slotIndex = slotIndex
   commanderSlotEditor.value = getCommanderSlotValue(commanderName, slotIndex)
+  commanderSlotEntryMode.value = 'manual'
+  commanderSlotManualNames.value = [
+    ...parseCommanderSlotNames(commanderSlotEditor.value),
+    '',
+  ]
   commanderSlotEditor.error = ''
   commanderSlotEditor.previewError = ''
   commanderSlotEditor.previewCards = []
@@ -1753,6 +1867,7 @@ function closeCommanderSlotEditor() {
   commanderSlotEditor.previewLoading = false
   commanderSlotEditor.previewError = ''
   commanderSlotEditor.previewCards = []
+  commanderSlotManualNames.value = ['']
   commanderSlotEditor.popupX = 0
   commanderSlotEditor.popupY = 0
 }
@@ -2096,6 +2211,53 @@ function applyCommanderDeckLinks(links: CommanderDeckLinkRecord[]) {
 
   commanderDeckLinks.value = nextLinks
   void hydrateCommanderSlotCards()
+}
+
+function isCommanderRetired(commanderName: string) {
+  // Retirement entries may intentionally have no Archidekt link, so use the
+  // deck entry lookup rather than the link-only helper.
+  return Boolean(getCommanderDeckEntry(commanderName)?.retired)
+}
+
+function setCommanderSlotEntryMode(mode: 'manual' | 'list') {
+  if (commanderSlotEntryMode.value === mode) return
+  if (mode === 'manual') {
+    commanderSlotManualNames.value = [...parseCommanderSlotNames(commanderSlotEditor.value), '']
+  } else {
+    commanderSlotEditor.value = commanderSlotManualNames.value.filter(Boolean).join(', ')
+  }
+  commanderSlotEntryMode.value = mode
+}
+
+function updateCommanderSlotManualName(index: number, value: string) {
+  commanderSlotManualNames.value[index] = value
+  if (
+    index === commanderSlotManualNames.value.length - 1
+    && value.trim()
+    && commanderSlotManualNames.value.filter((name) => name.trim()).length < 2
+  ) {
+    commanderSlotManualNames.value.push('')
+  }
+  commanderSlotEditor.value = commanderSlotManualNames.value.filter((name) => name.trim()).join(', ')
+}
+
+async function setCommanderRetired(commanderName: string, retired: boolean) {
+  try {
+    await $fetch('/api/commander-retirement', {
+      method: 'PUT',
+      body: { playerName: displayPlayerName.value, commanderName, retired },
+    })
+    const key = normalizeDeckIdentityKey(commanderName)
+    const existing = commanderDeckLinks.value[key]
+    commanderDeckLinks.value = {
+      ...commanderDeckLinks.value,
+      [key]: existing
+        ? { ...existing, retired }
+        : { playerName: displayPlayerName.value, commanderName, commanderNameKey: key, archidektUrl: '', archidektDeckId: '', retired },
+    }
+  } catch (error: any) {
+    titleErrors[commanderName] = error?.data?.statusMessage ?? 'Could not update commander retirement.'
+  }
 }
 
 async function loadCommanderDeckLinks(playerName: string) {
@@ -4173,6 +4335,11 @@ function getEdgeTooltipText(cmd: CommanderRow) {
   }
 }
 
+.cmd-row--retired .cmd-row__card-bg,
+.cmd-row--retired .cmd-row__card-img {
+  filter: grayscale(1) brightness(0.68);
+}
+
 // ── Mini achievement card ─────────────────────────────────────────────────────
 
 .mini-ach {
@@ -5104,6 +5271,77 @@ function getEdgeTooltipText(cmd: CommanderRow) {
   background: rgba(0, 0, 0, 0.28);
   color: $color-text;
   padding: 10px 12px;
+}
+
+.cmd-row__slot-entry-toggle {
+  display: inline-flex;
+  align-self: flex-start;
+  padding: 2px;
+  border: 1px solid rgba($color-primary-light, 0.22);
+  border-radius: 999px;
+
+  button {
+    border: 0;
+    border-radius: 999px;
+    padding: 4px 8px;
+    background: transparent;
+    color: $color-text-muted;
+    font: inherit;
+    font-size: 10px;
+    cursor: pointer;
+
+    &.is-active {
+      background: rgba($color-primary, 0.65);
+      color: $color-text;
+    }
+  }
+
+  &__stat--rating {
+    position: relative;
+
+    &:hover .player__rating-pie-popover {
+      opacity: 1;
+      transform: translate(-50%, calc(-100% - 10px));
+      pointer-events: auto;
+    }
+  }
+}
+
+.player__rating-pie-popover {
+  position: absolute;
+  left: 50%;
+  top: 0;
+  z-index: 20;
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  min-width: 250px;
+  padding: 10px;
+  border: 1px solid rgba($color-primary-light, .28);
+  border-radius: $border-radius-md;
+  background: rgba(12, 8, 21, .98);
+  box-shadow: $shadow-lg;
+  opacity: 0;
+  pointer-events: none;
+  transform: translate(-50%, calc(-100% - 4px));
+  transition: opacity $transition-fast, transform $transition-fast;
+}
+.player__rating-pie { position: relative; width: 80px; aspect-ratio: 1; border-radius: 50%; display: grid; place-items: center; flex: 0 0 80px; }
+.player__rating-pie::after { content: ''; position: absolute; width: 38px; height: 38px; border-radius: 50%; background: rgba(12,8,21,.98); }
+.player__rating-pie span { position: relative; z-index: 1; font-size: 11px; font-weight: $font-weight-bold; }
+.player__rating-pie-legend { display: grid; gap: 3px; font-size: 9px; }
+.player__rating-pie-legend span { display: flex; align-items: center; gap: 5px; }
+.player__rating-pie-legend i { width: 7px; height: 7px; border-radius: 50%; }
+
+.cmd-row__slot-manual-list {
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+}
+
+.cmd-row__slot-textarea {
+  min-height: 72px;
+  resize: vertical;
 }
 
 @keyframes deck-drawer-spin {

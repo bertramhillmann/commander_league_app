@@ -3,7 +3,7 @@
     <div class="commanders-page__header">
       <div>
         <h1 class="commanders-page__title">Commanders</h1>
-        <p class="commanders-page__subtitle">League-wide commander performance across all players.</p>
+        <p class="commanders-page__subtitle">Player-specific commander deck performance.</p>
       </div>
 
       <div class="commanders-page__controls">
@@ -56,7 +56,7 @@
           <div class="commander-row__header">
             <NuxtLink
               class="commander-row__name"
-              :to="`/commanders/${encodeURIComponent(row.name)}`"
+              :to="playerCommanderRoute(row)"
             >
               {{ row.name }}
             </NuxtLink>
@@ -171,6 +171,7 @@ interface LeaderRow {
 }
 
 interface CommanderRow {
+  playerName: string
   name: string
   gamesPlayed: number
   wins: number
@@ -216,6 +217,7 @@ const commanderRows = computed((): CommanderRow[] => {
 
       const leaders = Object.entries(gameRecords.value)
         .map(([playerName, recordsByGame]) => {
+          if (playerName !== commander.playerName) return null
           const records = Object.values(recordsByGame).filter((record) => record.commander === commander.name)
           if (records.length === 0) return null
 
@@ -240,6 +242,7 @@ const commanderRows = computed((): CommanderRow[] => {
         .filter((entry): entry is LeaderRow => !!entry)
 
       return {
+        playerName: commander.playerName,
         name: commander.name,
         gamesPlayed: commander.gamesPlayed,
         wins: commander.wins,
@@ -373,6 +376,13 @@ function metricsLabel(row: CommanderRow) {
   const leader = selectedLeader(row)
   if (!leader) return 'Best pairing for this commander'
   return `${leader.playerName}: ${leader.plays} plays · ${fmt(leader.avgPoints)} avg pts · ${leader.winRate}% wins`
+}
+
+function playerCommanderRoute(row: CommanderRow) {
+  return {
+    path: '/players/' + encodeURIComponent(row.playerName),
+    hash: '#commander-' + row.name.trim().toLowerCase().replace(/[\s,]+/g, ''),
+  }
 }
 
 function fmt(n: number) {

@@ -24,7 +24,7 @@
           </article>
           <article class="shop-stat">
             <span class="shop-stat__label">Purchases</span>
-            <strong class="shop-stat__value">{{ purchases.length }}</strong>
+            <strong class="shop-stat__value">{{ ownPurchaseCount }}</strong>
           </article>
         </div>
       </header>
@@ -56,8 +56,10 @@
             v-for="item in shopItems"
             :key="item.id"
             class="shop-item"
+            :class="{ 'shop-item--locked': isShopItemActionDisabled(item), 'shop-item--disabled': isShopItemActionDisabled(item) }"
             role="button"
-            tabindex="0"
+            :tabindex="isShopItemActionDisabled(item) ? -1 : 0"
+            :aria-disabled="isShopItemActionDisabled(item)"
             @click="openShopItem(item)"
             @keydown.enter="openShopItem(item)"
             @keydown.space.prevent="openShopItem(item)"
@@ -120,8 +122,22 @@
             <h2 class="shop-history__title">Purchase History</h2>
             <p class="shop-history__subtitle">Every stored purchase, newest first. Only admins can edit saved entries.</p>
           </div>
-          <span class="shop-history__count">{{ purchases.length }}</span>
+          <span class="shop-history__count">{{ filteredPurchases.length }}</span>
         </header>
+
+        <div class="shop-history__filter-bar">
+          <span class="shop-history__filter-count">{{ filteredPurchases.length }} purchase{{ filteredPurchases.length === 1 ? '' : 's' }}</span>
+          <div class="shop-history__filter-actions">
+            <select v-model="selectedHistoryPlayer" class="shop-history__filter">
+              <option value="">All players</option>
+              <option v-for="playerName in purchasePlayerOptions" :key="playerName" :value="playerName">{{ playerName }}</option>
+            </select>
+            <select v-model="selectedHistorySet" class="shop-history__filter">
+              <option value="">All sets</option>
+              <option v-for="set in purchaseSetOptions" :key="set.code" :value="set.code">{{ set.label }}</option>
+            </select>
+          </div>
+        </div>
 
         <div v-if="isAdmin" class="shop-import">
           <div class="shop-import__copy">
@@ -150,6 +166,7 @@
 
         <div v-if="loadingPurchases" class="shop-empty">Loading purchases...</div>
         <div v-else-if="purchases.length === 0" class="shop-empty">No purchases saved yet.</div>
+        <div v-else-if="filteredPurchases.length === 0" class="shop-empty">No purchases match these filters.</div>
         <div v-else class="purchase-list">
           <div v-if="loadingPurchaseCardImages" class="shop-sync">
             <div class="shop-sync__meta">
@@ -160,47 +177,7 @@
               <span class="shop-sync__bar-fill" :style="{ width: `${scryfallCardProgressPercent}%` }" />
             </div>
           </div>
-          <article v-for="purchase in purchases" :key="purchase.id" class="purchase-card">
-            <template v-if="editingPurchaseId === purchase.id">
-              <div class="purchase-card__edit-grid">
-                <label class="form-field">
-                  <span class="form-label">Player</span>
-                  <input :value="editingPurchase.playerName" class="form-input" readonly />
-                </label>
-                <label class="form-field">
-                  <span class="form-label">Date</span>
-                  <input v-model="editingPurchase.date" type="date" class="form-input" required />
-                </label>
-                <label class="form-field">
-                  <span class="form-label">Set Code</span>
-                  <input v-model="editingPurchase.set" type="text" class="form-input" placeholder="e.g. DMU" required />
-                </label>
-                <label class="form-field">
-                  <span class="form-label">Set Name</span>
-                  <input v-model="editingPurchase.setName" type="text" class="form-input" placeholder="e.g. Dominaria United" required />
-                </label>
-                <label class="form-field">
-                  <span class="form-label">Price In Euro</span>
-                  <input v-model.number="editingPurchase.priceEuro" type="number" min="0" step="0.01" class="form-input" required />
-                </label>
-              </div>
-
-              <label class="form-field">
-                <span class="form-label">Cards</span>
-                <textarea v-model="editingPurchase.cardsText" class="form-input form-textarea" />
-              </label>
-
-              <div class="purchase-card__actions">
-                <button type="button" class="btn btn--primary btn--sm" :disabled="savingEdit" @click="saveEditPurchase">
-                  {{ savingEdit ? 'Saving...' : 'Save Changes' }}
-                </button>
-                <button type="button" class="btn btn--ghost btn--sm" :disabled="savingEdit" @click="cancelEditPurchase">
-                  Cancel
-                </button>
-              </div>
-            </template>
-
-            <template v-else>
+          <article v-for="purchase in filteredPurchases" :key="purchase.id" class="purchase-card">
               <div class="purchase-card__top">
                 <div class="purchase-card__headline">
                   <a
@@ -264,9 +241,9 @@
                   v-for="card in getSortedPurchaseCards(purchase)"
                   :key="`${purchase.id}-${card}`"
                   class="purchase-card__chip"
-                  :href="purchaseCardImages[getPurchaseCardLookupKey(purchase, card)]?.scryfallUrl || undefined"
-                  :target="purchaseCardImages[getPurchaseCardLookupKey(purchase, card)]?.scryfallUrl ? '_blank' : undefined"
-                  :rel="purchaseCardImages[getPurchaseCardLookupKey(purchase, card)]?.scryfallUrl ? 'noopener noreferrer' : undefined"
+                   :href="getPurchaseCardScryfallUrl(purchase, card) || undefined"
+                   :target="getPurchaseCardScryfallUrl(purchase, card) ? '_blank' : undefined"
+                   :rel="getPurchaseCardScryfallUrl(purchase, card) ? 'noopener noreferrer' : undefined"
                 >
                   <img
                     v-if="purchaseCardImages[getPurchaseCardLookupKey(purchase, card)]?.smallUrl"
@@ -302,7 +279,6 @@
                   {{ deletingPurchaseId === purchase.id ? 'Deleting...' : 'Delete' }}
                 </button>
               </div>
-            </template>
           </article>
         </div>
       </section>
@@ -319,7 +295,7 @@
 
             <div class="purchase-modal__header">
               <p class="purchase-modal__eyebrow">Register Purchase</p>
-              <h2 id="modal-title" class="purchase-modal__title">Looster Pack</h2>
+              <h2 id="modal-title" class="purchase-modal__title">{{ editingPurchaseId ? 'Edit Looster' : 'Looster Pack' }}</h2>
               <p class="purchase-modal__subtitle">
                 {{ isAdmin ? 'Admins can assign purchases to any player.' : 'Purchases are saved to your own player record.' }}
               </p>
@@ -332,7 +308,7 @@
               <div class="modal-form__grid">
                 <label class="form-field">
                   <span class="form-label">Player</span>
-                  <select v-if="isAdmin" v-model="form.playerName" class="form-input">
+                  <select v-if="isAdmin && !editingPurchaseId" v-model="form.playerName" class="form-input">
                     <option v-for="name in selectablePlayers" :key="name" :value="name">{{ name }}</option>
                   </select>
                   <input v-else :value="form.playerName" class="form-input" readonly />
@@ -344,13 +320,13 @@
                 </label>
 
                 <label class="form-field">
-                  <span class="form-label">Set Code</span>
-                  <input v-model="form.set" type="text" class="form-input" placeholder="e.g. DMU" spellcheck="false" required />
+                  <span class="form-label">Set Code (optional)</span>
+                  <input v-model="form.set" type="text" class="form-input" placeholder="e.g. OTJ" spellcheck="false" />
                 </label>
 
                 <label class="form-field">
-                  <span class="form-label">Set Name</span>
-                  <input v-model="form.setName" type="text" class="form-input" placeholder="e.g. Dominaria United" required />
+                  <span class="form-label">Set Name (optional)</span>
+                  <input v-model="form.setName" type="text" class="form-input" placeholder="e.g. Outlaws of Thunder Junction" />
                 </label>
 
                 <label class="form-field">
@@ -359,45 +335,115 @@
                 </label>
               </div>
 
-              <label class="form-field">
-                <span class="form-label">Cards</span>
+              <section class="card-entry">
+                <div class="card-entry__header">
+                  <span class="form-label">Cards (optional)</span>
+                  <div class="card-entry__mode" role="group" aria-label="Card entry mode">
+                    <button
+                      type="button"
+                      class="card-entry__mode-button"
+                      :class="{ 'card-entry__mode-button--active': cardEntryMode === 'list' }"
+                      @click="setCardEntryMode('list')"
+                    >
+                      Comma-separated list
+                    </button>
+                    <button
+                      type="button"
+                      class="card-entry__mode-button"
+                      :class="{ 'card-entry__mode-button--active': cardEntryMode === 'manual' }"
+                      @click="setCardEntryMode('manual')"
+                    >
+                      Add cards manually
+                    </button>
+                  </div>
+                </div>
+
                 <textarea
+                  v-if="cardEntryMode === 'list'"
                   v-model="form.cardsText"
                   class="form-input form-textarea"
                   placeholder="Enter a comma-separated card list"
-                  required
                 />
-              </label>
 
-              <div class="modal-balance">
+                <div v-else class="card-entry__manual">
+                  <p class="card-entry__hint">Cards are checked 1.5 seconds after you stop typing. Click a preview to choose another printing.</p>
+                  <div v-for="(entry, index) in manualCardEntries" :key="entry.id" class="card-entry__row">
+                    <div class="card-entry__input-wrap">
+                      <input
+                        :value="entry.name"
+                        type="text"
+                        class="form-input"
+                        placeholder="Card name"
+                        @input="updateManualCardName(index, ($event.target as HTMLInputElement).value)"
+                      />
+                      <span v-if="entry.loading" class="card-entry__spinner" aria-label="Checking Scryfall" />
+                    </div>
+                    <button
+                      v-if="entry.name.trim()"
+                      type="button"
+                      class="card-entry__preview"
+                      :class="{ 'card-entry__preview--missing': !entry.card, 'card-entry__preview--loading': entry.loading }"
+                      :disabled="entry.loading || entry.printingsLoading"
+                      @click="openPrintingPicker(index)"
+                    >
+                      <img v-if="entry.card" :src="getCardImageUrl(entry.card, 'small') || undefined" :alt="entry.card.name" />
+                      <span v-else>{{ entry.loading ? 'Checking…' : 'Card or printing not found — choose printing' }}</span>
+                    </button>
+                  </div>
+                </div>
+              </section>
+
+              <div v-if="!editingPurchaseId" class="modal-balance">
                 <div class="modal-balance__item">
-                  <span class="modal-balance__label">Earned</span>
-                  <strong class="modal-balance__value">{{ fmt(selectedEarnedBalance) }}</strong>
+                  <span class="modal-balance__label">Current L-Points</span>
+                  <strong class="modal-balance__value">{{ fmt(selectedRemainingBalance) }}</strong>
                 </div>
                 <div class="modal-balance__item">
-                  <span class="modal-balance__label">Spent</span>
-                  <strong class="modal-balance__value">{{ fmt(selectedSpentBalance) }}</strong>
+                  <span class="modal-balance__label">Cost</span>
+                  <strong class="modal-balance__value">-{{ fmt(selectedShopItemCost) }}</strong>
                 </div>
                 <div class="modal-balance__item">
-                  <span class="modal-balance__label">After Purchase</span>
+                  <span class="modal-balance__label">After Cost</span>
                   <strong class="modal-balance__value" :class="{ 'modal-balance__value--danger': projectedRemainingBalance < 0 }">
                     {{ fmt(projectedRemainingBalance) }}
                   </strong>
                 </div>
               </div>
 
-              <p v-if="projectedRemainingBalance < 0" class="modal-warning">
+              <p v-if="!editingPurchaseId && projectedRemainingBalance < 0" class="modal-warning">
                 This player does not currently have enough L-Points for a Looster at the configured cost.
               </p>
 
               <div class="modal-form__actions">
                 <button type="button" class="btn btn--ghost btn--sm" @click="closePurchaseModal">Cancel</button>
-                <button type="submit" class="modal-confirm-btn" :disabled="savingPurchase || projectedRemainingBalance < 0">
-                  {{ savingPurchase ? 'Processing...' : 'Confirm Purchase' }}
+                <button type="submit" class="modal-confirm-btn" :disabled="savingPurchase || (!editingPurchaseId && projectedRemainingBalance < 0)">
+                  {{ savingPurchase ? 'Processing...' : editingPurchaseId ? 'Save Changes' : 'Confirm Purchase' }}
                 </button>
               </div>
 
             </form>
+
+            <div v-if="printingPicker.open" class="printing-picker" role="dialog" aria-label="Choose card printing">
+              <div class="printing-picker__backdrop" @click="closePrintingPicker" />
+              <section class="printing-picker__panel">
+                <button type="button" class="printing-picker__close" aria-label="Close printing chooser" @click="closePrintingPicker">✕</button>
+                <h3>Choose a printing</h3>
+                <p v-if="printingPicker.loading">Loading available printings…</p>
+                <p v-else-if="printingPicker.printings.length === 0">No printings were found for this card.</p>
+                <div v-else class="printing-picker__grid">
+                  <button
+                    v-for="card in printingPicker.printings"
+                    :key="card.id"
+                    type="button"
+                    class="printing-picker__card"
+                    @click="selectPrinting(card)"
+                  >
+                    <img :src="getCardImageUrl(card, 'normal') || undefined" :alt="`${card.name} — ${card.set_name}`" />
+                    <span>{{ card.set.toUpperCase() }} · {{ card.set_name }}</span>
+                  </button>
+                </div>
+              </section>
+            </div>
           </div>
         </div>
       </Transition>
@@ -406,10 +452,10 @@
 </template>
 
 <script setup lang="ts">
-import { computed, onMounted, reactive, ref, watch } from 'vue'
-import { fetchCardsByIdentifiers, fetchSetByCode, getCardImageUrl } from '~/services/scryfallService'
+import { computed, onBeforeUnmount, onMounted, reactive, ref, watch } from 'vue'
+import { fetchCardPrintingsByName, fetchCardsByIdentifiers, fetchCardsByName, fetchSetByCode, getCardImageUrl } from '~/services/scryfallService'
 import { formatPlayerName } from '~/utils/playerNames'
-import type { LoosterPurchaseRecord } from '~/utils/loosterPurchases'
+import type { LoosterCardPrinting, LoosterPurchaseRecord } from '~/utils/loosterPurchases'
 import type { ScryfallCard } from '~/services/scryfallService'
 import { getShopItems, getStartedSeasonCount, type ShopItem } from '~/utils/shopOptions'
 
@@ -443,6 +489,14 @@ type PurchaseFormAutofillState = {
   priceEuro: number | null
 }
 
+type ManualCardEntry = {
+  id: number
+  name: string
+  card: ScryfallCard | null
+  loading: boolean
+  printingsLoading: boolean
+}
+
 const today = new Date().toISOString().slice(0, 10)
 
 const { user, isAdmin, ensureSession } = useAuth()
@@ -462,13 +516,14 @@ const { data: allPlayers } = await useFetch<string[]>('/api/players')
 const showModal = ref(false)
 const viewMode = ref<'shop' | 'history'>('shop')
 const purchases = ref<LoosterPurchaseRecord[]>([])
+const selectedHistoryPlayer = ref('')
+const selectedHistorySet = ref('')
 const purchaseCardImages = ref<Record<string, PurchaseCardImage>>({})
 const purchaseCardSortMeta = ref<Record<string, PurchaseCardSortMeta>>({})
 const purchaseSetImages = ref<Record<string, PurchaseSetImage>>({})
 const loadingPurchases = ref(false)
 const loadingPurchaseCardImages = ref(false)
 const savingPurchase = ref(false)
-const savingEdit = ref(false)
 const importingPurchases = ref(false)
 const deletingPurchaseId = ref('')
 const successMessage = ref('')
@@ -490,17 +545,20 @@ const form = reactive<PurchaseFormState>({
   priceEuro: null,
   cardsText: '',
 })
+const cardEntryMode = ref<'list' | 'manual'>('list')
+const manualCardEntries = ref<ManualCardEntry[]>([])
+const printingPicker = reactive({
+  open: false,
+  entryIndex: -1,
+  loading: false,
+  printings: [] as ScryfallCard[],
+})
+const formCardPrintings = ref<LoosterCardPrinting[]>([])
+let nextManualCardEntryId = 1
+let manualCardLookupTimer: ReturnType<typeof setTimeout> | null = null
+let manualCardLookupRequestId = 0
 
 const selectedShopItemId = ref<string>('looster')
-
-const editingPurchase = reactive<PurchaseFormState>({
-  playerName: '',
-  date: today,
-  set: '',
-  setName: '',
-  priceEuro: null,
-  cardsText: '',
-})
 
 const currentPlayerName = computed(() => (user.value ? formatPlayerName(user.value) : ''))
 const selectablePlayers = computed(() => {
@@ -510,6 +568,46 @@ const selectablePlayers = computed(() => {
   ])
 
   return Array.from(merged).sort((a, b) => a.localeCompare(b))
+})
+const purchasePlayerOptions = computed(() =>
+  [...new Set(
+    purchases.value
+      .filter((purchase) => !selectedHistorySet.value || purchase.set.trim().toUpperCase() === selectedHistorySet.value)
+      .map((purchase) => purchase.playerName)
+      .filter(Boolean),
+  )]
+    .sort((left, right) => left.localeCompare(right)),
+)
+const purchaseSetOptions = computed(() => {
+  const sets = new Map<string, string>()
+  for (const purchase of purchases.value.filter((purchase) =>
+    !selectedHistoryPlayer.value || purchase.playerName === selectedHistoryPlayer.value,
+  )) {
+    const code = purchase.set.trim().toUpperCase()
+    if (!code) continue
+    sets.set(code, purchase.set_name.trim() || code)
+  }
+  return [...sets.entries()]
+    .map(([code, name]) => ({ code, label: name === code ? code : `${code} — ${name}` }))
+    .sort((left, right) => left.label.localeCompare(right.label))
+})
+const filteredPurchases = computed(() =>
+  purchases.value.filter((purchase) =>
+    (!selectedHistoryPlayer.value || purchase.playerName === selectedHistoryPlayer.value)
+    && (!selectedHistorySet.value || purchase.set.trim().toUpperCase() === selectedHistorySet.value),
+  ),
+)
+
+watch(purchasePlayerOptions, (options) => {
+  if (selectedHistoryPlayer.value && !options.includes(selectedHistoryPlayer.value)) {
+    selectedHistoryPlayer.value = ''
+  }
+})
+
+watch(purchaseSetOptions, (options) => {
+  if (selectedHistorySet.value && !options.some((set) => set.code === selectedHistorySet.value)) {
+    selectedHistorySet.value = ''
+  }
 })
 
 const loosterCost = computed(() => settings.value.shop.loosterCost)
@@ -573,6 +671,9 @@ const selectedEarnedBalance = computed(() => earnedByPlayer.value.get(form.playe
 const selectedSpentBalance = computed(() => spentByPlayer.value.get(form.playerName) ?? 0)
 const selectedRemainingBalance = computed(() => round3(selectedEarnedBalance.value - selectedSpentBalance.value))
 const projectedRemainingBalance = computed(() => round3(selectedRemainingBalance.value - selectedShopItemCost.value))
+const ownPurchaseCount = computed(() =>
+  purchases.value.filter((purchase) => purchase.playerName === currentPlayerName.value).length,
+)
 const ownedUpgradeTypes = computed(() => new Set(
   purchases.value
     .filter((purchase) => purchase.playerName === currentPlayerName.value)
@@ -601,11 +702,19 @@ watch(
     const normalizedSetCode = normalizeSetCode(nextSet)
     form.set = nextSet.trim().toUpperCase()
     void syncFormSetDetails(normalizedSetCode)
+    if (cardEntryMode.value === 'manual' && manualCardEntries.value.some((entry) => entry.name.trim())) {
+      scheduleManualCardLookup()
+    }
   },
 )
 
 onMounted(() => {
+  resetManualCardEntries()
   void loadPurchases()
+})
+
+onBeforeUnmount(() => {
+  if (manualCardLookupTimer) clearTimeout(manualCardLookupTimer)
 })
 
 function openPurchaseModal() {
@@ -635,6 +744,7 @@ function getShopItemBadge(item: ShopItem) {
 
 function getShopItemButtonLabel(item: ShopItem) {
   if (isShopItemOwned(item)) return 'Owned'
+  if (!canAffordShopItem(item)) return 'Not enough L-Points'
   if (item.purchaseType === 'looster') return 'Purchase'
   return 'Unlock'
 }
@@ -644,6 +754,7 @@ function isShopItemActionDisabled(item: ShopItem) {
 }
 
 function openShopItem(item: ShopItem) {
+  if (isShopItemActionDisabled(item)) return
   selectedShopItemId.value = item.id
 
   if (item.purchaseType === 'looster') {
@@ -656,6 +767,8 @@ function openShopItem(item: ShopItem) {
 
 function closePurchaseModal() {
   showModal.value = false
+  closePrintingPicker()
+  if (editingPurchaseId.value) cancelEditPurchase()
 }
 
 async function submitPurchaseAndClose() {
@@ -733,7 +846,7 @@ async function loadPurchaseCardImages() {
     purchases.value
       .flatMap((purchase) => purchase.cards.map((card) => ({
         card,
-        setCode: purchase.set,
+        setCode: getPurchaseCardSetCode(purchase, card),
       })))
       .filter((entry) => entry.card)
       .map((entry) => [getPurchaseCardLookupKeyByValues(entry.setCode, entry.card), entry] as const),
@@ -908,6 +1021,131 @@ function getSingleColorRank(color?: string) {
   }
 }
 
+function createManualCardEntry(name = ''): ManualCardEntry {
+  return {
+    id: nextManualCardEntryId++,
+    name,
+    card: null,
+    loading: false,
+    printingsLoading: false,
+  }
+}
+
+function resetManualCardEntries() {
+  if (manualCardLookupTimer) clearTimeout(manualCardLookupTimer)
+  manualCardLookupTimer = null
+  manualCardEntries.value = [createManualCardEntry()]
+}
+
+function setCardEntryMode(mode: 'list' | 'manual') {
+  if (cardEntryMode.value === mode) return
+
+  if (mode === 'manual') {
+    const names = form.cardsText
+      .split(/[,\n\r]+/)
+      .map((name) => name.trim())
+      .filter(Boolean)
+    manualCardEntries.value = [...names.map((name) => createManualCardEntry(name)), createManualCardEntry()]
+    if (names.length > 0) scheduleManualCardLookup()
+  } else {
+    form.cardsText = manualCardEntries.value
+      .map((entry) => entry.name.trim())
+      .filter(Boolean)
+      .join(', ')
+  }
+
+  cardEntryMode.value = mode
+}
+
+function updateManualCardName(index: number, name: string) {
+  const entry = manualCardEntries.value[index]
+  if (!entry) return
+  entry.name = name
+  entry.card = null
+
+  const last = manualCardEntries.value.at(-1)
+  if (last?.name.trim()) manualCardEntries.value.push(createManualCardEntry())
+  scheduleManualCardLookup()
+}
+
+function scheduleManualCardLookup() {
+  if (manualCardLookupTimer) clearTimeout(manualCardLookupTimer)
+  const namedEntries = manualCardEntries.value.filter((entry) => entry.name.trim())
+  for (const entry of namedEntries) entry.loading = true
+
+  manualCardLookupTimer = setTimeout(() => {
+    void resolveManualCards()
+  }, 1500)
+}
+
+async function resolveManualCards() {
+  const requestId = ++manualCardLookupRequestId
+  const namedEntries = manualCardEntries.value.filter((entry) => entry.name.trim())
+  if (namedEntries.length === 0) return
+
+  const names = [...new Set(namedEntries.map((entry) => entry.name.trim()))]
+  const results = await fetchCardsByName(names, { setCode: form.set.trim() || undefined }).catch(() => new Map<string, ScryfallCard | null>())
+  if (requestId !== manualCardLookupRequestId) return
+
+  for (const entry of namedEntries) {
+    entry.card = results.get(entry.name.trim()) ?? null
+    entry.loading = false
+  }
+}
+
+async function openPrintingPicker(index: number) {
+  const entry = manualCardEntries.value[index]
+  if (!entry?.name.trim()) return
+
+  printingPicker.open = true
+  printingPicker.entryIndex = index
+  printingPicker.loading = true
+  printingPicker.printings = []
+  entry.printingsLoading = true
+
+  const printings = await fetchCardPrintingsByName(entry.name.trim())
+  if (printingPicker.entryIndex === index) {
+    printingPicker.printings = printings
+    printingPicker.loading = false
+  }
+  entry.printingsLoading = false
+}
+
+function closePrintingPicker() {
+  printingPicker.open = false
+  printingPicker.entryIndex = -1
+  printingPicker.loading = false
+  printingPicker.printings = []
+}
+
+function selectPrinting(card: ScryfallCard) {
+  const entry = manualCardEntries.value[printingPicker.entryIndex]
+  if (entry) {
+    entry.name = card.name
+    entry.card = card
+  }
+  closePrintingPicker()
+}
+
+function getSubmittedCards() {
+  if (cardEntryMode.value === 'list') return form.cardsText
+  return manualCardEntries.value
+    .map((entry) => entry.name.trim())
+    .filter(Boolean)
+}
+
+function getSubmittedCardPrintings(): LoosterCardPrinting[] {
+  if (cardEntryMode.value === 'list') return formCardPrintings.value
+
+  return manualCardEntries.value
+    .filter((entry) => entry.name.trim() && entry.card?.scryfall_uri)
+    .map((entry) => ({
+      name: entry.name.trim(),
+      scryfallUrl: entry.card!.scryfall_uri,
+      setCode: entry.card!.set,
+    }))
+}
+
 async function submitPurchase() {
   successMessage.value = ''
   errorMessage.value = ''
@@ -920,8 +1158,11 @@ async function submitPurchase() {
   savingPurchase.value = true
 
   try {
-    await $fetch(`/api/players/${encodeURIComponent(form.playerName)}/purchases`, {
-      method: 'POST',
+    const isEditing = Boolean(editingPurchaseId.value)
+    await $fetch(isEditing
+      ? `/api/players/${encodeURIComponent(form.playerName)}/purchases/${encodeURIComponent(editingPurchaseId.value)}`
+      : `/api/players/${encodeURIComponent(form.playerName)}/purchases`, {
+      method: isEditing ? 'PUT' : 'POST',
       body: {
         name: 'Looster',
         type: 'looster',
@@ -929,15 +1170,21 @@ async function submitPurchase() {
         set: form.set,
         set_name: form.setName,
         priceEuro: form.priceEuro,
-        cards: form.cardsText,
+        cards: getSubmittedCards(),
+        cardPrintings: getSubmittedCardPrintings(),
       },
     })
 
-    successMessage.value = 'Purchase saved.'
+    successMessage.value = isEditing ? 'Purchase updated.' : 'Purchase saved.'
+    if (isEditing) cancelEditPurchase()
     resetPurchaseFormSetFields()
     form.cardsText = ''
+    formCardPrintings.value = []
+    resetManualCardEntries()
     form.date = today
     await loadPurchases()
+    // Best-effort only: display card art from the selected set when Scryfall can find it.
+    void ensurePurchaseAssetsLoaded()
   } catch (error: any) {
     errorMessage.value = error?.data?.statusMessage ?? 'Failed to save purchase.'
   } finally {
@@ -947,53 +1194,30 @@ async function submitPurchase() {
 
 function startEditPurchase(purchase: LoosterPurchaseRecord) {
   editingPurchaseId.value = purchase.id
-  editingPurchase.playerName = purchase.playerName
-  editingPurchase.date = purchase.date
-  editingPurchase.set = purchase.set
-  editingPurchase.setName = purchase.set_name
-  editingPurchase.priceEuro = purchase.priceEuro
-  editingPurchase.cardsText = purchase.cards.join(', ')
+  form.playerName = purchase.playerName
+  form.date = purchase.date
+  form.set = purchase.set
+  form.setName = purchase.set_name
+  form.priceEuro = purchase.priceEuro
+  form.cardsText = purchase.cards.join(', ')
+  formCardPrintings.value = purchase.cardPrintings ?? []
+  cardEntryMode.value = 'manual'
+  manualCardEntries.value = [...purchase.cards.map((card) => createManualCardEntry(card)), createManualCardEntry()]
+  if (purchase.cards.length > 0) scheduleManualCardLookup()
+  errorMessage.value = ''
+  showModal.value = true
 }
 
 function cancelEditPurchase() {
   editingPurchaseId.value = ''
-  editingPurchase.playerName = ''
-  editingPurchase.date = today
-  editingPurchase.set = ''
-  editingPurchase.setName = ''
-  editingPurchase.priceEuro = null
-  editingPurchase.cardsText = ''
-}
-
-async function saveEditPurchase() {
-  if (!editingPurchaseId.value) return
-
-  successMessage.value = ''
-  errorMessage.value = ''
-  savingEdit.value = true
-
-  try {
-    await $fetch(`/api/players/${encodeURIComponent(editingPurchase.playerName)}/purchases/${encodeURIComponent(editingPurchaseId.value)}`, {
-      method: 'PUT',
-      body: {
-        name: 'Looster',
-        type: 'looster',
-        date: editingPurchase.date,
-        set: editingPurchase.set,
-        set_name: editingPurchase.setName,
-        priceEuro: editingPurchase.priceEuro,
-        cards: editingPurchase.cardsText,
-      },
-    })
-
-    successMessage.value = 'Purchase updated.'
-    cancelEditPurchase()
-    await loadPurchases()
-  } catch (error: any) {
-    errorMessage.value = error?.data?.statusMessage ?? 'Failed to update purchase.'
-  } finally {
-    savingEdit.value = false
-  }
+  form.date = today
+  form.set = ''
+  form.setName = ''
+  form.priceEuro = null
+  form.cardsText = ''
+  formCardPrintings.value = []
+  cardEntryMode.value = 'list'
+  resetManualCardEntries()
 }
 
 async function deletePurchase(purchase: LoosterPurchaseRecord) {
@@ -1102,7 +1326,26 @@ function getPurchaseCardLookupKeyByValues(setCode: string, cardName: string) {
 }
 
 function getPurchaseCardLookupKey(purchase: LoosterPurchaseRecord | undefined, cardName: string) {
-  return getPurchaseCardLookupKeyByValues(purchase?.set ?? '', cardName)
+  return getPurchaseCardLookupKeyByValues(
+    purchase ? getPurchaseCardSetCode(purchase, cardName) : '',
+    cardName,
+  )
+}
+
+function getPurchaseCardSetCode(purchase: LoosterPurchaseRecord, cardName: string) {
+  const storedPrinting = purchase.cardPrintings?.find((printing) =>
+    printing.name.trim().toLowerCase() === cardName.trim().toLowerCase(),
+  )
+  return storedPrinting?.setCode || purchase.set
+}
+
+function getPurchaseCardScryfallUrl(purchase: LoosterPurchaseRecord, cardName: string) {
+  const storedPrinting = purchase.cardPrintings?.find((printing) =>
+    printing.name.trim().toLowerCase() === cardName.trim().toLowerCase(),
+  )
+  return storedPrinting?.scryfallUrl
+    ?? purchaseCardImages.value[getPurchaseCardLookupKey(purchase, cardName)]?.scryfallUrl
+    ?? ''
 }
 
 function getMostRecentPriceForSet(setCode: string) {
@@ -1385,7 +1628,7 @@ async function syncFormSetDetails(setCode: string) {
   transition: transform $transition-base, border-color $transition-base, box-shadow $transition-base;
   user-select: none;
 
-  &:hover:not(.shop-item--locked) {
+  &:hover:not(.shop-item--disabled) {
     transform: translateY(-8px);
     border-color: rgba($color-accent, 0.55);
     box-shadow:
@@ -1405,6 +1648,10 @@ async function syncFormSetDetails(setCode: string) {
   &--locked {
     cursor: not-allowed;
     filter: saturate(0.45) brightness(0.7);
+  }
+
+  &--disabled {
+    cursor: not-allowed;
   }
 
   &:focus-visible {
@@ -1664,6 +1911,42 @@ async function syncFormSetDetails(setCode: string) {
     font-size: $font-size-xs;
     font-weight: $font-weight-bold;
     padding: 0 $spacing-2;
+  }
+
+  &__filter-bar {
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    gap: $spacing-3;
+    margin-bottom: $spacing-4;
+  }
+
+  &__filter-actions {
+    display: flex;
+    flex-wrap: wrap;
+    gap: $spacing-2;
+  }
+
+  &__filter {
+    min-width: 150px;
+    padding: $spacing-1 $spacing-3;
+    border: 1px solid rgba($color-primary-light, 0.3);
+    border-radius: $border-radius-sm;
+    background: $color-bg-elevated;
+    color: $color-text;
+    font: inherit;
+    font-size: $font-size-sm;
+    cursor: pointer;
+
+    &:focus {
+      outline: none;
+      border-color: $color-primary-light;
+    }
+  }
+
+  &__filter-count {
+    color: $color-text-muted;
+    font-size: $font-size-sm;
   }
 }
 
@@ -2076,7 +2359,8 @@ async function syncFormSetDetails(setCode: string) {
     inset 0 0 60px rgba($color-primary, 0.05),
     0 32px 80px rgba(0, 0, 0, 0.75);
   padding: $spacing-6;
-  overflow: hidden;
+  overflow-x: hidden;
+  overflow-y: auto;
 
   &::before {
     content: '';
@@ -2170,6 +2454,199 @@ async function syncFormSetDetails(setCode: string) {
 .form-textarea {
   min-height: 7rem;
   resize: vertical;
+}
+
+.card-entry {
+  display: flex;
+  flex-direction: column;
+  gap: $spacing-2;
+
+  &__header {
+    display: flex;
+    flex-wrap: wrap;
+    align-items: center;
+    justify-content: space-between;
+    gap: $spacing-2;
+  }
+
+  &__mode {
+    display: inline-flex;
+    padding: 2px;
+    border: 1px solid rgba($color-primary-light, 0.2);
+    border-radius: $border-radius-full;
+    background: rgba($color-bg-elevated, 0.55);
+  }
+
+  &__mode-button {
+    border: 0;
+    border-radius: $border-radius-full;
+    padding: 4px 8px;
+    background: transparent;
+    color: $color-text-muted;
+    font: inherit;
+    font-size: 10px;
+    cursor: pointer;
+
+    &--active {
+      color: $color-text;
+      background: rgba($color-primary, 0.65);
+    }
+  }
+
+  &__hint {
+    margin: 0;
+    color: $color-text-muted;
+    font-size: 11px;
+  }
+
+  &__manual {
+    display: flex;
+    flex-direction: column;
+    gap: $spacing-2;
+  }
+
+  &__row {
+    display: grid;
+    grid-template-columns: minmax(0, 1fr) 84px;
+    gap: $spacing-2;
+    align-items: stretch;
+  }
+
+  &__input-wrap {
+    position: relative;
+
+    .form-input {
+      height: 100%;
+      padding-right: 34px;
+    }
+  }
+
+  &__spinner {
+    position: absolute;
+    top: 50%;
+    right: 11px;
+    width: 14px;
+    height: 14px;
+    margin-top: -7px;
+    border: 2px solid rgba($color-primary-light, 0.25);
+    border-top-color: $color-primary-light;
+    border-radius: 50%;
+    animation: card-entry-spin 0.75s linear infinite;
+  }
+
+  &__preview {
+    min-height: 44px;
+    padding: 0;
+    overflow: hidden;
+    border: 1px solid rgba($color-primary-light, 0.24);
+    border-radius: $border-radius-md;
+    background: rgba($color-bg-elevated, 0.8);
+    color: $color-text-muted;
+    font: inherit;
+    font-size: 9px;
+    line-height: 1.2;
+    cursor: pointer;
+
+    img {
+      width: 100%;
+      height: 100%;
+      min-height: 44px;
+      display: block;
+      object-fit: cover;
+    }
+
+    &--missing {
+      padding: 5px;
+      border-style: dashed;
+    }
+
+    &--loading {
+      opacity: 0.6;
+    }
+  }
+}
+
+@keyframes card-entry-spin {
+  to { transform: rotate(360deg); }
+}
+
+.printing-picker {
+  position: absolute;
+  inset: 0;
+  z-index: 5;
+  display: grid;
+  place-items: center;
+
+  &__backdrop {
+    position: absolute;
+    inset: 0;
+    background: rgba(3, 1, 9, 0.82);
+    backdrop-filter: blur(4px);
+  }
+
+  &__panel {
+    position: relative;
+    z-index: 1;
+    width: min(500px, 100%);
+    max-height: calc(90vh - 48px);
+    padding: $spacing-4;
+    overflow-y: auto;
+    border: 1px solid rgba($color-primary-light, 0.35);
+    border-radius: $border-radius-lg;
+    background: $color-bg-elevated;
+    box-shadow: $shadow-lg;
+
+    h3,
+    p {
+      margin-top: 0;
+    }
+  }
+
+  &__close {
+    position: absolute;
+    top: $spacing-3;
+    right: $spacing-3;
+    border: 0;
+    background: transparent;
+    color: $color-text-muted;
+    cursor: pointer;
+  }
+
+  &__grid {
+    display: grid;
+    grid-template-columns: repeat(auto-fill, minmax(110px, 1fr));
+    gap: $spacing-3;
+  }
+
+  &__card {
+    padding: 0;
+    overflow: hidden;
+    border: 1px solid rgba($color-primary-light, 0.2);
+    border-radius: $border-radius-md;
+    background: rgba($color-bg, 0.65);
+    color: $color-text;
+    cursor: pointer;
+    text-align: left;
+
+    &:hover {
+      border-color: rgba($color-accent, 0.7);
+      transform: translateY(-2px);
+    }
+
+    img {
+      width: 100%;
+      aspect-ratio: 0.714;
+      display: block;
+      object-fit: cover;
+    }
+
+    span {
+      display: block;
+      padding: 5px;
+      font-size: 9px;
+      line-height: 1.2;
+    }
+  }
 }
 
 // ── Modal balance summary ─────────────────────────────────────────────────────

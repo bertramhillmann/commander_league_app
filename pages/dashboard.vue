@@ -2,11 +2,15 @@
   <div class="page page--dashboard">
     <div class="dashboard__heading">
       <h1 class="dashboard__title">Standings</h1>
-      <div v-if="isAdmin && isPlayerRatingMode" class="dashboard__simulation-actions">
-        <button type="button" class="dashboard__simulation-button" @click="simulationMode = !simulationMode">
+      <div class="dashboard__simulation-actions">
+        <button type="button" class="dashboard__simulation-button" :disabled="checkingNewGames" @click="checkForNewGames">
+          {{ checkingNewGames ? 'Checking…' : 'Check new games' }}
+        </button>
+        <button v-if="isAdmin && isPlayerRatingMode" type="button" class="dashboard__simulation-button" @click="simulationMode = !simulationMode">
           {{ simulationMode ? 'Exit simulation' : 'Simulation mode' }}
         </button>
-        <button v-if="simulationMode" type="button" class="dashboard__simulation-button" @click="resetSimulation">Reset</button>
+        <button v-if="isAdmin && simulationMode" type="button" class="dashboard__simulation-button" @click="resetSimulation">Reset</button>
+        <span v-if="newGameCheckMessage" class="dashboard__new-game-status">{{ newGameCheckMessage }}</span>
       </div>
     </div>
 
@@ -413,6 +417,15 @@
               class="dashboard__spotlight-reason"
             >{{ reason }}</li>
           </ul>
+          <div v-if="featuredPlayer.relevantGameIds.length" class="dashboard__spotlight-games">
+            <button
+              v-for="gameId in featuredPlayer.relevantGameIds"
+              :key="gameId"
+              type="button"
+              class="dashboard__spotlight-game-chip"
+              @click="openGameModal(gameId)"
+            >{{ gameChipLabel(gameId) }}</button>
+          </div>
         </div>
 
         <div v-if="honorableMentions.length" class="dashboard__spotlight-honorable">
@@ -436,6 +449,15 @@
                 <span>{{ fmt(player.avgPerGame) }} avg pts</span>
               </div>
               <p class="dashboard__spotlight-mention-summary">{{ player.summary }}</p>
+              <div v-if="player.relevantGameIds.length" class="dashboard__spotlight-games">
+                <button
+                  v-for="gameId in player.relevantGameIds"
+                  :key="gameId"
+                  type="button"
+                  class="dashboard__spotlight-game-chip dashboard__spotlight-game-chip--sm"
+                  @click.stop.prevent="openGameModal(gameId)"
+                >{{ gameChipLabel(gameId) }}</button>
+              </div>
             </NuxtLink>
           </div>
         </div>
@@ -481,15 +503,15 @@
         <button
           type="button"
           class="dashboard__perf-switch"
-          :class="{ 'dashboard__perf-switch--active': activeChart === 'performance' }"
-          @click="activeChart = 'performance'"
-        >Performance</button>
-        <button
-          type="button"
-          class="dashboard__perf-switch"
           :class="{ 'dashboard__perf-switch--active': activeChart === 'total' }"
           @click="activeChart = 'total'"
         >{{ secondaryChartLabel }}</button>
+        <button
+          type="button"
+          class="dashboard__perf-switch"
+          :class="{ 'dashboard__perf-switch--active': activeChart === 'performance' }"
+          @click="activeChart = 'performance'"
+        >Performance</button>
         <button
           type="button"
           class="dashboard__perf-switch"
@@ -504,22 +526,22 @@
         >Avg Commander MMR</button>
       </div>
       <div
-        v-if="activeChart === 'performance' && performanceSeasonOptions.length > 0"
+        v-if="chartSeasonOptions.length > 0"
         class="dashboard__perf-season-switcher"
       >
         <button
           type="button"
           class="dashboard__perf-season-switch"
-          :class="{ 'dashboard__perf-season-switch--active': selectedPerformanceSeason === 'all' }"
-          @click="selectedPerformanceSeason = 'all'"
+          :class="{ 'dashboard__perf-season-switch--active': selectedChartSeason === 'all' }"
+          @click="selectedChartSeason = 'all'"
         >All</button>
         <button
-          v-for="season in performanceSeasonOptions"
+          v-for="season in chartSeasonOptions"
           :key="season.index"
           type="button"
           class="dashboard__perf-season-switch"
-          :class="{ 'dashboard__perf-season-switch--active': selectedPerformanceSeason === season.index }"
-          @click="selectedPerformanceSeason = season.index"
+          :class="{ 'dashboard__perf-season-switch--active': selectedChartSeason === season.index }"
+          @click="toggleChartSeason(season.index)"
         >{{ season.label }}</button>
       </div>
       <ChartsPerformanceTimeline
@@ -528,6 +550,10 @@
         :series="activePerformanceChartData.series"
         :title="activePerfChartTitle"
         :subtitle="activePerfChartSubtitle"
+        :season-filtered="selectedChartSeason !== 'all'"
+        :game-ids="seasonFilteredGameIds"
+        @reset="selectedChartSeason = 'all'"
+        @point-click="openGameModal"
       />
       <ChartsPerformanceTimeline
         v-else-if="activeChart === 'total'"
@@ -535,6 +561,10 @@
         :series="scoreChartData.series"
         :title="activePerfChartTitle"
         :subtitle="activePerfChartSubtitle"
+        :season-filtered="selectedChartSeason !== 'all'"
+        :game-ids="seasonFilteredGameIds"
+        @reset="selectedChartSeason = 'all'"
+        @point-click="openGameModal"
       />
       <ChartsPerformanceTimeline
         v-else-if="activeChart === 'participation'"
@@ -542,6 +572,8 @@
         :series="participationChartData.series"
         :title="activePerfChartTitle"
         :subtitle="activePerfChartSubtitle"
+        :season-filtered="selectedChartSeason !== 'all'"
+        @reset="selectedChartSeason = 'all'"
       />
       <ChartsPerformanceTimeline
         v-else
@@ -549,6 +581,10 @@
         :series="averageCommanderMmrChartData.series"
         :title="activePerfChartTitle"
         :subtitle="activePerfChartSubtitle"
+        :season-filtered="selectedChartSeason !== 'all'"
+        :game-ids="seasonFilteredGameIds"
+        @reset="selectedChartSeason = 'all'"
+        @point-click="openGameModal"
       />
       <div v-if="currentChartStandings.length" class="dashboard__perf-ranking">
         <NuxtLink
@@ -577,7 +613,7 @@
       </div>
     </section>
 
-    <CommandersTopCommander />
+    <CommandersTopCommander @open-game="openGameModal" />
 
     <section v-if="commanderMmrChartData.series.length > 0" class="dashboard__perf-section">
       <div class="dashboard__mmr-filter">
@@ -596,6 +632,8 @@
         :series="filteredCommanderMmrSeries"
         title="Commander MMR Timeline"
         subtitle="All commanders in the league, carrying forward their latest recorded MMR after each game."
+        :game-ids="chronologicalGameIds"
+        @point-click="openGameModal"
       />
     </section>
     </template>
@@ -951,6 +989,8 @@
       :compare-player-name="ratingSidebarComparePlayer"
       :mode="detailSidebarMode"
     />
+
+    <GamesGameModal :game-id="openGameModalId" @close="closeGameModal" />
   </div>
 </template>
 
@@ -988,10 +1028,12 @@ import {
 } from '~/utils/placements'
 import type { LoosterPurchaseRecord } from '~/utils/loosterPurchases'
 
-const { gameRecords, games, leagueSnapshots, players, standings, loading, loaded, progress } = useLeagueState()
+const { gameRecords, games, leagueSnapshots, players, standings, loading, loaded, progress, checkNewGames } = useLeagueState()
 const { settings } = useLeagueSettings()
 const { user, isAdmin, ensureSession } = useAuth()
 const simulationMode = ref(false)
+const checkingNewGames = ref(false)
+const newGameCheckMessage = ref('')
 const simulatedAverageCommanderMmrs = reactive<Record<string, number>>({})
 const simulatedWinRates = reactive<Record<string, number>>({})
 
@@ -1102,32 +1144,39 @@ const seasonalRankingEnabled = computed(() =>
 const showSeasonScoresInTable = computed(() => seasonalRankingEnabled.value)
 const generatedLeagueSeasons = computed(() => buildLeagueSeasonRanges(settings.value.standings.seasonalRanking))
 const displayedLeagueSeasons = computed(() => showSeasonScoresInTable.value ? generatedLeagueSeasons.value : [])
-const performanceSeasonOptions = computed(() => {
+const chartSeasonOptions = computed(() => {
   const now = Date.now()
   return generatedLeagueSeasons.value.filter((season) => season.startMs <= now)
 })
-const selectedPerformanceSeason = ref<'all' | number>('all')
-watch(performanceSeasonOptions, (options) => {
-  if (selectedPerformanceSeason.value === 'all') return
-  if (!options.some((season) => season.index === selectedPerformanceSeason.value)) {
-    selectedPerformanceSeason.value = 'all'
+const selectedChartSeason = ref<'all' | number>('all')
+watch(chartSeasonOptions, (options) => {
+  if (selectedChartSeason.value === 'all') return
+  if (!options.some((season) => season.index === selectedChartSeason.value)) {
+    selectedChartSeason.value = 'all'
   }
 }, { immediate: true })
+function toggleChartSeason(index: number) {
+  selectedChartSeason.value = selectedChartSeason.value === index ? 'all' : index
+}
 const showStandingsDetailColumns = false
 const showAveragePerGameColumn = false
 const totalScoreColumnLabel = computed(() => playerRankingSystem.value === 'player_rating_based' ? 'Rating' : 'Total')
 const secondaryChartLabel = computed(() => playerRankingSystem.value === 'player_rating_based' ? 'Player Rating' : 'Total Score')
 const activePerfChartTitle = computed(() => {
-  const selectedSeason = getSelectedPerformanceSeason()
+  const selectedSeason = getSelectedChartSeason()
   if (activeChart.value === 'performance') {
     return selectedSeason ? `${selectedSeason.label} Performance` : 'Performance Over Time'
   }
-  if (activeChart.value === 'total') return secondaryChartLabel.value
-  if (activeChart.value === 'averageCommanderMmr') return 'Average Commander MMR Over Time'
-  return 'Participation Over Time'
+  if (activeChart.value === 'total') {
+    return selectedSeason ? `${selectedSeason.label} ${secondaryChartLabel.value}` : secondaryChartLabel.value
+  }
+  if (activeChart.value === 'averageCommanderMmr') {
+    return selectedSeason ? `${selectedSeason.label} Average Commander MMR` : 'Average Commander MMR Over Time'
+  }
+  return selectedSeason ? `${selectedSeason.label} Participation` : 'Participation Over Time'
 })
 const activePerfChartSubtitle = computed(() => {
-  const selectedSeason = getSelectedPerformanceSeason()
+  const selectedSeason = getSelectedChartSeason()
   if (activeChart.value === 'performance') {
     if (selectedSeason) {
       return `Season-only average trend for ${selectedSeason.label}, resetting at the start of that season.`
@@ -1135,14 +1184,19 @@ const activePerfChartSubtitle = computed(() => {
     return 'League performance trend after each recorded game.'
   }
   if (activeChart.value === 'total') {
-    return playerRankingSystem.value === 'player_rating_based'
-      ? 'Live player rating across the full league timeline.'
-      : 'Total score across the full league timeline.'
+    const base = playerRankingSystem.value === 'player_rating_based' ? 'Player rating' : 'Total score'
+    return selectedSeason
+      ? `${base} within ${selectedSeason.label} only.`
+      : `${base} across the full league timeline.`
   }
   if (activeChart.value === 'averageCommanderMmr') {
-    return 'Rolling average commander strength per player after each recorded game.'
+    return selectedSeason
+      ? `Rolling average commander strength per player, reset at the start of ${selectedSeason.label}.`
+      : 'Rolling average commander strength per player after each recorded game.'
   }
-  return 'Games played per week for each player.'
+  return selectedSeason
+    ? `Games played per week for each player during ${selectedSeason.label}.`
+    : 'Games played per week for each player.'
 })
 const adjustmentColumnLabel = computed(() => {
   if (adjustmentMode.value === 'freeGames') return 'Free Games'
@@ -1384,6 +1438,21 @@ onMounted(async () => {
   await ensureSession()
   await loadPrizePool()
 })
+
+async function checkForNewGames() {
+  checkingNewGames.value = true
+  newGameCheckMessage.value = ''
+  try {
+    const addedGames = await checkNewGames()
+   newGameCheckMessage.value = addedGames > 0
+      ? addedGames + ' new game' + (addedGames === 1 ? '' : 's') + ' loaded.'
+     : 'No new games found.'
+  } catch {
+    newGameCheckMessage.value = 'Could not check for new games.'
+  } finally {
+    checkingNewGames.value = false
+  }
+}
 
 async function loadPrizePool() {
   try {
@@ -1729,6 +1798,7 @@ const featuredPlayers = computed<FeaturedPlayerCandidate[]>(() => {
       `Ranked #1 with ${leader.gamesPlayed} game${leader.gamesPlayed === 1 ? '' : 's'} played.`,
     ],
     score: 0,
+    relevantGameIds: [],
   }]
 })
 
@@ -1921,7 +1991,7 @@ function computeWeightedScore(records: PlayerGameRecord[]): number {
   return totalWeight > 0 ? r3(weightedSum / totalWeight) : 0
 }
 
-const activeChart = ref<'performance' | 'total' | 'participation' | 'averageCommanderMmr'>('performance')
+const activeChart = ref<'performance' | 'total' | 'participation' | 'averageCommanderMmr'>('total')
 
 function fmtGameDate(date: string | Date) {
   return new Date(date).toLocaleDateString('de-DE', { day: '2-digit', month: '2-digit', year: '2-digit' })
@@ -1943,19 +2013,22 @@ function fmtWeekLabel(weekKey: string) {
   return `Week of ${parsed.toLocaleDateString('de-DE', { day: '2-digit', month: '2-digit', year: '2-digit' })}`
 }
 
-function getSelectedPerformanceSeason() {
-  if (selectedPerformanceSeason.value === 'all') return null
-  return performanceSeasonOptions.value.find((season) => season.index === selectedPerformanceSeason.value) ?? null
+function getSelectedChartSeason() {
+  if (selectedChartSeason.value === 'all') return null
+  return chartSeasonOptions.value.find((season) => season.index === selectedChartSeason.value) ?? null
 }
 
-const activePerformanceGames = computed(() => {
-  const selectedSeason = getSelectedPerformanceSeason()
+const seasonFilteredGames = computed(() => {
+  const selectedSeason = getSelectedChartSeason()
   if (!selectedSeason) return chronologicalGames.value
   return chronologicalGames.value.filter((game) => {
     const gameMs = new Date(game.date).getTime()
     return Number.isFinite(gameMs) && gameMs >= selectedSeason.startMs && gameMs <= selectedSeason.endMs
   })
 })
+
+const seasonFilteredGameIds = computed(() => seasonFilteredGames.value.map((game) => game.gameId))
+const chronologicalGameIds = computed(() => chronologicalGames.value.map((game) => game.gameId))
 
 function buildPerformanceChartData(games: typeof chronologicalGames.value): { labels: string[], series: PerformancePlayerSeries[] } {
   if (games.length === 0) return { labels: [], series: [] }
@@ -1994,11 +2067,11 @@ const fullPerformanceChartData = computed<{ labels: string[], series: Performanc
 )
 
 const activePerformanceChartData = computed<{ labels: string[], series: PerformancePlayerSeries[] }>(() =>
-  buildPerformanceChartData(activePerformanceGames.value),
+  buildPerformanceChartData(seasonFilteredGames.value),
 )
 
 const scoreChartData = computed<{ labels: string[], series: PerformancePlayerSeries[] }>(() => {
-  const games = chronologicalGames.value
+  const games = seasonFilteredGames.value
   if (games.length === 0) return { labels: [], series: [] }
 
   const labels = games.map((game) => fmtGameDate(game.date))
@@ -2084,7 +2157,7 @@ const scoreChartData = computed<{ labels: string[], series: PerformancePlayerSer
 })
 
 const participationChartData = computed<{ labels: string[], series: PerformancePlayerSeries[] }>(() => {
-  const games = chronologicalGames.value
+  const games = seasonFilteredGames.value
   if (games.length === 0) return { labels: [], series: [] }
 
   const weekKeys = Array.from(new Set(games.map((game) => startOfWeekKey(game.date))))
@@ -2125,7 +2198,7 @@ function averageGamesPerWeekSinceFirstGame(playerName: string): number | null {
 }
 
 const averageCommanderMmrChartData = computed<{ labels: string[], series: PerformancePlayerSeries[] }>(() => {
-  const games = chronologicalGames.value
+  const games = seasonFilteredGames.value
   if (games.length === 0) return { labels: [], series: [] }
 
   const initialCommanderMmr = getInitialCommanderMMR()
@@ -2441,6 +2514,23 @@ function calcPosition(e: MouseEvent) {
   return { x: x + window.scrollX, y: y + window.scrollY }
 }
 
+// ── Game point modal ─────────────────────────────────────────────────────────
+
+const openGameModalId = ref<string | null>(null)
+
+function openGameModal(gameId: string) {
+  openGameModalId.value = gameId
+}
+
+function closeGameModal() {
+  openGameModalId.value = null
+}
+
+function gameChipLabel(gameId: string) {
+  const game = chronologicalGames.value.find((entry) => entry.gameId === gameId)
+  return game ? fmtGameDate(game.date) : gameId
+}
+
 function onCommanderEnter(playerName: string, commanderName: string, e: MouseEvent) {
   hover.playerName = playerName
   hover.commanderName = commanderName
@@ -2734,12 +2824,12 @@ const dashboardRatingFactorRows: Array<{
 const ratingFactorColors: Record<PlayerRatingBreakdownKey, string> = {
   recentPerformance: '#9b6ee8',
   allTimePerformance: '#6c3fc5',
-  seasonPoints: '#e8a030',
-  winRate: '#ffd36a',
-  commanderMMRContext: '#72b7ff',
-  averageCommanderMMR: '#4a8edb',
-  activityPoints: '#3cb87a',
-  achievements: '#d2a8ff',
+  seasonPoints: '#9b6ee8',
+  winRate: '#e8a030',
+  commanderMMRContext: '#ffd36a',
+  averageCommanderMMR: '#2c9c6a',
+  activityPoints: '#c27be8',
+  achievements: '#e05050',
   clutch: '#e05050',
   commanderDiversity: '#c27be8',
 }
@@ -3190,6 +3280,12 @@ function onCompLeave() {
 </script>
 
 <style lang="scss" scoped>
+// Shared row height for the standings and Looster Points tables so their rows
+// line up visually. This is the standings table's natural (content-driven)
+// row height; the Looster table pins to it explicitly since its cells alone
+// don't produce the same height.
+$table-row-height: 47.8px;
+
 .dash-loader {
   position: fixed;
   inset: 0;
@@ -3318,6 +3414,8 @@ function onCompLeave() {
 
   &__th,
   &__td {
+    // Keep rows aligned with the standings table.
+    height: $table-row-height;
     padding: $spacing-2 $spacing-3;
     border-bottom: 1px solid rgba($border-color, 0.42);
     text-align: left;
@@ -3326,7 +3424,7 @@ function onCompLeave() {
 
   &__th {
     color: $color-text-muted;
-    font-size: 10px;
+    font-size: $font-size-xs;
     text-transform: uppercase;
     letter-spacing: 0.08em;
     font-weight: $font-weight-semibold;
@@ -3559,6 +3657,36 @@ function onCompLeave() {
     color: $color-text;
     font-weight: $font-weight-semibold;
     line-height: 1.4;
+  }
+
+  &-games {
+    display: flex;
+    flex-wrap: wrap;
+    gap: 6px;
+    margin-top: 2px;
+  }
+
+  &-game-chip {
+    appearance: none;
+    font: inherit;
+    font-size: 11px;
+    color: $color-primary-light;
+    background: rgba($color-primary, 0.1);
+    border: 1px solid rgba($color-primary-light, 0.3);
+    border-radius: $border-radius-full;
+    padding: 3px 10px;
+    cursor: pointer;
+    transition: background $transition-fast, border-color $transition-fast;
+
+    &:hover {
+      background: rgba($color-primary, 0.22);
+      border-color: rgba($color-primary-light, 0.55);
+    }
+
+    &--sm {
+      font-size: 10px;
+      padding: 2px 8px;
+    }
   }
 
   &-honorable {
@@ -3973,7 +4101,7 @@ function onCompLeave() {
   gap: $spacing-3;
 }
 
-.dashboard__simulation-actions { display: inline-flex; gap: $spacing-2; }
+.dashboard__simulation-actions { display: inline-flex; align-items: center; flex-wrap: wrap; justify-content: flex-end; gap: $spacing-2; }
 .dashboard__simulation-button {
   padding: $spacing-2 $spacing-3;
   border: 1px solid rgba($color-primary-light, .5);
@@ -3985,6 +4113,7 @@ function onCompLeave() {
   font-weight: $font-weight-semibold;
   cursor: pointer;
 }
+.dashboard__new-game-status { color: $color-text-muted; font-size: $font-size-xs; }
 .standings__simulation-input {
   width: 74px;
   padding: 3px 5px;
@@ -4004,6 +4133,7 @@ function onCompLeave() {
   font-size: $font-size-sm;
 
   &__th {
+    height: $table-row-height;
     text-align: center;
     padding: $spacing-2 $spacing-3;
     color: $color-text-muted;
@@ -4082,6 +4212,7 @@ function onCompLeave() {
   }
 
   &__td {
+    height: $table-row-height;
     padding: $spacing-2 $spacing-3;
     color: $color-text;
     vertical-align: middle;

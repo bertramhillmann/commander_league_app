@@ -476,7 +476,7 @@ export function calculateWinRateScore(player: PlayerRatingPlayerState) {
   const rawValue = player.gamesPlayed > 0 ? player.baseWins / player.gamesPlayed : 0
   return {
     rawValue,
-    normalizedScore: normalizeScore(rawValue, 0, 0.45),
+    normalizedScore: normalizeScore(rawValue, -1, 0.45),
     wins: player.baseWins,
     gamesPlayed: player.gamesPlayed,
   }
@@ -521,6 +521,9 @@ export function calculateAverageCommanderMMRScore(
     .map((commander) => usePeakCommanderMmr ? commander.peakMmr : commander.latestMmr)
     .sort((left, right) => right - left)
     .slice(0, sanitizedTopCommanderCount)
+    // A counted commander below the configured fallback cannot lower this factor
+    // below the value of an otherwise missing commander slot.
+    .map((mmr) => Math.max(mmr, sanitizedMissingCommanderMmr))
 
   while (bestCommanderMmrs.length < sanitizedTopCommanderCount) {
     bestCommanderMmrs.push(sanitizedMissingCommanderMmr)
@@ -624,7 +627,9 @@ export function calculateClutchScore(gameContexts: RatingGameContext[]) {
     const outperformBonus = Math.max(0, context.playerPerformanceDelta) * (1 + Math.max(0, context.playerRatingGap) / 600)
     return { winBonus, outperformBonus, total: winBonus + outperformBonus }
   })
+
   const rawValue = average(clutchValues.map((entry) => entry.total))
+
   return {
     rawValue,
     normalizedScore: normalizeScore(rawValue, 0, 2.5),
@@ -697,7 +702,7 @@ function buildFactorDetails(
         `average commander MMR: ${round3(factors.averageCommanderMMR.averageCommanderMMR ?? 0)}`,
         `best commanders counted: ${Math.round(factors.averageCommanderMMR.countedCommanders ?? 0)}`,
         `minimum games per commander: ${Math.round(factors.averageCommanderMMR.minimumGamesPerCommander ?? 0)}`,
-        `fallback MMR for missing slots: ${round3(factors.averageCommanderMMR.missingCommanderMmr ?? 0)}`,
+        `fallback MMR for missing or lower-rated slots: ${round3(factors.averageCommanderMMR.missingCommanderMmr ?? 0)}`,
         `MMR source: ${(factors.averageCommanderMMR.usePeakCommanderMmr ?? 0) > 0 ? 'peak ever' : 'current'}`,
         `eligible commanders: ${Math.round(factors.averageCommanderMMR.eligibleCommanders ?? 0)}`,
         `commanders available: ${Math.round(factors.averageCommanderMMR.availableCommanders ?? 0)}`,

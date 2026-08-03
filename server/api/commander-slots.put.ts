@@ -99,6 +99,7 @@ export default defineEventHandler(async (event) => {
     archidektDeckId: existingEntry?.archidektDeckId ?? '',
     selectedTitle: existingEntry?.selectedTitle ?? '',
     gameChangerSlots: nextSlots,
+    retired: Boolean(existingEntry?.retired),
   })
   await player.save()
 
@@ -118,6 +119,7 @@ export default defineEventHandler(async (event) => {
           archidektDeckId: entry.archidektDeckId ?? '',
           selectedTitle: entry.selectedTitle || undefined,
           gameChangerSlots: Array.isArray(entry.gameChangerSlots) ? entry.gameChangerSlots : [],
+          retired: Boolean(entry.retired),
           updatedAt: entry.updatedAt,
         }
       : null,

@@ -5,10 +5,17 @@ export interface LoosterPurchaseDocument {
   set?: string
   set_name?: string
   cards?: string[]
+  cardPrintings?: LoosterCardPrinting[]
   date?: string
   priceEuro?: number
   createdAt?: string
   updatedAt?: string
+}
+
+export interface LoosterCardPrinting {
+  name: string
+  scryfallUrl: string
+  setCode: string
 }
 
 export interface LoosterPurchaseRecord extends Required<Pick<LoosterPurchaseDocument, 'name' | 'type' | 'cost' | 'set' | 'set_name' | 'cards' | 'date' | 'priceEuro'>> {

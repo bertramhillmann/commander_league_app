@@ -3,6 +3,12 @@ const COLLECTION_CHUNK_SIZE = 75
 const CARD_STORAGE_KEY = 'scryfall-card-cache:v2'
 const SET_STORAGE_KEY = 'scryfall-set-cache:v1'
 
+// Scryfall asks for 50-100 ms of delay between requests sent in a single-threaded
+// manner (~10 req/s). All outbound requests share one queue so bursts from unrelated
+// callers (shop, dashboard, sidebar, deck views, ...) never stack up concurrently.
+const MIN_REQUEST_INTERVAL_MS = 110
+const MAX_RATE_LIMIT_RETRIES = 4
+
 // Scryfall rejects requests carrying a generic HTTP-library User-Agent (e.g. Node's
 // default) with a 400 "generic_user_agent" error. Server-side requests need an explicit
 // override; browsers ignore this header (forbidden to override) and send their own, which
@@ -46,6 +52,8 @@ interface ScryfallCollectionResponse {
 
 interface ScryfallSearchResponse {
   data: ScryfallCard[]
+  has_more?: boolean
+  next_page?: string
 }
 
 interface FetchCardsByNameOptions {
@@ -183,18 +191,70 @@ function chunk<T>(items: T[], size: number) {
   return chunks
 }
 
+function sleep(ms: number) {
+  return new Promise<void>((resolve) => setTimeout(resolve, ms))
+}
+
+// Serializes every outbound Scryfall request behind a single tail promise so
+// concurrent callers (e.g. several components preloading images at once) still
+// only ever send one request per MIN_REQUEST_INTERVAL_MS, app-wide.
+let requestQueueTail: Promise<void> = Promise.resolve()
+let lastRequestStartedAt = 0
+
+function scheduleSlot(): Promise<void> {
+  const slot = requestQueueTail.then(async () => {
+    const wait = Math.max(0, lastRequestStartedAt + MIN_REQUEST_INTERVAL_MS - Date.now())
+    if (wait > 0) await sleep(wait)
+    lastRequestStartedAt = Date.now()
+  })
+  // Keep the chain alive even if this slot's request later throws.
+  requestQueueTail = slot.catch(() => {})
+  return slot
+}
+
+function getRateLimitStatus(error: unknown): number | undefined {
+  return (error as { response?: { status?: number } } | undefined)?.response?.status
+}
+
+function getRetryAfterMs(error: unknown): number | null {
+  const headers = (error as { response?: { headers?: Headers } } | undefined)?.response?.headers
+  const retryAfterHeader = headers?.get?.('retry-after')
+  if (!retryAfterHeader) return null
+  const seconds = Number(retryAfterHeader)
+  return Number.isFinite(seconds) ? seconds * 1000 : null
+}
+
+/**
+ * Runs a Scryfall request through the shared throttle queue, retrying with
+ * backoff (honoring Retry-After when present) if Scryfall responds with 429.
+ */
+async function scryfallFetch<T>(request: () => Promise<T>, attempt = 0): Promise<T> {
+  await scheduleSlot()
+
+  try {
+    return await request()
+  } catch (error) {
+    if (attempt < MAX_RATE_LIMIT_RETRIES && getRateLimitStatus(error) === 429) {
+      const backoffMs = getRetryAfterMs(error) ?? MIN_REQUEST_INTERVAL_MS * 2 ** (attempt + 2)
+      await sleep(backoffMs)
+      return scryfallFetch(request, attempt + 1)
+    }
+    throw error
+  }
+}
+
 async function requestCardByName(name: string, setCode?: string) {
   if (setCode) {
     const normalizedSetCode = normalizeSetCode(setCode)
 
     try {
-      const response = await $fetch<ScryfallCollectionResponse>(`${BASE_URL}/cards/collection`, {
+      const response = await scryfallFetch(() => $fetch<ScryfallCollectionResponse>(`${BASE_URL}/cards/collection`, {
         method: 'POST',
         headers: SCRYFALL_HEADERS,
         body: {
           identifiers: [{ name, set: normalizedSetCode }],
         },
-      })
+      }))
 
       const match = response.data.find((card) => (
         normalizeCardName(card.name) === normalizeCardName(name)
@@ -207,12 +267,12 @@ async function requestCardByName(name: string, setCode?: string) {
     }
 
     try {
-      const response = await $fetch<ScryfallSearchResponse>(`${BASE_URL}/cards/search`, {
+      const response = await scryfallFetch(() => $fetch<ScryfallSearchResponse>(`${BASE_URL}/cards/search`, {
         headers: SCRYFALL_HEADERS,
         params: {
           q: `!"${escapeScryfallQueryValue(name)}" set:${normalizedSetCode}`,
         },
-      })
+      }))
 
       const match = response.data.find((card) => (
         normalizeCardName(card.name) === normalizeCardName(name)
@@ -226,10 +286,10 @@ async function requestCardByName(name: string, setCode?: string) {
   }
 
   try {
-    return await $fetch<ScryfallCard>(`${BASE_URL}/cards/named`, {
+    return await scryfallFetch(() => $fetch<ScryfallCard>(`${BASE_URL}/cards/named`, {
       headers: SCRYFALL_HEADERS,
       params: { fuzzy: name },
-    })
+    }))
   } catch {
     return null
   }
@@ -300,7 +360,7 @@ export async function fetchCardsByIdentifiers(
 
   for (const identifiersChunk of chunk(uncachedIdentifiers, COLLECTION_CHUNK_SIZE)) {
     try {
-      const response = await $fetch<ScryfallCollectionResponse>(`${BASE_URL}/cards/collection`, {
+      const response = await scryfallFetch(() => $fetch<ScryfallCollectionResponse>(`${BASE_URL}/cards/collection`, {
         method: 'POST',
         headers: SCRYFALL_HEADERS,
         body: {
@@ -310,7 +370,7 @@ export async function fetchCardsByIdentifiers(
               : { name: identifier.name }
           )),
         },
-      })
+      }))
 
       for (const identifier of identifiersChunk) {
         const match = response.data.find((card) => (
@@ -385,6 +445,46 @@ export async function fetchCardsByName(
   return results
 }
 
+const printingCache = new Map<string, Promise<ScryfallCard[]>>()
+
+/**
+ * Fetch every available printing of one card. This is intentionally only used
+ * after the user asks to choose a printing; normal card entry remains batched
+ * through the collection endpoint above.
+ */
+export async function fetchCardPrintingsByName(name: string): Promise<ScryfallCard[]> {
+  const normalizedName = normalizeCardName(name)
+  if (!normalizedName) return []
+
+  const existing = printingCache.get(normalizedName)
+  if (existing) return existing
+
+  const request = (async () => {
+    const printings: ScryfallCard[] = []
+    let pageUrl: string | null = `${BASE_URL}/cards/search`
+    let params: Record<string, string> | undefined = {
+      q: `!\"${escapeScryfallQueryValue(name)}\" unique:prints`,
+      order: 'released',
+      dir: 'desc',
+    }
+
+    while (pageUrl) {
+      const response = await scryfallFetch(() => $fetch<ScryfallSearchResponse>(pageUrl!, {
+        headers: SCRYFALL_HEADERS,
+        params,
+      }))
+      printings.push(...response.data)
+      pageUrl = response.has_more && response.next_page ? response.next_page : null
+      params = undefined
+    }
+
+    return printings
+  })().catch(() => [])
+
+  printingCache.set(normalizedName, request)
+  return request
+}
+
 /**
  * Fetch a Scryfall set by code.
  * Returns null when the set is not found.
@@ -399,7 +499,7 @@ export async function fetchSetByCode(code: string): Promise<ScryfallSet | null> 
   const existingRequest = pendingSetRequests.get(normalizedCode)
   if (existingRequest) return existingRequest
 
-  const request = $fetch<ScryfallSet>(`${BASE_URL}/sets/${normalizedCode}`, { headers: SCRYFALL_HEADERS })
+  const request = scryfallFetch(() => $fetch<ScryfallSet>(`${BASE_URL}/sets/${normalizedCode}`, { headers: SCRYFALL_HEADERS }))
     .then((data) => {
       setSetCacheEntry(normalizedCode, data)
       return data

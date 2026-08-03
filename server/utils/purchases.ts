@@ -2,7 +2,7 @@ import { createError } from 'h3'
 import type { IPlayerPurchase } from '../models/Player'
 import { fetchCardsByName } from '~/services/scryfallService'
 import { normalizeCardNames } from './playerData'
-import { formatPurchaseDate, type LoosterPurchaseRecord } from '~/utils/loosterPurchases'
+import { formatPurchaseDate, type LoosterCardPrinting, type LoosterPurchaseRecord } from '~/utils/loosterPurchases'
 
 export function parseCardListInput(cards: string[] | string | undefined) {
   if (Array.isArray(cards)) return cards
@@ -85,6 +85,24 @@ export function normalizeEuroPrice(value: unknown) {
   return Math.round(parsed * 100) / 100
 }
 
+export function normalizeCardPrintings(value: unknown, cards: string[]): LoosterCardPrinting[] {
+  if (!Array.isArray(value)) return []
+
+  const knownCards = new Set(cards.map((card) => card.toLowerCase()))
+  const printings = new Map<string, LoosterCardPrinting>()
+  for (const candidate of value) {
+    if (!candidate || typeof candidate !== 'object') continue
+    const entry = candidate as Partial<LoosterCardPrinting>
+    const name = typeof entry.name === 'string' ? entry.name.trim() : ''
+    const scryfallUrl = typeof entry.scryfallUrl === 'string' ? entry.scryfallUrl.trim() : ''
+    const setCode = typeof entry.setCode === 'string' ? entry.setCode.trim().toLowerCase() : ''
+    if (!name || !knownCards.has(name.toLowerCase()) || !/^https:\/\/scryfall\.com\/card\//.test(scryfallUrl)) continue
+    printings.set(name.toLowerCase(), { name, scryfallUrl, setCode })
+  }
+
+  return [...printings.values()]
+}
+
 export function flattenPlayerPurchases(
   playerName: string,
   purchases: Array<(IPlayerPurchase & { _id?: { toString(): string } | string }) | null | undefined>,
@@ -100,6 +118,15 @@ export function flattenPlayerPurchases(
       set: purchase.set ?? '',
       set_name: purchase.set_name ?? '',
       cards: Array.isArray(purchase.cards) ? purchase.cards.filter(Boolean) : [],
+      cardPrintings: Array.isArray(purchase.cardPrintings)
+        ? purchase.cardPrintings
+          .filter((printing) => printing?.name && printing?.scryfallUrl)
+          .map((printing) => ({
+            name: printing.name,
+            scryfallUrl: printing.scryfallUrl,
+            setCode: printing.setCode ?? '',
+          }))
+        : [],
       date: formatPurchaseDate(purchase.date ?? purchase.createdAt ?? null),
       priceEuro: Number(purchase.priceEuro ?? 0),
       createdAt: purchase.createdAt ? new Date(purchase.createdAt).toISOString() : undefined,

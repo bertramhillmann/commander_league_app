@@ -19,7 +19,19 @@
       "Bash(curl -s -X POST https://api.scryfall.com/cards/collection -H \"Content-Type: application/json\" -d '{\"identifiers\":[{\"name\":\"Cyclonic Rift\"}]}')",
       "Bash(node \"C:\\\\Users\\\\bertr\\\\AppData\\\\Local\\\\Temp\\\\claude\\\\c--Users-bertr-Desktop-Work-cmd-app\\\\7ceea090-6a88-4766-bccc-ef7841d7459a\\\\scratchpad\\\\test-scryfall.mjs\")",
       "Bash(node -e ' *)",
-      "Bash(npx nuxi *)"
+      "Bash(npx nuxi *)",
+      "Bash(npx tsc *)",
+      "Bash(grep -n \"^\\\\.standings__td\\\\b\\\\|^\\\\.standings__td,\\\\|standings__td {\" pages/dashboard.vue)",
+      "Bash(awk '/^\\\\.standings \\\\{/,0' pages/dashboard.vue)",
+      "Bash(grep -n '^@@\\\\|table-row-height\\\\|height:\\\\|font-size: 10px\\\\|font-size: $font-size-xs')",
+      "Bash(npx vue-tsc *)",
+      "Bash(timeout 40 npm run dev)",
+      "Bash(curl -s -o /dev/null -w \"%{http_code}\\\\n\" http://localhost:3000/dashboard)",
+      "Bash(timeout 35 npm run dev)",
+      "Bash(awk '/<style/{flag=1} flag' pages/dashboard.vue)",
+      "Bash(timeout 30 npm run dev)",
+      "Bash(git stash *)",
+      "Read(//tmp/**)"
     ]
   }
 }

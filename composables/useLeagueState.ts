@@ -125,6 +125,8 @@ export interface PlayerState {
 export type CommanderTitleSelectionMap = Record<string, Record<string, CommanderTitleId>>
 
 export interface CommanderState {
+  id: string
+  playerName: string
   name: string
   totalPoints: number
   totalBasePoints: number
@@ -134,6 +136,11 @@ export interface CommanderState {
   uniquePlayers: string[]
   mmr: number
   tier: CommanderMMRTier
+}
+
+/** A deck's rating state belongs to its owner, never to a commander name globally. */
+export function getCommanderId(playerName: string, commanderName: string) {
+  return `${normalizeDeckIdentityKey(playerName)}_${normalizeDeckIdentityKey(commanderName)}`
 }
 
 export interface LeagueStanding {
@@ -1218,8 +1225,9 @@ export function useLeagueState() {
         const computed = computeGamePoints(game.players) as ProcessedGamePlayer[]
         const commanderMMRParticipants = computed.map((player, index) => ({
           participantId: `${player.name}::${player.commander}::${index}`,
+          commanderId: getCommanderId(player.name, player.commander),
           commanderName: player.commander,
-          currentMMR: commanderMap[player.commander]?.mmr ?? getInitialCommanderMMR(),
+          currentMMR: commanderMap[getCommanderId(player.name, player.commander)]?.mmr ?? getInitialCommanderMMR(),
           placement: player.placement,
         }))
         const commanderMMRChanges = calculateCommanderMMRChanges(
@@ -1239,7 +1247,7 @@ export function useLeagueState() {
           newMMR: number
         }>>((acc, participant) => {
           const participantChange = commanderMMRChangeMap[participant.participantId]
-          const existing = acc[participant.commanderName] ?? {
+          const existing = acc[participant.commanderId] ?? {
             oldMMR: participant.currentMMR,
             delta: 0,
             newMMR: participant.currentMMR,
@@ -1247,7 +1255,7 @@ export function useLeagueState() {
 
           existing.delta = round3(existing.delta + (participantChange?.delta ?? 0))
           existing.newMMR = round3(existing.oldMMR + existing.delta)
-          acc[participant.commanderName] = existing
+          acc[participant.commanderId] = existing
           return acc
         }, {})
 
@@ -1316,9 +1324,12 @@ export function useLeagueState() {
 
           if (!playerMap[p.name]) playerMap[p.name] = createEmptyPlayerState(p.name)
 
-          if (!commanderMap[p.commander]) {
+          const commanderId = getCommanderId(p.name, p.commander)
+          if (!commanderMap[commanderId]) {
             const initialCommanderMMR = getInitialCommanderMMR()
-            commanderMap[p.commander] = {
+            commanderMap[commanderId] = {
+              id: commanderId,
+              playerName: p.name,
               name: p.commander,
               totalPoints: 0,
               totalBasePoints: 0,
@@ -1603,14 +1614,14 @@ export function useLeagueState() {
           ps.commanderXP[p.commander] = commanderXpBefore + commanderXpGained
           if (!(p.commander in ps.commanderRested)) ps.commanderRested[p.commander] = 0
 
-          const cs = commanderMap[p.commander]
+          const cs = commanderMap[getCommanderId(p.name, p.commander)]
           cs.totalPoints = round3(cs.totalPoints + finalPoints)
           cs.totalBasePoints = round3(cs.totalBasePoints + p.points)
           cs.totalLPoints = roundLoosterPoints(cs.totalLPoints + adjustedLPoints)
           cs.gamesPlayed++
           if (isWinner) cs.wins++
           if (!cs.uniquePlayers.includes(p.name)) cs.uniquePlayers.push(p.name)
-          cs.mmr = commanderMMRAggregateMap[p.commander]?.newMMR ?? cs.mmr
+          cs.mmr = commanderMMRAggregateMap[getCommanderId(p.name, p.commander)]?.newMMR ?? cs.mmr
           cs.tier = getCommanderTierFromMMR(cs.mmr)
 
           // Update own game index and commander last-seen index
@@ -1765,7 +1776,7 @@ export function useLeagueState() {
         const ps = playerMap[playerName]
 
         for (const [cmdName, data] of Object.entries(byCommander)) {
-          const commanderState = commanderMap[cmdName]
+          const commanderState = commanderMap[getCommanderId(playerName, cmdName)]
           const mmrTier = commanderState?.tier ?? getCommanderTierFromMMR(getInitialCommanderMMR())
           playerMap[playerName].commanderTiers[cmdName] = mmrTier
 
@@ -1881,6 +1892,22 @@ export function useLeagueState() {
     await init(true)
   }
 
+  async function checkNewGames() {
+    const lastGameId = games.value
+      .map((game) => game.gameId)
+      .filter((gameId) => /^G\d+$/.test(gameId))
+      .sort((left, right) => Number(right.slice(1)) - Number(left.slice(1)))[0]
+
+    // Do the cheap incremental database check first. Rebuilding remains the
+    // safe path when additions are found: standings include sequential MMR,
+    // achievements, and cross-player context that must stay consistent.
+    const newGames = await $fetch<any[]>('/api/games?afterId=' + encodeURIComponent(lastGameId ?? 'G0000'))
+    if (newGames.length === 0) return 0
+
+    await init(true)
+    return newGames.length
+  }
+
   return {
     games,
     players,
@@ -1895,6 +1922,7 @@ export function useLeagueState() {
     error,
     init,
     refresh,
+    checkNewGames,
   }
 }
 

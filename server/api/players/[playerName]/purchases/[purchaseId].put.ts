@@ -1,8 +1,8 @@
 import { connectToDatabase } from '../../../../utils/mongoose'
 import { Player } from '../../../../models/Player'
-import { addCardsToPlayerCardpool } from '../../../../utils/playerData'
+import { addCardsToPlayerCardpool, normalizeCardNames } from '../../../../utils/playerData'
 import { getPlayerSession, isAdminUser } from '../../../../utils/playerAuth'
-import { flattenPlayerPurchases, normalizeEuroPrice, parsePurchaseDate, validateAndCanonicalizeOptionalCards } from '../../../../utils/purchases'
+import { flattenPlayerPurchases, normalizeCardPrintings, normalizeEuroPrice, parseCardListInput, parsePurchaseDate } from '../../../../utils/purchases'
 import { formatPlayerName } from '~/utils/playerNames'
 
 type PurchaseBody = {
@@ -11,6 +11,7 @@ type PurchaseBody = {
   set?: string
   set_name?: string
   cards?: string[] | string
+  cardPrintings?: unknown
   date?: string
   priceEuro?: number
 }
@@ -35,13 +36,12 @@ export default defineEventHandler(async (event) => {
   const type = (body.type ?? 'looster').trim() || 'looster'
   const set = (body.set ?? '').trim()
   const setName = (body.set_name ?? '').trim()
-  const cards = await validateAndCanonicalizeOptionalCards(body.cards, set)
+  // Looster cards are optional user-entered notes. Do not block saving when
+  // Scryfall cannot find a card in the selected set.
+  const cards = normalizeCardNames(parseCardListInput(body.cards))
+  const cardPrintings = normalizeCardPrintings(body.cardPrintings, cards)
   const date = parsePurchaseDate(body.date)
   const priceEuro = normalizeEuroPrice(body.priceEuro)
-
-  if (!set || !setName) {
-    throw createError({ statusCode: 400, statusMessage: 'Set and set name are required' })
-  }
 
   await connectToDatabase()
 
@@ -57,6 +57,7 @@ export default defineEventHandler(async (event) => {
         'purchases.$.set': set,
         'purchases.$.set_name': setName,
         'purchases.$.cards': cards,
+        'purchases.$.cardPrintings': cardPrintings,
         'purchases.$.date': date,
         'purchases.$.priceEuro': priceEuro,
       },

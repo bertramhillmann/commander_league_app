@@ -13,12 +13,20 @@ const { games, gameRecords, players, loading, error, refresh: refreshLeagueState
 const { preloadCommanderImages, getCachedCommanderImage } = useImageCache()
 const { isAdmin } = useAuth()
 const { settings } = useLeagueSettings()
+const { data: retiredCommanderEntries } = await useFetch<Array<{ playerName: string; commanderName: string }>>('/api/retired-commanders')
 
 const canCreateGame = computed(() => props.allowCreate && isAdmin.value)
 
 const playerOptions = computed(() =>
-  buildMatchmakingPlayerOptions(games.value, gameRecords.value, players.value),
+  buildMatchmakingPlayerOptions(games.value, gameRecords.value, players.value, retiredCommandersByPlayer.value),
 )
+const retiredCommandersByPlayer = computed(() => {
+  const retired: Record<string, Set<string>> = {}
+  for (const entry of retiredCommanderEntries.value ?? []) {
+    ;(retired[entry.playerName] ??= new Set()).add(entry.commanderName)
+  }
+  return retired
+})
 
 const selectedPlayers = ref<string[]>([])
 const selectedCommanderByPlayer = ref<Record<string, string>>({})
@@ -64,6 +72,7 @@ const matchmaking = computed(() =>
     gameRecords.value,
     settings.value.playerRating.simpleMmr.enabled,
     placementByPlayer.value,
+    retiredCommandersByPlayer.value,
   ),
 )
 

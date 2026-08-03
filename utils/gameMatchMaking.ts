@@ -91,6 +91,7 @@ export function buildMatchmakingPlayerOptions(
   games: ProcessedGame[],
   gameRecords: Record<string, Record<string, PlayerGameRecord>>,
   players: Record<string, PlayerState>,
+  retiredCommanders: Record<string, Set<string>> = {},
 ): MatchmakingPlayerOption[] {
   const orderedGames = [...games].sort(compareGamesChronological)
 
@@ -98,6 +99,7 @@ export function buildMatchmakingPlayerOptions(
     .map((player) => {
       const orderedRecords = getOrderedPlayerRecords(player.name, orderedGames, gameRecords)
       const profiles = buildCommanderProfiles(orderedRecords)
+        .filter((profile) => !retiredCommanders[player.name]?.has(profile.commander))
 
       return {
         name: player.name,
@@ -117,6 +119,7 @@ export function buildFairMatchmakingResult(
   gameRecords: Record<string, Record<string, PlayerGameRecord>>,
   includePlayerMmrPreview = false,
   placementsByPlayer: Record<string, number> = {},
+  retiredCommanders: Record<string, Set<string>> = {},
 ): MatchmakingResult | null {
   if (selectedPlayers.length < MIN_PLAYERS || selectedPlayers.length > MAX_PLAYERS) return null
 
@@ -125,6 +128,7 @@ export function buildFairMatchmakingResult(
     .map((playerName) => {
       const orderedRecords = getOrderedPlayerRecords(playerName, orderedGames, gameRecords)
       const commanders = buildCommanderProfiles(orderedRecords)
+        .filter((profile) => !retiredCommanders[playerName]?.has(profile.commander))
 
       if (orderedRecords.length === 0 || commanders.length === 0) return null
 

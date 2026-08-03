@@ -6,7 +6,7 @@
     </div>
 
     <div v-if="points.length > 0" class="rating-chart__frame">
-      <canvas ref="canvasRef" class="rating-chart__canvas" />
+      <canvas ref="canvasRef" class="rating-chart__canvas" @click="onCanvasClick" />
     </div>
 
     <div v-else class="rating-chart__empty">
@@ -28,8 +28,23 @@ const props = withDefaults(defineProps<{
   title: 'Player Rating Over Time',
 })
 
+const emit = defineEmits<{
+  pointClick: [gameId: string]
+}>()
+
 const canvasRef = ref<HTMLCanvasElement | null>(null)
 let chart: Chart | null = null
+
+function onCanvasClick(event: MouseEvent) {
+  if (!chart || !canvasRef.value || props.points.length === 0) return
+  const rect = canvasRef.value.getBoundingClientRect()
+  const pixelX = event.clientX - rect.left
+  const rawIndex = chart.scales.x.getValueForPixel(pixelX)
+  if (rawIndex === undefined) return
+  const index = Math.max(0, Math.min(props.points.length - 1, Math.round(rawIndex)))
+  const gameId = props.points[index]?.gameId
+  if (gameId) emit('pointClick', gameId)
+}
 
 const ratingBounds = computed(() => {
   const values = [
@@ -218,6 +233,7 @@ function fmt(n: number) {
     display: block;
     width: 100%;
     height: 100%;
+    cursor: pointer;
   }
 
   &__empty {
