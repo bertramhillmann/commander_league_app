@@ -1,12 +1,30 @@
 <template>
-  <div class="placement-chart" :class="{ 'placement-chart--compact': compact }">
+  <div class="placement-chart" :class="{ 'placement-chart--compact': compact, 'placement-chart--zoomed': selectionRange }">
     <div v-if="!compact" class="placement-chart__header">
       <span class="placement-chart__title">{{ title }}</span>
-      <span class="placement-chart__summary">{{ points.length }} games</span>
+      <span class="placement-chart__summary">{{ displayPoints.length }}{{ selectionRange ? ` / ${points.length}` : '' }} games</span>
     </div>
 
     <div v-if="points.length > 0" class="placement-chart__frame">
-      <canvas ref="canvasRef" class="placement-chart__canvas" @click="onCanvasClick" />
+      <canvas
+        ref="canvasRef"
+        class="placement-chart__canvas"
+        @pointerdown="onPointerDown"
+        @pointermove="onPointerMove"
+        @pointerup="onPointerUp"
+        @pointercancel="onPointerCancel"
+      />
+      <div
+        v-if="isDragging"
+        class="placement-chart__drag-box"
+        :style="dragBoxStyle"
+      />
+      <button
+        v-if="selectionRange"
+        type="button"
+        class="placement-chart__reset-btn"
+        @click="resetSelection"
+      >Reset</button>
     </div>
 
     <div v-else class="placement-chart__empty">
@@ -27,17 +45,20 @@
 
 <script setup lang="ts">
 import type { Chart, ChartConfiguration, Plugin, TooltipItem } from 'chart.js'
-import type { CommanderMMRTimelinePoint, PlacementTimelinePoint } from '~/utils/commanderTimeline'
+import type { CommanderMMRTimelinePoint, PlacementTimelinePoint, PlacementTimelineRange } from '~/utils/commanderTimeline'
 
 const props = withDefaults(defineProps<{
   points: Array<PlacementTimelinePoint | CommanderMMRTimelinePoint>
   title?: string
   compact?: boolean
   mode?: "placement" | "mmr"
+  /** Lets a parent clear the chart's own zoom when it clears the selection elsewhere (e.g. a "Clear" button on filtered stats). */
+  activeRange?: PlacementTimelineRange | null
 }>(), {
   title: 'Placements Over Time',
   compact: false,
   mode: "placement",
+  activeRange: null,
 })
 
 const tierPalette: Record<string, string> = {
@@ -53,27 +74,116 @@ const tierPalette: Record<string, string> = {
 
 const emit = defineEmits<{
   pointClick: [gameId: string]
+  rangeChange: [range: PlacementTimelineRange | null]
 }>()
 
 const canvasRef = ref<HTMLCanvasElement | null>(null)
 let chart: Chart | null = null
 
-function onCanvasClick(event: MouseEvent) {
-  if (!chart || !canvasRef.value || props.points.length === 0) return
-  const rect = canvasRef.value.getBoundingClientRect()
-  const pixelX = event.clientX - rect.left
+const selectionRange = ref<{ start: number; end: number } | null>(null)
+const isDragging = ref(false)
+const dragStartX = ref(0)
+const dragCurrentX = ref(0)
+
+const displayPoints = computed(() => {
+  if (!selectionRange.value) return props.points
+  return props.points.slice(selectionRange.value.start, selectionRange.value.end + 1)
+})
+
+const dragBoxStyle = computed(() => {
+  const left = Math.min(dragStartX.value, dragCurrentX.value)
+  const width = Math.abs(dragCurrentX.value - dragStartX.value)
+  return { left: `${left}px`, width: `${width}px` }
+})
+
+const DRAG_THRESHOLD_PX = 8
+
+function onPointerDown(event: PointerEvent) {
+  if (!chart || event.button !== 0) return
+  const canvas = canvasRef.value
+  if (!canvas) return
+  const rect = canvas.getBoundingClientRect()
+  isDragging.value = true
+  dragStartX.value = event.clientX - rect.left
+  dragCurrentX.value = dragStartX.value
+  canvas.setPointerCapture(event.pointerId)
+}
+
+function onPointerMove(event: PointerEvent) {
+  if (!isDragging.value) return
+  const canvas = canvasRef.value
+  if (!canvas) return
+  const rect = canvas.getBoundingClientRect()
+  dragCurrentX.value = Math.min(Math.max(event.clientX - rect.left, 0), rect.width)
+}
+
+function onPointerUp(event: PointerEvent) {
+  if (!isDragging.value || !chart) return
+  isDragging.value = false
+  const canvas = canvasRef.value
+  if (canvas) canvas.releasePointerCapture(event.pointerId)
+
+  const minPx = Math.min(dragStartX.value, dragCurrentX.value)
+  const maxPx = Math.max(dragStartX.value, dragCurrentX.value)
+  if (maxPx - minPx < DRAG_THRESHOLD_PX) {
+    handlePointClick(dragCurrentX.value)
+    return
+  }
+
+  const xScale = chart.scales.x
+  const rawStart = xScale.getValueForPixel(minPx)
+  const rawEnd = xScale.getValueForPixel(maxPx)
+  if (rawStart === undefined || rawEnd === undefined) return
+
+  const currentLength = displayPoints.value.length
+  const localStart = Math.max(0, Math.min(currentLength - 1, Math.round(rawStart)))
+  const localEnd = Math.max(0, Math.min(currentLength - 1, Math.round(rawEnd)))
+  if (localEnd <= localStart) return
+
+  const offset = selectionRange.value?.start ?? 0
+  selectionRange.value = { start: offset + localStart, end: offset + localEnd }
+  emitRangeChange()
+}
+
+function onPointerCancel() {
+  isDragging.value = false
+}
+
+function resetSelection() {
+  selectionRange.value = null
+  emit('rangeChange', null)
+}
+
+function emitRangeChange() {
+  if (!selectionRange.value) {
+    emit('rangeChange', null)
+    return
+  }
+  const startPoint = props.points[selectionRange.value.start]
+  const endPoint = props.points[selectionRange.value.end]
+  if (!startPoint || !endPoint) return
+  emit('rangeChange', {
+    startGameId: startPoint.gameId,
+    endGameId: endPoint.gameId,
+    startLabel: startPoint.dateLabel,
+    endLabel: endPoint.dateLabel,
+  })
+}
+
+function handlePointClick(pixelX: number) {
+  if (!chart || displayPoints.value.length === 0) return
   const rawIndex = chart.scales.x.getValueForPixel(pixelX)
   if (rawIndex === undefined) return
-  const index = Math.max(0, Math.min(props.points.length - 1, Math.round(rawIndex)))
-  const gameId = props.points[index]?.gameId
+  const index = Math.max(0, Math.min(displayPoints.value.length - 1, Math.round(rawIndex)))
+  const gameId = displayPoints.value[index]?.gameId
   if (gameId) emit('pointClick', gameId)
 }
 
-const hasTierChanges = computed(() => props.points.some((point) => point.tierChange))
+const hasTierChanges = computed(() => displayPoints.value.some((point) => point.tierChange))
 
 const legendTierExamples = computed(() => {
   const seen = new Set<string>()
-  return props.points.filter((point) => {
+  return displayPoints.value.filter((point) => {
     if (!point.tierChange) return false
     const key = `${point.tier}-${point.tierChange}`
     if (seen.has(key)) return false
@@ -83,11 +193,11 @@ const legendTierExamples = computed(() => {
 })
 
 const placementPoints = computed(() =>
-  props.points.filter((point): point is PlacementTimelinePoint => "placement" in point),
+  displayPoints.value.filter((point): point is PlacementTimelinePoint => "placement" in point),
 )
 
 const mmrPoints = computed(() =>
-  props.points.filter((point): point is CommanderMMRTimelinePoint => "mmr" in point),
+  displayPoints.value.filter((point): point is CommanderMMRTimelinePoint => "mmr" in point),
 )
 
 const maxPlacement = computed(() =>
@@ -97,9 +207,26 @@ const maxPlacement = computed(() =>
 watch(
   () => props.points,
   async () => {
+    if (selectionRange.value) {
+      selectionRange.value = null
+      emit('rangeChange', null)
+    }
     await renderChart()
   },
   { deep: true },
+)
+
+watch(selectionRange, async () => { await renderChart() }, { deep: true })
+
+// Lets a parent clear our zoom (e.g. a "Clear" button on filtered stats) without us
+// echoing the range back — only react when the parent has actually dropped the range.
+watch(
+  () => props.activeRange,
+  (range) => {
+    if (!range && selectionRange.value) {
+      selectionRange.value = null
+    }
+  },
 )
 
 watch(
@@ -139,11 +266,11 @@ function destroyChart() {
 }
 
 function buildChartConfig(): ChartConfiguration<'line' | 'scatter'> {
-  const labels = props.points.map((point) => point.dateLabel)
+  const labels = displayPoints.value.map((point) => point.dateLabel)
   const metricValues = props.mode === "mmr"
     ? mmrPoints.value.map((point) => point.mmr)
     : placementPoints.value.map((point) => point.placement)
-  const markerData = props.points.map((point, index) =>
+  const markerData = displayPoints.value.map((point, index) =>
     point.tierChange
       ? { x: index, y: props.mode === "mmr" && "mmr" in point ? point.mmr : "placement" in point ? point.placement : null }
       : { x: index, y: null },
@@ -165,12 +292,12 @@ function buildChartConfig(): ChartConfiguration<'line' | 'scatter'> {
           borderWidth: props.compact ? 1.5 : 2,
           pointRadius: props.compact ? 1.6 : 2.4,
           pointHoverRadius: props.compact ? 3 : 4,
-          pointBackgroundColor: props.points.map((p) => tierPalette[p.tier] ?? '#9b6ee8'),
+          pointBackgroundColor: displayPoints.value.map((p) => tierPalette[p.tier] ?? '#9b6ee8'),
           pointBorderColor: '#242438',
           pointBorderWidth: props.compact ? 0.8 : 1,
           fill: false,
           segment: {
-            borderColor: (ctx: any) => tierPalette[props.points[ctx.p0DataIndex]?.tier] ?? '#9b6ee8',
+            borderColor: (ctx: any) => tierPalette[displayPoints.value[ctx.p0DataIndex]?.tier] ?? '#9b6ee8',
           },
         },
         {
@@ -219,11 +346,11 @@ function buildChartConfig(): ChartConfiguration<'line' | 'scatter'> {
           callbacks: {
             title(items) {
               const item = items[0]
-              const point = props.points[item.dataIndex]
+              const point = displayPoints.value[item.dataIndex]
               return point?.dateLabel ?? item.label
             },
             label(item: TooltipItem<'line' | 'scatter'>) {
-              const point = props.points[item.dataIndex]
+              const point = displayPoints.value[item.dataIndex]
               if (!point) return ''
               const bits = props.mode === "mmr" && "mmr" in point
                 ? [`MMR ${formatMmr(point.mmr)}`, point.tierLabel]
@@ -326,7 +453,7 @@ const tierPointLabelPlugin: Plugin<'line' | 'scatter'> = {
     ctx.font = props.compact ? '700 9px sans-serif' : '700 10px sans-serif'
 
     datasetMeta.data.forEach((element, index) => {
-      const point = props.points[index]
+      const point = displayPoints.value[index]
       if (!point?.tierChange) return
 
       const arrow = point.tierChange === 'drop' ? '▼' : '▲'
@@ -340,7 +467,7 @@ const tierPointLabelPlugin: Plugin<'line' | 'scatter'> = {
 }
 
 function markerRotation(index: number) {
-  return props.points[index]?.tierChange === 'drop' ? 180 : 0
+  return displayPoints.value[index]?.tierChange === 'drop' ? 180 : 0
 }
 
 function ordinal(value: number) {
@@ -389,6 +516,12 @@ function formatMmr(value: number) {
     background: rgba($color-bg-elevated, 0.55);
   }
 
+  &--zoomed {
+    border-color: rgba($color-primary-light, 0.55);
+    background: rgba($color-primary, 0.14);
+    transition: border-color $transition-fast, background $transition-fast;
+  }
+
   &__header {
     display: flex;
     align-items: center;
@@ -422,7 +555,39 @@ function formatMmr(value: number) {
     display: block;
     width: 100%;
     height: 100%;
+    cursor: crosshair;
+    touch-action: none;
+  }
+
+  &__drag-box {
+    position: absolute;
+    top: 0;
+    bottom: 0;
+    background: rgba($color-primary-light, 0.18);
+    border-left: 1px solid rgba($color-primary-light, 0.6);
+    border-right: 1px solid rgba($color-primary-light, 0.6);
+    pointer-events: none;
+    z-index: 2;
+  }
+
+  &__reset-btn {
+    position: absolute;
+    top: 2px;
+    right: 2px;
+    z-index: 3;
+    padding: 2px 8px;
+    border: 1px solid rgba($border-color, 0.6);
+    border-radius: $border-radius-full;
+    background: rgba(20, 18, 36, 0.9);
+    color: $color-text;
+    font-size: 10px;
     cursor: pointer;
+    transition: border-color $transition-fast, background $transition-fast;
+
+    &:hover {
+      border-color: rgba($color-primary-light, 0.5);
+      background: rgba(20, 18, 36, 1);
+    }
   }
 
   &__empty {

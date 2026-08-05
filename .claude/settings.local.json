@@ -31,7 +31,22 @@
       "Bash(awk '/<style/{flag=1} flag' pages/dashboard.vue)",
       "Bash(timeout 30 npm run dev)",
       "Bash(git stash *)",
-      "Read(//tmp/**)"
+      "Read(//tmp/**)",
+      "Bash(git diff *)",
+      "Bash(sleep 8; tail -n 60 /tmp/dev.log)",
+      "Bash(tail -n 15 /tmp/dev.log)",
+      "Bash(curl -s -o /dev/null -w \"%{http_code}\\\\n\" http://localhost:3000/)",
+      "Bash(npx --no-install chromium-cli --version)",
+      "Bash(node -e \"console.log\\(require.resolve\\('playwright'\\)\\)\")",
+      "Bash(npx --no-install playwright --version)",
+      "Bash(chromium-cli --help)",
+      "Bash(npm ls *)",
+      "Bash(npm info *)",
+      "Bash(npm install *)",
+      "Bash(npx playwright *)",
+      "Bash(node \"C:\\\\Users\\\\bertr\\\\AppData\\\\Local\\\\Temp\\\\claude\\\\c--Users-bertr-Desktop-Work-cmd-app\\\\90559c3e-1462-481a-b5c2-3d274757bab8\\\\scratchpad\\\\verify-drag-zoom.mjs\")",
+      "Bash(node \"__diag.mjs\")",
+      "Bash(node \"__verify.mjs\")"
     ]
   }
 }

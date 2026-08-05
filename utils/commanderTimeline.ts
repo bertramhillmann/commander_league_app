@@ -24,6 +24,13 @@ export interface CommanderMMRTimelinePoint {
   tierChange: "rise" | "drop" | null
 }
 
+export interface PlacementTimelineRange {
+  startGameId: string
+  endGameId: string
+  startLabel: string
+  endLabel: string
+}
+
 export function buildCommanderPlacementTimeline(
   games: ProcessedGame[],
   gameRecords: Record<string, Record<string, PlayerGameRecord>>,

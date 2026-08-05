@@ -319,6 +319,7 @@
                 </template>
                 <div v-else class="cmd-row__card-placeholder" />
               </div>
+              <div v-if="isCommanderRetired(cmd.name)" class="cmd-row__retired-tag">RETIRED</div>
               <div
                 class="cmd-row__card-xp"
                 :class="{
@@ -544,6 +545,15 @@
                 </div>
               </div>
 
+              <div v-if="cmd.timeframe" class="cmd-row__timeframe-badge">
+                <span>Stats filtered: {{ cmd.timeframe.startLabel }} – {{ cmd.timeframe.endLabel }}</span>
+                <button
+                  type="button"
+                  class="cmd-row__timeframe-clear"
+                  @click="onCommanderRangeChange(cmd.name, null)"
+                >Clear</button>
+              </div>
+
               <div class="cmd-row__stats-band">
                 <div
                   v-if="showAverageCommanderMmrHighlight && getAverageCommanderMmrInsight(cmd.name)"
@@ -690,9 +700,11 @@
                       :points="activeCommanderTimeline === 'mmr' ? cmd.mmrTimeline : cmd.timeline"
                       :mode="activeCommanderTimeline"
                       :title="activeCommanderTimeline === 'mmr' ? 'MMR Rating Over Time' : 'Placements Over Time'"
+                      :active-range="cmd.timeframe"
                       class="cmd-row__timeline"
                       compact
                       @point-click="openGameModal"
+                      @range-change="(range) => onCommanderRangeChange(cmd.name, range)"
                     />
                   </div>
                 </div>
@@ -1003,22 +1015,42 @@
       @keydown.esc.prevent="closeCommanderSlotEditor()"
     />
     <div v-else class="cmd-row__slot-manual-list">
-      <input
+      <div
         v-for="(cardName, index) in commanderSlotManualNames"
         :key="index"
-        :value="cardName"
-        type="text"
-        class="cmd-row__slot-input"
-        placeholder="Card name"
-        @input="updateCommanderSlotManualName(index, ($event.target as HTMLInputElement).value)"
-        @keydown.esc.prevent="closeCommanderSlotEditor()"
-      />
+        class="cmd-row__slot-manual-row"
+      >
+        <input
+          :value="cardName"
+          type="text"
+          class="cmd-row__slot-input"
+          placeholder="Card name"
+          @input="updateCommanderSlotManualName(index, ($event.target as HTMLInputElement).value)"
+          @keydown.esc.prevent="closeCommanderSlotEditor()"
+        />
+        <button
+          v-if="cardName.trim()"
+          type="button"
+          class="cmd-row__slot-manual-card"
+          :class="{ 'is-missing': !getCommanderSlotManualPreview(cardName, index) }"
+          :disabled="commanderSlotPrintingChoices.loading"
+          :title="getCommanderSlotManualPreview(cardName, index) ? 'Choose another printing' : 'Choose a printing'"
+          @click="openCommanderSlotPrintingChoices(index)"
+        >
+          <img
+            v-if="getCommanderSlotManualPreview(cardName, index)"
+            :src="getCommanderSlotManualPreview(cardName, index)?.imageUrl"
+            :alt="getCommanderSlotManualPreview(cardName, index)?.name"
+          />
+          <span v-else>Choose<br>printing</span>
+        </button>
+      </div>
     </div>
     <div v-if="commanderSlotEditor.previewLoading" class="cmd-row__slot-preview-status">
       Checking Scryfall…
     </div>
     <div
-      v-else-if="commanderSlotEditor.previewCards.length > 0"
+      v-else-if="commanderSlotEntryMode === 'list' && commanderSlotEditor.previewCards.length > 0"
       class="cmd-row__slot-preview"
     >
       <div
@@ -1044,6 +1076,30 @@
       <div class="cmd-row__slot-preview-names">
         {{ commanderSlotEditor.previewCards.map((card) => card.name).join(' + ') }}
       </div>
+    </div>
+    <div v-if="commanderSlotPrintingChoices.open" class="cmd-row__slot-printings">
+      <div class="cmd-row__slot-printings-header">
+        <span>Choose printing</span>
+        <button type="button" aria-label="Close printing picker" @click="closeCommanderSlotPrintingChoices()">×</button>
+      </div>
+      <div v-if="commanderSlotPrintingChoices.loading" class="cmd-row__slot-preview-status">Loading printings…</div>
+      <div v-else-if="commanderSlotPrintingChoices.cards.length" class="cmd-row__slot-printings-grid">
+        <button
+          v-for="card in commanderSlotPrintingChoices.cards"
+          :key="card.id"
+          type="button"
+          class="cmd-row__slot-printing"
+          @click="selectCommanderSlotPrinting(card)"
+        >
+          <img
+            v-if="getCardImageUrl(card, 'small') || getCardImageUrl(card, 'normal')"
+            :src="getCardImageUrl(card, 'small') || getCardImageUrl(card, 'normal')"
+            :alt="card.name"
+          />
+          <span>{{ card.set_name || card.set?.toUpperCase() }}</span>
+        </button>
+      </div>
+      <div v-else class="cmd-row__slot-preview-status">No printings found for this card.</div>
     </div>
     <span v-if="commanderSlotEditor.previewError" class="cmd-row__deck-error">
       {{ commanderSlotEditor.previewError }}
@@ -1078,11 +1134,11 @@
 <script setup lang="ts">
 import { compareGamesChronological, getPlayerCommanderPerformanceEdgeMetrics, getPlayerCommanderMetrics } from '~/composables/useLeagueState'
 import { useAuth } from '~/composables/useAuth'
-import { fetchCardsByName, getCardImageUrl, type ScryfallCard } from '~/services/scryfallService'
+import { fetchCardPrintingsByName, fetchCardsByName, getCardImageUrl, type ScryfallCard } from '~/services/scryfallService'
 import { xpToLevel, getCommanderLevelProgress, getRestedXpMultiplier } from '~/utils/commanderExperience'
 import { getArchEnemySummary } from '~/utils/archEnemy'
 import { extractArchidektDeckId } from '~/utils/archidekt'
-import { buildCommanderMMRTimeline, buildCommanderPlacementTimeline, type CommanderMMRTimelinePoint, type PlacementTimelinePoint } from '~/utils/commanderTimeline'
+import { buildCommanderMMRTimeline, buildCommanderPlacementTimeline, type CommanderMMRTimelinePoint, type PlacementTimelinePoint, type PlacementTimelineRange } from '~/utils/commanderTimeline'
 import { buildPlayerLeagueTimeline } from '~/utils/playerLeagueTimeline'
 import { buildPlayerMatchTimeline } from '~/utils/playerMatchTimeline'
 import {
@@ -1659,6 +1715,7 @@ interface CommanderRow {
   title: CommanderTitleResult
   availableTitles: CommanderTitleResult[]
   achievements: Array<{ id: string; name: string; description: string; icon: string; points: number }>
+  timeframe: PlacementTimelineRange | null
 }
 
 type CommanderIndicatorDirection = 'up' | 'down'
@@ -1752,6 +1809,13 @@ const commanderSlotEditor = reactive({
 const commanderSlotPopupRef = ref<HTMLElement | null>(null)
 const commanderSlotEntryMode = ref<'manual' | 'list'>('manual')
 const commanderSlotManualNames = ref<string[]>([''])
+const commanderSlotPrintingChoices = reactive({
+  open: false,
+  index: -1,
+  loading: false,
+  cards: [] as ScryfallCard[],
+})
+const commanderSlotSelectedPrintings = reactive<Record<number, ScryfallCard | undefined>>({})
 let commanderSlotPreviewTimer: ReturnType<typeof setTimeout> | null = null
 let commanderSlotPreviewToken = 0
 let commanderSlotPopupResizeObserver: ResizeObserver | null = null
@@ -1835,8 +1899,8 @@ function openCommanderSlotEditor(commanderName: string, slotIndex: number, event
   const trigger = event.currentTarget as HTMLElement | null
   if (trigger && import.meta.client) {
     const rect = trigger.getBoundingClientRect()
-    const popupWidth = 290
-    const popupHeight = 276
+    const popupWidth = 390
+    const popupHeight = 360
     commanderSlotEditor.popupX = Math.max(12, Math.min(rect.left + 10, window.innerWidth - popupWidth - 12))
     commanderSlotEditor.popupY = Math.max(12, Math.min(rect.top + 10, window.innerHeight - popupHeight - 12))
   }
@@ -1852,6 +1916,8 @@ function openCommanderSlotEditor(commanderName: string, slotIndex: number, event
   commanderSlotEditor.error = ''
   commanderSlotEditor.previewError = ''
   commanderSlotEditor.previewCards = []
+  closeCommanderSlotPrintingChoices()
+  for (const key of Object.keys(commanderSlotSelectedPrintings)) delete commanderSlotSelectedPrintings[Number(key)]
   void updateCommanderSlotPreview(commanderSlotEditor.value)
 }
 
@@ -1868,6 +1934,8 @@ function closeCommanderSlotEditor() {
   commanderSlotEditor.previewError = ''
   commanderSlotEditor.previewCards = []
   commanderSlotManualNames.value = ['']
+  closeCommanderSlotPrintingChoices()
+  for (const key of Object.keys(commanderSlotSelectedPrintings)) delete commanderSlotSelectedPrintings[Number(key)]
   commanderSlotEditor.popupX = 0
   commanderSlotEditor.popupY = 0
 }
@@ -1964,6 +2032,55 @@ function standardDeviation(values: number[]) {
   return Math.sqrt(variance)
 }
 
+// ── Per-commander timeframe filtering (drag-to-zoom on the commander chart) ────
+
+const commanderTimeframes = reactive<Record<string, PlacementTimelineRange | undefined>>({})
+
+const gameChronoIndex = computed(() => {
+  const map = new Map<string, number>()
+  chronologicalGames.value.forEach((game, index) => map.set(game.gameId, index))
+  return map
+})
+
+function onCommanderRangeChange(commanderName: string, range: PlacementTimelineRange | null) {
+  if (range) {
+    commanderTimeframes[commanderName] = range
+  } else {
+    delete commanderTimeframes[commanderName]
+  }
+}
+
+function getTimeframeFilteredGameRecords(playerName: string, range: PlacementTimelineRange): typeof gameRecords.value {
+  const startIdx = gameChronoIndex.value.get(range.startGameId)
+  const endIdx = gameChronoIndex.value.get(range.endGameId)
+  if (startIdx === undefined || endIdx === undefined) return gameRecords.value
+
+  const lo = Math.min(startIdx, endIdx)
+  const hi = Math.max(startIdx, endIdx)
+  const filtered: (typeof gameRecords.value)[string] = {}
+  for (const [gameId, record] of Object.entries(gameRecords.value[playerName] ?? {})) {
+    const idx = gameChronoIndex.value.get(gameId)
+    if (idx !== undefined && idx >= lo && idx <= hi) filtered[gameId] = record
+  }
+
+  return { ...gameRecords.value, [playerName]: filtered }
+}
+
+// Kept separate from commanderRows so its array references stay stable when only
+// commanderTimeframes changes — the chart relies on reference equality of `points`
+// to know whether its own drag-selection is still valid.
+const commanderChartTimelines = computed(() => {
+  const names = new Set(allRecords.value.map((r) => r.commander))
+  const map: Record<string, { timeline: PlacementTimelinePoint[]; mmrTimeline: CommanderMMRTimelinePoint[] }> = {}
+  for (const name of names) {
+    map[name] = {
+      timeline: buildCommanderPlacementTimeline(chronologicalGames.value, gameRecords.value, playerId.value, name),
+      mmrTimeline: buildCommanderMMRTimeline(chronologicalGames.value, gameRecords.value, playerId.value, name),
+    }
+  }
+  return map
+})
+
 const commanderRows = computed((): CommanderRow[] => {
   const byCommander: Record<string, typeof allRecords.value> = {}
   for (const r of allRecords.value) {
@@ -1981,9 +2098,13 @@ const commanderRows = computed((): CommanderRow[] => {
   }
 
   return Object.entries(byCommander).map(([name, records]) => {
-    const metrics = getPlayerCommanderMetrics(playerId.value, name, gameRecords.value, players.value)
+    const timeframe: PlacementTimelineRange | null = commanderTimeframes[name] ?? null
+    const effectiveGameRecords = timeframe
+      ? getTimeframeFilteredGameRecords(playerId.value, timeframe)
+      : gameRecords.value
+    const metrics = getPlayerCommanderMetrics(playerId.value, name, effectiveGameRecords, players.value)
     if (!metrics) return null
-    const edgeMetrics = getPlayerCommanderPerformanceEdgeMetrics(playerId.value, name, gameRecords.value)
+    const edgeMetrics = getPlayerCommanderPerformanceEdgeMetrics(playerId.value, name, effectiveGameRecords)
     const xp = player.value?.commanderXP?.[name] ?? 0
     const rested = player.value?.commanderRested?.[name] ?? 0
     const {
@@ -2000,18 +2121,7 @@ const commanderRows = computed((): CommanderRow[] => {
     const mmr = records[records.length - 1]?.commanderMMRAfter ?? 0
     const mmrTier = getCommanderTierFromMMR(mmr)
     const mmrTierLabel = commanderMmrTierLabel(mmrTier)
-    const timeline = buildCommanderPlacementTimeline(
-      chronologicalGames.value,
-      gameRecords.value,
-      playerId.value,
-      name,
-    )
-    const mmrTimeline = buildCommanderMMRTimeline(
-      chronologicalGames.value,
-      gameRecords.value,
-      playerId.value,
-      name,
-    )
+    const { timeline, mmrTimeline } = commanderChartTimelines.value[name] ?? { timeline: [], mmrTimeline: [] }
     const titleSummary = getCommanderTitleSummary({
       playerName: playerId.value,
       commanderName: name,
@@ -2070,6 +2180,7 @@ const commanderRows = computed((): CommanderRow[] => {
       title: titleSummary.displayTitle,
       availableTitles: titleSummary.earnedTitles,
       achievements,
+      timeframe,
     }
   }).filter((row): row is CommanderRow => !!row)
 })
@@ -2230,6 +2341,7 @@ function setCommanderSlotEntryMode(mode: 'manual' | 'list') {
 }
 
 function updateCommanderSlotManualName(index: number, value: string) {
+  delete commanderSlotSelectedPrintings[index]
   commanderSlotManualNames.value[index] = value
   if (
     index === commanderSlotManualNames.value.length - 1
@@ -2239,6 +2351,52 @@ function updateCommanderSlotManualName(index: number, value: string) {
     commanderSlotManualNames.value.push('')
   }
   commanderSlotEditor.value = commanderSlotManualNames.value.filter((name) => name.trim()).join(', ')
+}
+
+function getCommanderSlotManualPreview(cardName: string, index: number) {
+  const selectedPrinting = commanderSlotSelectedPrintings[index]
+  if (selectedPrinting) {
+    return {
+      name: selectedPrinting.name,
+      imageUrl: getCardImageUrl(selectedPrinting, 'small') ?? getCardImageUrl(selectedPrinting, 'normal') ?? '',
+    }
+  }
+
+  const normalizedName = cardName.trim().toLocaleLowerCase()
+  return commanderSlotEditor.previewCards.find((card) => card.name.trim().toLocaleLowerCase() === normalizedName)
+}
+
+function closeCommanderSlotPrintingChoices() {
+  commanderSlotPrintingChoices.open = false
+  commanderSlotPrintingChoices.index = -1
+  commanderSlotPrintingChoices.loading = false
+  commanderSlotPrintingChoices.cards = []
+}
+
+async function openCommanderSlotPrintingChoices(index: number) {
+  const name = commanderSlotManualNames.value[index]?.trim()
+  if (!name) return
+
+  commanderSlotPrintingChoices.open = true
+  commanderSlotPrintingChoices.index = index
+  commanderSlotPrintingChoices.loading = true
+  commanderSlotPrintingChoices.cards = []
+
+  const cards = await fetchCardPrintingsByName(name)
+  if (!commanderSlotPrintingChoices.open || commanderSlotPrintingChoices.index !== index) return
+
+  commanderSlotPrintingChoices.cards = cards
+  commanderSlotPrintingChoices.loading = false
+}
+
+function selectCommanderSlotPrinting(card: ScryfallCard) {
+  const index = commanderSlotPrintingChoices.index
+  if (index < 0) return
+
+  commanderSlotSelectedPrintings[index] = card
+  commanderSlotManualNames.value[index] = card.name
+  commanderSlotEditor.value = commanderSlotManualNames.value.filter((name) => name.trim()).join(', ')
+  closeCommanderSlotPrintingChoices()
 }
 
 async function setCommanderRetired(commanderName: string, retired: boolean) {
@@ -4063,7 +4221,7 @@ function getEdgeTooltipText(cmd: CommanderRow) {
     display: flex;
     gap: $spacing-1;
     flex-wrap: wrap;
-    flex: 0 1 auto;
+    flex: 0 1 100%;
     align-content: flex-start;
   }
 
@@ -4073,6 +4231,35 @@ function getEdgeTooltipText(cmd: CommanderRow) {
     justify-content: space-between;
     gap: $spacing-3;
     flex-wrap: wrap;
+  }
+
+  &__timeframe-badge {
+    display: flex;
+    align-items: center;
+    gap: $spacing-2;
+    padding: 4px 10px;
+    border-radius: $border-radius-full;
+    border: 1px solid rgba($color-primary-light, 0.4);
+    background: rgba($color-primary, 0.12);
+    font-size: 11px;
+    color: $color-text;
+    width: fit-content;
+  }
+
+  &__timeframe-clear {
+    padding: 1px 8px;
+    border: 1px solid rgba($border-color, 0.7);
+    border-radius: $border-radius-full;
+    background: transparent;
+    color: $color-text-muted;
+    font-size: 10px;
+    cursor: pointer;
+    transition: border-color $transition-fast, color $transition-fast;
+
+    &:hover {
+      border-color: rgba($color-primary-light, 0.5);
+      color: $color-text;
+    }
   }
 
   &__meta-row {
@@ -4335,9 +4522,37 @@ function getEdgeTooltipText(cmd: CommanderRow) {
   }
 }
 
-.cmd-row--retired .cmd-row__card-bg,
+.cmd-row--retired .cmd-row__card-bg {
+  filter: grayscale(1) saturate(0.15) brightness(0.46) blur(5px);
+}
+
 .cmd-row--retired .cmd-row__card-img {
+  box-sizing: border-box;
+  border: 3px solid #d9363e;
   filter: grayscale(1) brightness(0.68);
+}
+
+.cmd-row__retired-tag {
+  position: relative;
+  z-index: 3;
+  align-self: center;
+  margin-top: -3px;
+  padding: 2px 12px 3px;
+  border: 2px solid rgba(255, 255, 255, 0.72);
+  background: rgba(22, 4, 6, 0.92);
+  color: #e9e9e9;
+  font-family: Impact, Haettenschweiler, 'Arial Narrow Bold', sans-serif;
+  font-size: 19px;
+  font-style: italic;
+  font-weight: 900;
+  letter-spacing: 0.08em;
+  line-height: 1;
+  text-shadow:
+    1px 1px 0 #111,
+    -1px -1px 0 #111,
+    1px -1px 0 #111,
+    -1px 1px 0 #111;
+  transform: skewX(-8deg);
 }
 
 // ── Mini achievement card ─────────────────────────────────────────────────────
@@ -5218,7 +5433,9 @@ function getEdgeTooltipText(cmd: CommanderRow) {
 .cmd-row__slot-popup {
   position: fixed;
   z-index: 1200;
-  width: min(290px, calc(100vw - 24px));
+  width: min(390px, calc(100vw - 24px));
+  max-height: min(620px, calc(100vh - 24px));
+  overflow-y: auto;
   display: flex;
   flex-direction: column;
   gap: 10px;
@@ -5337,6 +5554,107 @@ function getEdgeTooltipText(cmd: CommanderRow) {
   display: flex;
   flex-direction: column;
   gap: 6px;
+}
+
+.cmd-row__slot-manual-row {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) 66px;
+  gap: 8px;
+  align-items: stretch;
+}
+
+.cmd-row__slot-manual-row .cmd-row__slot-input {
+  min-width: 0;
+  min-height: 42px;
+  padding: 8px 10px;
+  line-height: 1.25;
+}
+
+.cmd-row__slot-manual-card {
+  min-width: 0;
+  min-height: 42px;
+  overflow: hidden;
+  padding: 0;
+  border: 1px solid rgba($color-primary-light, 0.32);
+  border-radius: 7px;
+  background: rgba(0, 0, 0, 0.3);
+  color: $color-text-muted;
+  cursor: pointer;
+
+  img {
+    display: block;
+    width: 100%;
+    height: 100%;
+    object-fit: cover;
+  }
+
+  span {
+    display: block;
+    font-size: 9px;
+    line-height: 1.15;
+  }
+
+  &.is-missing {
+    border-style: dashed;
+  }
+
+  &:disabled {
+    cursor: wait;
+    opacity: 0.6;
+  }
+}
+
+.cmd-row__slot-printings {
+  display: grid;
+  gap: 8px;
+  padding-top: 2px;
+}
+
+.cmd-row__slot-printings-header {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  color: $color-text;
+  font-size: 11px;
+  font-weight: $font-weight-bold;
+
+  button {
+    border: 0;
+    background: transparent;
+    color: $color-text-muted;
+    font-size: 18px;
+    line-height: 1;
+    cursor: pointer;
+  }
+}
+
+.cmd-row__slot-printings-grid {
+  display: grid;
+  grid-template-columns: repeat(auto-fill, minmax(58px, 1fr));
+  gap: 6px;
+  max-height: 240px;
+  overflow-y: auto;
+}
+
+.cmd-row__slot-printing {
+  display: grid;
+  gap: 3px;
+  min-width: 0;
+  padding: 3px;
+  border: 1px solid rgba($color-primary-light, 0.22);
+  border-radius: 7px;
+  background: rgba(0, 0, 0, 0.28);
+  color: $color-text-muted;
+  font-size: 8px;
+  cursor: pointer;
+
+  img {
+    display: block;
+    width: 100%;
+    aspect-ratio: 0.714;
+    object-fit: cover;
+    border-radius: 4px;
+  }
 }
 
 .cmd-row__slot-textarea {
