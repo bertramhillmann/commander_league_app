@@ -46,8 +46,9 @@ const PlayerPurchaseSchema = new Schema<IPlayerPurchase>(
     name: { type: String, required: true },
     type: { type: String, required: true },
     cost: { type: Number, required: true, default: 0 },
-    set: { type: String, required: true, default: '' },
-    set_name: { type: String, required: true, default: '' },
+    // Upgrades such as Commander slots do not belong to a card set.
+    set: { type: String, default: '' },
+    set_name: { type: String, default: '' },
     cards: { type: [String], default: [] },
     cardPrintings: {
       type: [{

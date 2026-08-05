@@ -3,6 +3,7 @@ import { getCommanderTierFromMMR, type CommanderMMRTier } from '~/composables/us
 
 export interface PlacementTimelinePoint {
   gameId: string
+  dateMs: number
   dateLabel: string
   placement: number
   playerCount: number
@@ -16,6 +17,7 @@ export interface PlacementTimelinePoint {
 
 export interface CommanderMMRTimelinePoint {
   gameId: string
+  dateMs: number
   dateLabel: string
   mmr: number
   delta: number
@@ -58,6 +60,7 @@ export function buildCommanderPlacementTimeline(
 
     timeline.push({
       gameId: game.gameId,
+      dateMs: new Date(game.date).getTime(),
       dateLabel: formatGameDate(game.date),
       placement: targetRecord.placement,
       playerCount: targetRecord.playerCount,
@@ -100,6 +103,7 @@ export function buildCommanderMMRTimeline(
 
     timeline.push({
       gameId: game.gameId,
+      dateMs: new Date(game.date).getTime(),
       dateLabel: formatGameDate(game.date),
       mmr: targetRecord.commanderMMRAfter,
       delta: targetRecord.commanderMMRDelta,

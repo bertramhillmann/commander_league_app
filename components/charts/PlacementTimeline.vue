@@ -46,6 +46,7 @@
 <script setup lang="ts">
 import type { Chart, ChartConfiguration, Plugin, TooltipItem } from 'chart.js'
 import type { CommanderMMRTimelinePoint, PlacementTimelinePoint, PlacementTimelineRange } from '~/utils/commanderTimeline'
+import type { LeagueSeasonRange } from '~/utils/leagueSettings'
 
 const props = withDefaults(defineProps<{
   points: Array<PlacementTimelinePoint | CommanderMMRTimelinePoint>
@@ -54,11 +55,14 @@ const props = withDefaults(defineProps<{
   mode?: "placement" | "mmr"
   /** Lets a parent clear the chart's own zoom when it clears the selection elsewhere (e.g. a "Clear" button on filtered stats). */
   activeRange?: PlacementTimelineRange | null
+  /** Season ranges to mark along the bottom of the chart, so users can see which season each game falls in. */
+  seasons?: LeagueSeasonRange[]
 }>(), {
   title: 'Placements Over Time',
   compact: false,
   mode: "placement",
   activeRange: null,
+  seasons: () => [],
 })
 
 const tierPalette: Record<string, string> = {
@@ -234,6 +238,14 @@ watch(
   async () => {
     await renderChart()
   },
+)
+
+watch(
+  () => props.seasons,
+  async () => {
+    await renderChart()
+  },
+  { deep: true },
 )
 
 watch(
@@ -436,7 +448,7 @@ function buildChartConfig(): ChartConfiguration<'line' | 'scatter'> {
         },
       },
     },
-    plugins: [tierPointLabelPlugin],
+    plugins: [tierPointLabelPlugin, seasonBoundaryPlugin],
   }
 }
 
@@ -468,6 +480,49 @@ const tierPointLabelPlugin: Plugin<'line' | 'scatter'> = {
 
 function markerRotation(index: number) {
   return displayPoints.value[index]?.tierChange === 'drop' ? 180 : 0
+}
+
+const seasonBoundaryPlugin: Plugin<'line' | 'scatter'> = {
+  id: 'season-boundaries',
+  afterDraw(chartInstance) {
+    const points = displayPoints.value
+    if (props.seasons.length === 0 || points.length < 2) return
+
+    const { ctx, chartArea, scales } = chartInstance
+    const xScale = scales.x
+    const tickHeight = props.compact ? 7 : 12
+
+    ctx.save()
+    ctx.strokeStyle = 'rgba(155, 110, 232, 0.55)'
+    ctx.fillStyle = 'rgba(200, 190, 230, 0.85)'
+    ctx.lineWidth = 1
+    ctx.font = props.compact ? '600 7px sans-serif' : '600 8px sans-serif'
+    ctx.textAlign = 'center'
+
+    for (const season of props.seasons) {
+      // Season 1's start is the league's start, not a meaningful cut point within the data.
+      if (season.index === 0) continue
+
+      const idx = points.findIndex((point) => point.dateMs >= season.startMs)
+      if (idx <= 0) continue // boundary falls before or after the visible range
+
+      const prevPoint = points[idx - 1]
+      const currPoint = points[idx]
+      const prevPx = xScale.getPixelForValue(idx - 1)
+      const currPx = xScale.getPixelForValue(idx)
+      const span = currPoint.dateMs - prevPoint.dateMs
+      const fraction = span > 0 ? (season.startMs - prevPoint.dateMs) / span : 0
+      const x = prevPx + (currPx - prevPx) * fraction
+
+      ctx.beginPath()
+      ctx.moveTo(x, chartArea.bottom)
+      ctx.lineTo(x, chartArea.bottom - tickHeight)
+      ctx.stroke()
+      ctx.fillText(`S${season.index + 1}`, x, chartArea.bottom - tickHeight - 2)
+    }
+
+    ctx.restore()
+  },
 }
 
 function ordinal(value: number) {

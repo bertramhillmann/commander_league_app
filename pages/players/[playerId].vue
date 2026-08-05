@@ -311,15 +311,17 @@
                     aria-hidden="true"
                     class="cmd-row__card-bg"
                   />
-                  <img
-                    :src="artUrls.get(cmd.name)"
-                    :alt="cmd.name"
-                    class="cmd-row__card-img"
-                  />
+                  <div class="cmd-row__card-img-frame">
+                    <img
+                      :src="artUrls.get(cmd.name)"
+                      :alt="cmd.name"
+                      class="cmd-row__card-img"
+                    />
+                  </div>
+                  <div v-if="isCommanderRetired(cmd.name)" class="cmd-row__retired-tag">RETIRED</div>
                 </template>
                 <div v-else class="cmd-row__card-placeholder" />
               </div>
-              <div v-if="isCommanderRetired(cmd.name)" class="cmd-row__retired-tag">RETIRED</div>
               <div
                 class="cmd-row__card-xp"
                 :class="{
@@ -701,6 +703,7 @@
                       :mode="activeCommanderTimeline"
                       :title="activeCommanderTimeline === 'mmr' ? 'MMR Rating Over Time' : 'Placements Over Time'"
                       :active-range="cmd.timeframe"
+                      :seasons="leagueSeasons"
                       class="cmd-row__timeline"
                       compact
                       @point-click="openGameModal"
@@ -1150,7 +1153,7 @@ import { buildAveragePlayerRatingSeries } from '~/utils/playerRatingTimeline'
 import { buildPlacementPrognosis } from '~/utils/placementPrognosis'
 import { formatPlayerName } from '~/utils/playerNames'
 import { normalizeDeckIdentityKey } from '~/utils/deckLinks'
-import { getResolvedLeagueSettings } from '~/utils/leagueSettings'
+import { buildLeagueSeasonRanges, getResolvedLeagueSettings } from '~/utils/leagueSettings'
 import { formatLoosterPoints } from '~/utils/loosterPoints'
 import { buildPlayerSuggestion, type PlayerCommanderPickSuggestion } from '~/utils/playerSuggestions'
 import { getAchievementDefinition } from '~/utils/achievements'
@@ -1163,6 +1166,10 @@ import { getCommanderTitleSummary, type CommanderTitleResult } from '~/utils/tit
 
 const route = useRoute()
 const leagueSettings = computed(() => getResolvedLeagueSettings())
+// Uses the reactive settings composable (not the getResolvedLeagueSettings() cache above) because
+// that cache is only populated by a full client boot flow and can still be empty here on a direct navigation.
+const { settings: reactiveLeagueSettings } = useLeagueSettings()
+const leagueSeasons = computed(() => buildLeagueSeasonRanges(reactiveLeagueSettings.value.standings.seasonalRanking))
 const playerId = computed(() => route.params.playerId as string)
 const displayPlayerName = computed(() => formatPlayerName(playerId.value))
 const { user, isAdmin, ensureSession } = useAuth()
@@ -3837,13 +3844,18 @@ function getEdgeTooltipText(cmd: CommanderRow) {
   }
 
   &__card-img {
-    position: relative;
-    z-index: 1;
     width: 100%;
     height: 100%;
     object-fit: contain;
     object-position: center;
     display: block;
+  }
+
+  &__card-img-frame {
+    position: relative;
+    z-index: 1;
+    width: 100%;
+    height: 100%;
   }
 
   &__card-placeholder {
@@ -4526,17 +4538,24 @@ function getEdgeTooltipText(cmd: CommanderRow) {
   filter: grayscale(1) saturate(0.15) brightness(0.46) blur(5px);
 }
 
-.cmd-row--retired .cmd-row__card-img {
+.cmd-row--retired .cmd-row__card-img-frame {
   box-sizing: border-box;
   border: 3px solid #d9363e;
+}
+
+.cmd-row--retired .cmd-row__card-img {
   filter: grayscale(1) brightness(0.68);
 }
 
 .cmd-row__retired-tag {
-  position: relative;
-  z-index: 3;
-  align-self: center;
-  margin-top: -3px;
+  position: absolute;
+  z-index: 2;
+  right: 0;
+  bottom: 4px;
+  left: 0;
+  justify-self: center;
+  width: max-content;
+  margin: auto;
   padding: 2px 12px 3px;
   border: 2px solid rgba(255, 255, 255, 0.72);
   background: rgba(22, 4, 6, 0.92);

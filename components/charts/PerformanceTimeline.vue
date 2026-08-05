@@ -227,10 +227,17 @@ async function renderChart() {
     chart = null
   }
   chart = new ChartJS(context, buildConfig())
-  if (soloedSeries.value) {
-    applyOpacities()
-    chart.update('none')
-  }
+  applyVisibility()
+  if (soloedSeries.value) applyOpacities()
+  chart.update('none')
+}
+
+function applyVisibility() {
+  if (!chart) return
+  displaySeries.value.forEach((s, i) => {
+    if (!chart) return
+    chart.setDatasetVisibility(i, !hiddenSet.value.has(s.name))
+  })
 }
 
 function toggleSeries(name: string, datasetIndex: number) {

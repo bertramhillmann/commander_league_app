@@ -73,26 +73,37 @@ export default defineEventHandler(async (event) => {
     throw createError({ statusCode: 500, statusMessage: 'Could not load player record' })
   }
 
-  const existingEntry = (player.commanderDecks ?? []).find((entry) =>
+  const commanderDecks = (player.commanderDecks ?? []).map((entry) => ({
+    commanderName: entry.commanderName,
+    commanderNameKey: entry.commanderNameKey,
+    archidektUrl: entry.archidektUrl ?? '',
+    archidektDeckId: entry.archidektDeckId ?? '',
+    selectedTitle: entry.selectedTitle ?? '',
+    gameChangerSlots: Array.isArray(entry.gameChangerSlots)
+      ? entry.gameChangerSlots.map((slot) => typeof slot === 'string' ? slot : '')
+      : [],
+    retired: Boolean(entry.retired),
+  }))
+  const existingEntry = commanderDecks.find((entry) =>
     entry.commanderNameKey === commanderNameKey || entry.commanderName === commanderName,
   )
 
-  const nextSlots = Array.isArray(existingEntry?.gameChangerSlots)
-    ? [...existingEntry!.gameChangerSlots]
-    : []
+  const nextSlots = [...(existingEntry?.gameChangerSlots ?? [])]
 
+  // A second or third slot may be filled before the preceding one. Avoid sparse
+  // JavaScript arrays here: JSON/Mongoose can serialise their empty positions as
+  // null, which makes later slot lookups unreliable.
+  while (nextSlots.length <= slotIndex) nextSlots.push('')
   nextSlots[slotIndex] = normalizedNames.join(', ')
 
   while (nextSlots.length > 0 && !nextSlots[nextSlots.length - 1]?.trim()) {
     nextSlots.pop()
   }
 
-  player.name = ensuredPlayer.name
-  player.nameKey = ensuredPlayer.nameKey
-  player.commanderDecks = (player.commanderDecks ?? []).filter((entry) => (
+  const nextCommanderDecks = commanderDecks.filter((entry) => (
     entry.commanderNameKey !== commanderNameKey && entry.commanderName !== commanderName
   ))
-  player.commanderDecks.push({
+  nextCommanderDecks.push({
     commanderName: existingEntry?.commanderName ?? commanderName,
     commanderNameKey,
     archidektUrl: existingEntry?.archidektUrl ?? '',
@@ -101,9 +112,25 @@ export default defineEventHandler(async (event) => {
     gameChangerSlots: nextSlots,
     retired: Boolean(existingEntry?.retired),
   })
-  await player.save()
 
-  const entry = (player.commanderDecks ?? []).find((item) =>
+  const updatedPlayer = await Player.findOneAndUpdate(
+    playerLookup,
+    {
+      $set: {
+        name: ensuredPlayer.name,
+        nameKey: ensuredPlayer.nameKey,
+        commanderDecks: nextCommanderDecks,
+      },
+    },
+    // Do not re-validate unrelated legacy purchase entries while updating a
+    // commander slot. The slot payload itself was validated above.
+    { new: true },
+  )
+  if (!updatedPlayer) {
+    throw createError({ statusCode: 500, statusMessage: 'Could not update commander slots' })
+  }
+
+  const entry = (updatedPlayer.commanderDecks ?? []).find((item) =>
     item.commanderNameKey === commanderNameKey || item.commanderName === commanderName,
   )
 
@@ -111,8 +138,8 @@ export default defineEventHandler(async (event) => {
     ok: true,
     entry: entry
       ? {
-          playerName: player?.name ?? ensuredPlayer.name,
-          playerNameKey: player?.nameKey ?? ensuredPlayer.nameKey,
+          playerName: updatedPlayer.name ?? ensuredPlayer.name,
+          playerNameKey: updatedPlayer.nameKey ?? ensuredPlayer.nameKey,
           commanderName: entry.commanderName,
           commanderNameKey: entry.commanderNameKey,
           archidektUrl: entry.archidektUrl ?? '',

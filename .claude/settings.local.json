@@ -46,7 +46,13 @@
       "Bash(npx playwright *)",
       "Bash(node \"C:\\\\Users\\\\bertr\\\\AppData\\\\Local\\\\Temp\\\\claude\\\\c--Users-bertr-Desktop-Work-cmd-app\\\\90559c3e-1462-481a-b5c2-3d274757bab8\\\\scratchpad\\\\verify-drag-zoom.mjs\")",
       "Bash(node \"__diag.mjs\")",
-      "Bash(node \"__verify.mjs\")"
+      "Bash(node \"__verify.mjs\")",
+      "Bash(curl -s -o /dev/null -w \"%{http_code}\" http://localhost:3001/)",
+      "Bash(break)",
+      "Bash(node \"__verify3.mjs\")",
+      "Bash(curl -s http://localhost:3001/api/games)",
+      "Bash(node -e \"let d='';process.stdin.on\\('data',c=>d+=c\\).on\\('end',\\(\\)=>{const j=JSON.parse\\(d\\);const dates=j.map\\(g=>g.date\\).sort\\(\\);console.log\\('count',j.length,'min',dates[0],'max',dates[dates.length-1]\\)}\\)\")",
+      "Bash(node \"__verify5.mjs\")"
     ]
   }
 }
