@@ -24,6 +24,7 @@ export const MIN_GAMES_FOR_PENALTY_MODE = 30
 export const DEFAULT_PLAYER_RATING_MIN = 0
 export const DEFAULT_PLAYER_RATING_MAX = 4000
 export const DEFAULT_PLAYER_RATING_PROVISIONAL_GAMES = 10
+export const DEFAULT_PLAYER_RATING_ACTIVITY_GAMES_FOR_MAX = 200
 export const DEFAULT_PLAYER_RATING_MMR_POINT_MODIFIER_MAX = 50
 export const DEFAULT_PLAYER_RATING_LPOINT_MMR_MODIFIER_ENABLED = false
 export const DEFAULT_PLAYER_RATING_SIMPLE_MMR_ENABLED = false
@@ -67,6 +68,7 @@ export interface PlayerRatingConfig {
   minRating: number
   maxRating: number
   provisionalGames: number
+  activityGamesForMax: number
   topCommandersForAverageMmr: number
   minimumGamesForAverageCommanderMmr: number
   missingCommanderMmr: number
@@ -105,6 +107,7 @@ export interface LeagueSettingsDocument {
     minRating?: number
     maxRating?: number
     provisionalGames?: number
+    activityGamesForMax?: number
     topCommandersForAverageMmr?: number
     minimumGamesForAverageCommanderMmr?: number
     missingCommanderMmr?: number
@@ -209,6 +212,10 @@ export function getResolvedLeagueSettings(settings?: LeagueSettingsDocument | nu
       provisionalGames: Math.max(1, Math.round(toNumberOr(
         source?.playerRating?.provisionalGames,
         DEFAULT_PLAYER_RATING_PROVISIONAL_GAMES,
+      ))),
+      activityGamesForMax: Math.max(1, Math.round(toNumberOr(
+        source?.playerRating?.activityGamesForMax,
+        DEFAULT_PLAYER_RATING_ACTIVITY_GAMES_FOR_MAX,
       ))),
       topCommandersForAverageMmr: Math.max(1, Math.round(toNumberOr(
         source?.playerRating?.topCommandersForAverageMmr,

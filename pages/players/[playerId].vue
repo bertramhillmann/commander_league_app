@@ -109,7 +109,13 @@
             </div>
             <div class="player__rating-pie-legend">
               <span v-for="entry in profileRatingPieRows" :key="entry.key">
-                <i :style="{ background: entry.color }" />{{ entry.label }}
+                <i :style="{ background: entry.color }" />
+                <span class="player__rating-pie-label">{{ entry.label }}</span>
+                <span class="player__rating-pie-value">
+                  <span>{{ Math.round(entry.value) }}</span>
+                  <span>/</span>
+                  <span>{{ Math.round(entry.maxValue) }}</span>
+                </span>
               </span>
             </div>
           </div>
@@ -255,7 +261,7 @@
           <div class="player__section-heading">
             <h2 class="player__section-title">Commanders</h2>
             <div v-if="showAverageCommanderMmrHighlight && averageCommanderMmrInsight" class="player__section-summary">
-              <span>Avg Cmdr MMR: <strong>{{ formatCommanderMmr(averageCommanderMmrInsight.averageCommanderMmr) }}</strong></span>
+              <span :class="{ 'player__estimated-mmr': averageCommanderMmrInsight.fallbackSlots > 0 }">Avg Cmdr MMR: <strong>{{ formatCommanderMmr(averageCommanderMmrInsight.averageCommanderMmr) }}</strong></span>
               <span>{{ averageCommanderMmrInsight.usePeakCommanderMmr ? 'Peak MMR' : 'Current MMR' }} source</span>
               <span>{{ averageCommanderMmrInsight.countedCommanders }}/{{ averageCommanderMmrInsight.topCount }} commander slots filled</span>
               <span v-if="averageCommanderMmrInsight.fallbackSlots > 0">
@@ -1146,6 +1152,7 @@ import { buildPlayerLeagueTimeline } from '~/utils/playerLeagueTimeline'
 import { buildPlayerMatchTimeline } from '~/utils/playerMatchTimeline'
 import {
   buildPlayerRatingDetail,
+  calculateCommanderSlotReduction,
   type PlayerRatingBreakdownKey,
   type PlayerRatingDetail,
 } from '~/composables/usePlayerRating'
@@ -1257,8 +1264,10 @@ const profileRatingPieRows = computed(() => {
       key,
       label: key.replace(/([A-Z])/g, ' $1').trim(),
       color: profileRatingFactorColors[key as PlayerRatingBreakdownKey] ?? '#aaa',
-      value: (factor.weightedContribution / totalWeight) * (0.2 + confidence) / 100 * span,
+      value: (factor.weightedContribution / totalWeight) * confidence / 100 * span,
+      maxValue: (factor.weight / totalWeight) * span,
     }))
+    .sort((left, right) => right.maxValue - left.maxValue || left.label.localeCompare(right.label))
 })
 const profileRatingPieTotal = computed(() => profileRatingPieRows.value.reduce((sum, row) => sum + row.value, 0))
 const profileRatingPieBackground = computed(() => {
@@ -1457,7 +1466,7 @@ type CommanderAverageMmrInsight = {
 const averageCommanderMmrInsight = computed(() => {
   if (!showAverageCommanderMmrHighlight.value) return null
 
-  const topCount = Math.max(1, leagueSettings.value.playerRating.topCommandersForAverageMmr)
+  const configuredTopCount = Math.max(1, leagueSettings.value.playerRating.topCommandersForAverageMmr)
   const minimumGames = Math.max(1, leagueSettings.value.playerRating.minimumGamesForAverageCommanderMmr)
   const fallbackMmr = Number.isFinite(leagueSettings.value.playerRating.missingCommanderMmr)
     ? leagueSettings.value.playerRating.missingCommanderMmr
@@ -1467,6 +1476,8 @@ const averageCommanderMmrInsight = computed(() => {
   const orderedRecords = chronologicalGames.value
     .map((game) => gameRecords.value[playerId.value]?.[game.gameId])
     .filter((record): record is NonNullable<typeof record> => Boolean(record))
+  const slotReduction = calculateCommanderSlotReduction(orderedRecords, chronologicalGames.value, leagueSettings.value)
+  const topCount = Math.max(1, configuredTopCount - slotReduction)
 
   const statsByCommander = new Map<string, { commander: string; plays: number; currentMmr: number; peakMmr: number }>()
 
@@ -1486,10 +1497,7 @@ const averageCommanderMmrInsight = computed(() => {
     .map((entry) => ({
       ...entry,
       sourceMmr: usePeakCommanderMmr ? entry.peakMmr : entry.currentMmr,
-      usedMmr: Math.max(
-        usePeakCommanderMmr ? entry.peakMmr : entry.currentMmr,
-        fallbackMmr,
-      ),
+      usedMmr: usePeakCommanderMmr ? entry.peakMmr : entry.currentMmr,
     }))
     .sort((left, right) => right.sourceMmr - left.sourceMmr || left.commander.localeCompare(right.commander))
 
@@ -1498,7 +1506,7 @@ const averageCommanderMmrInsight = computed(() => {
   const entries = Object.fromEntries(
     [...statsByCommander.values()].map((entry) => {
       const sourceMmr = usePeakCommanderMmr ? entry.peakMmr : entry.currentMmr
-      const usedMmr = Math.max(sourceMmr, fallbackMmr)
+      const usedMmr = sourceMmr
       const rank = eligible.findIndex((eligibleEntry) => eligibleEntry.commander === entry.commander)
       const status: CommanderAverageMmrInsight['status'] = countedNames.has(entry.commander)
         ? 'counted'
@@ -1526,6 +1534,8 @@ const averageCommanderMmrInsight = computed(() => {
 
   return {
     topCount,
+    configuredTopCount,
+    slotReduction,
     minimumGames,
     fallbackMmr,
     fallbackSlots,
@@ -5565,9 +5575,14 @@ function getEdgeTooltipText(cmd: CommanderRow) {
 .player__rating-pie { position: relative; width: 80px; aspect-ratio: 1; border-radius: 50%; display: grid; place-items: center; flex: 0 0 80px; }
 .player__rating-pie::after { content: ''; position: absolute; width: 38px; height: 38px; border-radius: 50%; background: rgba(12,8,21,.98); }
 .player__rating-pie span { position: relative; z-index: 1; font-size: 11px; font-weight: $font-weight-bold; }
-.player__rating-pie-legend { display: grid; gap: 3px; font-size: 9px; }
-.player__rating-pie-legend span { display: flex; align-items: center; gap: 5px; }
+.player__rating-pie-legend { display: grid; gap: 3px; min-width: 180px; font-size: 9px; }
+.player__rating-pie-legend > span { display: grid; grid-template-columns: 7px minmax(0, 1fr) auto; align-items: center; gap: 5px; }
 .player__rating-pie-legend i { width: 7px; height: 7px; border-radius: 50%; }
+.player__rating-pie-value { display: grid; grid-template-columns: 4ch 1ch 4ch; column-gap: 4px; font-variant-numeric: tabular-nums; }
+.player__rating-pie-value span:first-child { text-align: right; }
+.player__rating-pie-value span:nth-child(2) { text-align: center; }
+.player__rating-pie-value span:last-child { text-align: left; }
+.player__estimated-mmr { color: #f0829e; }
 
 .cmd-row__slot-manual-list {
   display: flex;

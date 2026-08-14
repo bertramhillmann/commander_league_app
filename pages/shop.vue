@@ -720,6 +720,10 @@ onBeforeUnmount(() => {
 function openPurchaseModal() {
   successMessage.value = ''
   errorMessage.value = ''
+  if (isAdmin.value && form.playerName === currentPlayerName.value) {
+    form.playerName = selectablePlayers.value.find((name) => name !== currentPlayerName.value)
+      ?? currentPlayerName.value
+  }
   showModal.value = true
 }
 
@@ -744,13 +748,18 @@ function getShopItemBadge(item: ShopItem) {
 
 function getShopItemButtonLabel(item: ShopItem) {
   if (isShopItemOwned(item)) return 'Owned'
+  if (isAdmin.value && item.purchaseType === 'looster') return 'Purchase for player'
   if (!canAffordShopItem(item)) return 'Not enough L-Points'
   if (item.purchaseType === 'looster') return 'Purchase'
   return 'Unlock'
 }
 
 function isShopItemActionDisabled(item: ShopItem) {
-  return isShopItemOwned(item) || isShopItemSeasonLocked(item) || !canAffordShopItem(item)
+  const cannotAfford = !canAffordShopItem(item)
+  const adminCanAssignLooster = isAdmin.value && item.purchaseType === 'looster'
+  return isShopItemOwned(item)
+    || isShopItemSeasonLocked(item)
+    || (cannotAfford && !adminCanAssignLooster)
 }
 
 function openShopItem(item: ShopItem) {

@@ -161,7 +161,7 @@
                 3. The weighted score is scaled by confidence:
                 <strong>{{ fmt(detail.weightedScore) }}</strong>
                 ×
-                <strong>{{ fmt(0.2 + detail.confidenceMultiplier) }}</strong>.
+                <strong>{{ fmt(detail.confidenceMultiplier) }}</strong>.
               </div>
               <div class="rating-sidebar__formula-line">
                 4. The adjusted score is mapped into the rating band
@@ -208,7 +208,7 @@
               <div class="rating-sidebar__factor-formula">{{ formatFactorExplanation(factor.current) }}</div>
 
               <ul class="rating-sidebar__factor-list">
-                <li v-for="line in factor.current.detailLines" :key="line">{{ line }}</li>
+                <li v-for="line in factor.current.detailLines" :key="line" :class="{ 'rating-sidebar__estimated-mmr': factor.key === 'averageCommanderMMR' && line.startsWith('average commander MMR:') && factor.current.detailLines.some((entry) => /^fallback slots used:\s*[1-9]/i.test(entry)) }">{{ line }}</li>
               </ul>
 
               <ChartsPerformanceTimeline
@@ -695,7 +695,7 @@ function toRatingContribution(
   const ratingSpan = Math.max(0, settings.value.playerRating.maxRating - settings.value.playerRating.minRating)
   return round3(
     (factor.weightedContribution / totalFactorWeight.value)
-    * (0.2 + confidenceMultiplier)
+    * confidenceMultiplier
     / 100
     * ratingSpan,
   )
@@ -1817,6 +1817,10 @@ const TIMELINE_COLORS = [
   color: $color-text-muted;
   display: grid;
   gap: 6px;
+}
+
+.rating-sidebar__estimated-mmr {
+  color: #f0829e;
 }
 
 .rating-sidebar__state {

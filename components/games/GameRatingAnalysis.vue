@@ -130,7 +130,7 @@ function factorChange(row: RatingRow) {
 function toRatingContribution(snapshot: PlayerRatingSnapshot, key: PlayerRatingBreakdownKey) {
   const ratingSpan = resolvedSettings.value.playerRating.maxRating - resolvedSettings.value.playerRating.minRating
   const scoreShare = snapshot.breakdown[key].weightedContribution / totalFactorWeight.value
-  const confidenceAdjustedShare = scoreShare * (snapshot.confidenceMultiplier + 0.2)
+  const confidenceAdjustedShare = scoreShare * snapshot.confidenceMultiplier
   return (confidenceAdjustedShare / 100) * ratingSpan
 }
 </script>

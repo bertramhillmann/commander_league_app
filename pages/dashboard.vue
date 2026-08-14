@@ -239,7 +239,13 @@
               {{ fmt(row.xpPoints) }}
             </button>
           </td>
-          <td class="standings__td standings__td--num">{{ isPlayerRatingMode ? `${row.participationRate}%` : row.gamesPlayed }}</td>
+          <td
+            class="standings__td standings__td--num"
+            :class="{ 'standings__td--hoverable': isPlayerRatingMode }"
+            @mouseenter="onParticipationEnter(row, $event)"
+            @mousemove="onMouseMove($event)"
+            @mouseleave="onParticipationLeave"
+          >{{ isPlayerRatingMode ? `${row.participationRate}%` : row.gamesPlayed }}</td>
           <td class="standings__td standings__td--num">
             <input
               v-if="simulationMode && isPlayerRatingMode"
@@ -253,7 +259,14 @@
             <template v-else>{{ row.winRate }}%</template>
           </td>
           <td v-show="showAveragePerGameColumn" class="standings__td standings__td--num">{{ fmt(row.avgPerGame) }}</td>
-          <td class="standings__td standings__td--num standings__td--avg-mmr" :title="`Avg Commander MMR: ${Math.round(row.averageCommanderMmr)}`">
+          <td
+            class="standings__td standings__td--num standings__td--avg-mmr"
+            :class="{ 'standings__td--insufficient': row.averageCommanderMmrEstimated }"
+            :title="`Avg Commander MMR: ${Math.round(row.averageCommanderMmr)}${row.averageCommanderMmrEstimated ? ' (projected with fallback slots)' : ''}`"
+            @mouseenter="onAverageCommanderMmrEnter(row, $event)"
+            @mousemove="onMouseMove($event)"
+            @mouseleave="onAverageCommanderMmrLeave"
+          >
             <input
               v-if="simulationMode && isPlayerRatingMode"
               class="standings__simulation-input"
@@ -261,12 +274,22 @@
               :value="simulatedAverageCommanderMmr(row)"
               @input="setSimulatedAverageCommanderMmr(row.name, Number(($event.target as HTMLInputElement).value))"
             />
-            <span v-else class="standings__avg-mmr"><IconsMmrIcon :size="11" />{{ Math.round(row.averageCommanderMmr) }}</span>
+            <span v-else class="standings__avg-mmr" :class="{ 'standings__avg-mmr--estimated': row.averageCommanderMmrEstimated }">
+              <span v-if="row.averageCommanderMmrEstimated" class="standings__avg-mmr-warning" aria-label="Projected value" title="Projected with fallback commander slots">⚠</span>
+              <IconsMmrIcon v-else :size="11" />{{ Math.round(row.averageCommanderMmr) }}
+            </span>
           </td>
           <td
             v-for="season in displayedLeagueSeasons"
             :key="season.index"
             class="standings__td standings__td--num"
+            :class="{
+              'standings__td--prejoin': isPreJoinSeason(row, season),
+              'standings__td--insufficient': !isPreJoinSeason(row, season) && season.startMs <= Date.now() && seasonGamesPlayed(row, season.index) < 10,
+            }"
+            @mouseenter="onSeasonGamesEnter(row, season, $event)"
+            @mousemove="onMouseMove($event)"
+            @mouseleave="onSeasonGamesLeave"
           >
             <span class="standings__season-score">{{ formatSeasonScoreCell(row.seasonScores?.[season.index] ?? null, season) }}</span>
           </td>
@@ -832,12 +855,91 @@
             <div v-for="entry in ratingHoverRows" :key="entry.key" class="rating-hover__legend-row">
               <span class="rating-hover__swatch" :style="{ backgroundColor: entry.color }"></span>
               <span class="rating-hover__label">{{ entry.label }}</span>
-              <span class="rating-hover__value">+{{ Math.round(entry.value) }}</span>
+              <span class="rating-hover__value">
+                <span>{{ Math.round(entry.value) }}</span>
+                <span class="rating-hover__value-separator">/</span>
+                <span>{{ Math.round(entry.maxValue) }}</span>
+              </span>
             </div>
           </div>
         </div>
         <div v-else class="mult-tooltip__summary">No factor breakdown is available for this rating.</div>
         <div v-if="ratingHover.provisional" class="rating-hover__status">Provisional rating</div>
+      </div>
+    </Teleport>
+
+    <Teleport to="body">
+      <div
+        v-if="participationHover.visible"
+        class="floating-panel mult-tooltip"
+        :style="{ top: `${participationHover.y}px`, left: `${participationHover.x}px` }"
+      >
+        <div class="mult-tooltip__title">{{ participationHover.playerName }}'s Participation</div>
+        <table class="mult-tooltip__table">
+          <tbody>
+            <tr>
+              <td class="mult-tooltip__label">Total</td>
+              <td class="mult-tooltip__op"></td>
+              <td class="mult-tooltip__detail">games played</td>
+              <td class="mult-tooltip__value">{{ participationHover.gamesPlayed }}</td>
+            </tr>
+            <tr
+              v-for="season in participationHover.seasons"
+              :key="season.index"
+              class="mult-tooltip__row--sep"
+              :class="`participation-tooltip__row--${season.status}`"
+            >
+              <td class="mult-tooltip__label">{{ season.label }}</td>
+              <td class="mult-tooltip__op"></td>
+              <td class="mult-tooltip__detail">{{ season.dateRange }}</td>
+              <td class="mult-tooltip__value">{{ season.gamesPlayed }}</td>
+            </tr>
+          </tbody>
+        </table>
+      </div>
+    </Teleport>
+
+    <Teleport to="body">
+      <div
+        v-if="averageCommanderMmrHover.visible"
+        class="floating-panel mult-tooltip"
+        :style="{ top: `${averageCommanderMmrHover.y}px`, left: `${averageCommanderMmrHover.x}px` }"
+      >
+        <div class="mult-tooltip__title">{{ averageCommanderMmrHover.playerName }}'s Average Commander MMR</div>
+        <table class="mult-tooltip__table">
+          <tbody>
+            <tr
+              v-for="entry in averageCommanderMmrHover.entries"
+              :key="entry.key"
+              :class="{ 'average-mmr-tooltip__fallback': entry.fallback }"
+            >
+              <td class="mult-tooltip__label">{{ entry.label }}</td>
+              <td class="mult-tooltip__op"></td>
+              <td class="mult-tooltip__detail">{{ Math.round(entry.mmr) }} / {{ averageCommanderMmrHover.slotCount }}</td>
+              <td class="mult-tooltip__value">{{ fmt(entry.contribution) }}</td>
+            </tr>
+            <tr class="mult-tooltip__row--sep">
+              <td class="mult-tooltip__label">Total</td>
+              <td class="mult-tooltip__op">=</td>
+              <td class="mult-tooltip__detail">{{ fmt(averageCommanderMmrHover.mmrSum) }} / {{ averageCommanderMmrHover.slotCount }}</td>
+              <td class="mult-tooltip__value">{{ fmt(averageCommanderMmrHover.average) }}</td>
+            </tr>
+          </tbody>
+        </table>
+      </div>
+    </Teleport>
+
+    <Teleport to="body">
+      <div
+        v-if="seasonGamesHover.visible"
+        class="floating-panel mult-tooltip"
+        :style="{ top: `${seasonGamesHover.y}px`, left: `${seasonGamesHover.x}px` }"
+      >
+        <div class="mult-tooltip__title">{{ seasonGamesHover.playerName }} · {{ seasonGamesHover.seasonLabel }}</div>
+        <div class="mult-tooltip__summary season-games-tooltip__value" :class="{ 'season-games-tooltip__value--prejoin': seasonGamesHover.preJoin }">
+          <template v-if="seasonGamesHover.preJoin">Joined on {{ seasonGamesHover.joinDate }} after {{ seasonGamesHover.seasonLabel }}</template>
+          <template v-else>{{ seasonGamesHover.gamesPlayed }} / 10 games played</template>
+        </div>
       </div>
     </Teleport>
 
@@ -1003,7 +1105,7 @@ import {
   type PlayerGameRecord,
   type StandingsAdjustmentResult,
 } from '~/composables/useLeagueState'
-import { calculateAverageCommanderMMRScore, calculatePlayerRating } from '~/composables/usePlayerRating'
+import { calculateAverageCommanderMMRScore, calculateCommanderSlotReduction, calculatePlayerRating } from '~/composables/usePlayerRating'
 import { getCommanderTierFromMMR, getInitialCommanderMMR, type CommanderMMRTier } from '~/composables/useCommanderMMR'
 import type { PerformancePlayerSeries } from '~/components/charts/PerformanceTimeline.vue'
 import { fetchSetByCode } from '~/services/scryfallService'
@@ -1576,15 +1678,62 @@ function topCommanderByMmr(playerName: string) {
 
 function averageCommanderMmr(playerName: string) {
   const records = Object.values(gameRecords.value[playerName] ?? {})
-  if (records.length === 0) return 0
+  const slotReduction = calculateCommanderSlotReduction(records, chronologicalGames.value, settings.value)
+  const topCount = Math.max(1, settings.value.playerRating.topCommandersForAverageMmr - slotReduction)
+  const minimumGames = Math.max(1, settings.value.playerRating.minimumGamesForAverageCommanderMmr)
+  const fallbackMmr = settings.value.playerRating.missingCommanderMmr
+  const usePeak = settings.value.playerRating.usePeakCommanderMmrForAverage
+  const commanderStats = new Map<string, { games: number, current: number, peak: number }>()
 
-  return calculateAverageCommanderMMRScore(
+  for (const record of records) {
+    const mmr = record.commanderMMRAfter ?? record.commanderMMRBefore ?? 0
+    const current = commanderStats.get(record.commander)
+    commanderStats.set(record.commander, {
+      games: (current?.games ?? 0) + 1,
+      current: mmr,
+      peak: Math.max(current?.peak ?? mmr, mmr),
+    })
+  }
+
+  const entries = [...commanderStats.entries()]
+    .filter(([, commander]) => commander.games >= minimumGames)
+    .map(([commander, stats]) => ({ commander, mmr: usePeak ? stats.peak : stats.current }))
+    .sort((left, right) => right.mmr - left.mmr || left.commander.localeCompare(right.commander))
+    .slice(0, topCount)
+    .map((entry, index) => ({
+      key: `commander-${index}-${entry.commander}`,
+      label: entry.commander,
+      mmr: entry.mmr,
+      contribution: entry.mmr / topCount,
+      fallback: false,
+    }))
+
+  while (entries.length < topCount) {
+    const slot = entries.length + 1
+    entries.push({
+      key: `fallback-${slot}`,
+      label: `Missing commander #${slot}`,
+      mmr: fallbackMmr,
+      contribution: fallbackMmr / topCount,
+      fallback: true,
+    })
+  }
+
+  const result = calculateAverageCommanderMMRScore(
     records,
     settings.value.playerRating.topCommandersForAverageMmr,
     settings.value.playerRating.minimumGamesForAverageCommanderMmr,
     settings.value.playerRating.missingCommanderMmr,
     settings.value.playerRating.usePeakCommanderMmrForAverage,
-  ).averageCommanderMMR
+    slotReduction,
+  )
+  return {
+    value: result.averageCommanderMMR,
+    estimated: result.fallbackSlots > 0,
+    entries,
+    slotCount: topCount,
+    mmrSum: entries.reduce((sum, entry) => sum + entry.mmr, 0),
+  }
 }
 
 function buildPerformanceMetrics(
@@ -1690,8 +1839,21 @@ const table = computed(() => {
     )
     const standing = standingsMap.get(player.name)
     const topCommanderEntry = topCommanderByMmr(player.name)
-    const averageCommanderMmrValue = averageCommanderMmr(player.name)
+    const averageCommanderMmrResult = averageCommanderMmr(player.name)
+    const averageCommanderMmrValue = averageCommanderMmrResult.value
     const seasonAverages = calculatePlayerSeasonAverages(player.name, chronologicalGames.value, gameRecords.value, settings.value)
+    const firstGame = chronologicalGames.value.find((game) => Boolean(gameRecords.value[player.name]?.[game.gameId]))
+    const firstGameTimestamp = firstGame ? new Date(firstGame.date).getTime() : null
+    const firstGameDate = firstGame ? fmtGameDate(firstGame.date) : ''
+    const gamesPlayedBySeason = generatedLeagueSeasons.value.map((season) => ({
+      index: season.index,
+      gamesPlayed: chronologicalGames.value.filter((game) => {
+        const timestamp = new Date(game.date).getTime()
+        return timestamp >= season.startMs
+          && timestamp <= season.endMs
+          && Boolean(gameRecords.value[player.name]?.[game.gameId])
+      }).length,
+    }))
     const participationRate = chronologicalGames.value.length > 0
       ? Math.round((player.gamesPlayed / chronologicalGames.value.length) * 100)
       : 0
@@ -1729,10 +1891,17 @@ const table = computed(() => {
       achievementPoints: player.achievementPoints,
       xpPoints: player.xpPoints,
       gamesPlayed: player.gamesPlayed,
+      gamesPlayedBySeason,
+      firstGameTimestamp,
+      firstGameDate,
       participationRate,
       winRate: performance.winRate,
       avgPerGame: performance.avgPerGame,
       averageCommanderMmr: averageCommanderMmrValue,
+      averageCommanderMmrEstimated: averageCommanderMmrResult.estimated,
+      averageCommanderMmrEntries: averageCommanderMmrResult.entries,
+      averageCommanderMmrSlotCount: averageCommanderMmrResult.slotCount,
+      averageCommanderMmrSum: averageCommanderMmrResult.mmrSum,
       seasonScores: seasonAverages.seasonScores,
       leagueAvgPerGame: performance.leagueAvgPerGame,
       perfMult: performance.perfMult,
@@ -1956,7 +2125,7 @@ function applyRatingSimulation<T extends { name: string, averageCommanderMmr: nu
   const weightedScore = Object.values(breakdown).reduce((sum, entry) => sum + entry.weightedContribution, 0) / totalWeight
   const confidence = Math.max(0.45, Math.min(1, row.gamesPlayed / 12))
   const rating = settings.value.playerRating.minRating
-    + (Math.max(0, Math.min(100, weightedScore * confidence + weightedScore * 0.2)) / 100)
+    + (Math.max(0, Math.min(100, weightedScore * confidence)) / 100)
       * (settings.value.playerRating.maxRating - settings.value.playerRating.minRating)
 
   return {
@@ -2226,6 +2395,7 @@ const averageCommanderMmrChartData = computed<{ labels: string[], series: Perfor
             settings.value.playerRating.minimumGamesForAverageCommanderMmr,
             settings.value.playerRating.missingCommanderMmr,
             settings.value.playerRating.usePeakCommanderMmrForAverage,
+            calculateCommanderSlotReduction(records, games, settings.value),
           ).averageCommanderMMR
         : initialCommanderMmr
       dataByPlayer[playerName].push(averageMmr)
@@ -2571,6 +2741,21 @@ function onMouseMove(e: MouseEvent) {
     ratingHover.x = pos.x
     ratingHover.y = pos.y
   }
+  if (participationHover.visible) {
+    const pos = calcMultPosition(e)
+    participationHover.x = pos.x
+    participationHover.y = pos.y
+  }
+  if (averageCommanderMmrHover.visible) {
+    const pos = calcMultPosition(e)
+    averageCommanderMmrHover.x = pos.x
+    averageCommanderMmrHover.y = pos.y
+  }
+  if (seasonGamesHover.visible) {
+    const pos = calcMultPosition(e)
+    seasonGamesHover.x = pos.x
+    seasonGamesHover.y = pos.y
+  }
   if (multHover.visible) {
     const pos = calcMultPosition(e)
     multHover.x = pos.x
@@ -2703,6 +2888,146 @@ function onRatingEnter(row: { rankingSystem?: string, name: string, provisional?
 
 function onRatingLeave() {
   ratingHover.visible = false
+}
+
+function seasonGamesPlayed(
+  row: { gamesPlayedBySeason?: Array<{ index: number, gamesPlayed: number }> },
+  seasonIndex: number,
+) {
+  return row.gamesPlayedBySeason?.find((season) => season.index === seasonIndex)?.gamesPlayed ?? 0
+}
+
+function isPreJoinSeason(
+  row: { firstGameTimestamp?: number | null },
+  season: { endMs: number },
+) {
+  return typeof row.firstGameTimestamp === 'number'
+    && Number.isFinite(row.firstGameTimestamp)
+    && season.endMs < row.firstGameTimestamp
+}
+
+const seasonGamesHover = reactive({
+  visible: false,
+  playerName: '',
+  seasonLabel: '',
+  gamesPlayed: 0,
+  preJoin: false,
+  joinDate: '',
+  x: 0,
+  y: 0,
+})
+
+function onSeasonGamesEnter(
+  row: { name: string, firstGameTimestamp?: number | null, firstGameDate?: string, gamesPlayedBySeason?: Array<{ index: number, gamesPlayed: number }> },
+  season: { index: number, label: string, startMs: number, endMs: number },
+  e: MouseEvent,
+) {
+  const gamesPlayed = seasonGamesPlayed(row, season.index)
+  if (season.startMs > Date.now() || gamesPlayed >= 10) return
+  seasonGamesHover.playerName = row.name
+  seasonGamesHover.seasonLabel = season.label
+  seasonGamesHover.gamesPlayed = gamesPlayed
+  seasonGamesHover.preJoin = isPreJoinSeason(row, season)
+  seasonGamesHover.joinDate = row.firstGameDate ?? ''
+  seasonGamesHover.visible = true
+  const pos = calcMultPosition(e)
+  seasonGamesHover.x = pos.x
+  seasonGamesHover.y = pos.y
+}
+
+function onSeasonGamesLeave() {
+  seasonGamesHover.visible = false
+}
+
+type ParticipationSeasonHover = {
+  index: number
+  label: string
+  dateRange: string
+  gamesPlayed: number
+  status: 'qualified' | 'active-insufficient' | 'missed'
+}
+
+const participationHover = reactive({
+  visible: false,
+  playerName: '',
+  gamesPlayed: 0,
+  seasons: [] as ParticipationSeasonHover[],
+  x: 0,
+  y: 0,
+})
+
+function onParticipationEnter(
+  row: { name: string, gamesPlayed: number, gamesPlayedBySeason?: Array<{ index: number, gamesPlayed: number }> },
+  e: MouseEvent,
+) {
+  if (!isPlayerRatingMode.value) return
+  const counts = new Map((row.gamesPlayedBySeason ?? []).map((season) => [season.index, season.gamesPlayed]))
+  participationHover.playerName = row.name
+  participationHover.gamesPlayed = row.gamesPlayed
+  const now = Date.now()
+  participationHover.seasons = chartSeasonOptions.value.map<ParticipationSeasonHover>((season) => ({
+    index: season.index,
+    label: season.label,
+    dateRange: `${formatSeasonDate(season.startDate)} – ${formatSeasonDate(season.endDate)}`,
+    gamesPlayed: counts.get(season.index) ?? 0,
+    status: (counts.get(season.index) ?? 0) >= 10
+      ? 'qualified'
+      : season.endMs < now
+        ? 'missed'
+        : 'active-insufficient',
+  }))
+  participationHover.visible = true
+  const pos = calcMultPosition(e)
+  participationHover.x = pos.x
+  participationHover.y = pos.y
+}
+
+function onParticipationLeave() {
+  participationHover.visible = false
+}
+
+type AverageCommanderMmrHoverEntry = {
+  key: string
+  label: string
+  mmr: number
+  contribution: number
+  fallback: boolean
+}
+
+const averageCommanderMmrHover = reactive({
+  visible: false,
+  playerName: '',
+  average: 0,
+  estimated: false,
+  slotCount: 1,
+  mmrSum: 0,
+  entries: [] as AverageCommanderMmrHoverEntry[],
+  x: 0,
+  y: 0,
+})
+
+function onAverageCommanderMmrEnter(row: {
+  name: string
+  averageCommanderMmr: number
+  averageCommanderMmrEstimated: boolean
+  averageCommanderMmrSlotCount: number
+  averageCommanderMmrSum: number
+  averageCommanderMmrEntries: AverageCommanderMmrHoverEntry[]
+}, e: MouseEvent) {
+  averageCommanderMmrHover.playerName = row.name
+  averageCommanderMmrHover.average = row.averageCommanderMmr
+  averageCommanderMmrHover.estimated = row.averageCommanderMmrEstimated
+  averageCommanderMmrHover.slotCount = row.averageCommanderMmrSlotCount
+  averageCommanderMmrHover.mmrSum = row.averageCommanderMmrSum
+  averageCommanderMmrHover.entries = row.averageCommanderMmrEntries
+  averageCommanderMmrHover.visible = true
+  const pos = calcMultPosition(e)
+  averageCommanderMmrHover.x = pos.x
+  averageCommanderMmrHover.y = pos.y
+}
+
+function onAverageCommanderMmrLeave() {
+  averageCommanderMmrHover.visible = false
 }
 
 function openRatingSidebar(playerName: string) {
@@ -2853,16 +3178,19 @@ const ratingHoverRows = computed(() => {
   const confidenceMultiplier = Math.min(1, Math.max(0.45, ratingHover.gamesPlayed / 12))
   const ratingSpan = Math.max(0, settings.value.playerRating.maxRating - settings.value.playerRating.minRating)
 
-  return enabledDashboardRatingFactorRows.value.map((entry) => ({
-    ...entry,
-    color: ratingFactorColors[entry.key],
-    value: r3(
-      ((breakdown[entry.key]?.weightedContribution ?? 0) / totalFactorWeight)
-      * (0.2 + confidenceMultiplier)
-      / 100
-      * ratingSpan,
-    ),
-  }))
+  return enabledDashboardRatingFactorRows.value
+    .map((entry) => ({
+      ...entry,
+      color: ratingFactorColors[entry.key],
+      value: r3(
+        ((breakdown[entry.key]?.weightedContribution ?? 0) / totalFactorWeight)
+        * confidenceMultiplier
+        / 100
+        * ratingSpan,
+      ),
+      maxValue: r3((dashboardRatingFactorWeight(entry.key) / totalFactorWeight) * ratingSpan),
+    }))
+    .sort((left, right) => right.maxValue - left.maxValue || left.label.localeCompare(right.label))
 })
 
 const ratingHoverTotal = computed(() => r3(
@@ -4511,8 +4839,54 @@ $table-row-height: 47.8px;
 }
 
 .rating-hover__value {
+  display: grid;
+  grid-template-columns: 4ch 1ch 4ch;
+  column-gap: 5px;
+  align-items: center;
   color: $color-text;
   font-variant-numeric: tabular-nums;
+
+  span:first-child { text-align: right; }
+  span:last-child { text-align: left; }
+}
+
+.standings__avg-mmr--estimated,
+.player__estimated-mmr {
+  color: #f0829e;
+}
+
+.standings__avg-mmr-warning {
+  display: inline-grid;
+  place-items: center;
+  width: 12px;
+  height: 12px;
+  margin-right: 2px;
+  font-size: 10px;
+  line-height: 1;
+  color: #f0829e;
+}
+
+.standings__td--insufficient {
+  color: #f0829e;
+
+  .standings__season-score,
+  .standings__avg-mmr,
+  .standings__simulation-input {
+    color: #f0829e;
+  }
+}
+
+.standings__td--prejoin {
+  opacity: 0.75;
+  color: $color-text-muted;
+
+  .standings__season-score {
+    color: $color-text-muted;
+  }
+}
+
+.rating-hover__value-separator {
+  text-align: center;
 }
 
 .rating-hover__status {
@@ -4524,6 +4898,41 @@ $table-row-height: 47.8px;
   text-align: center;
   text-transform: uppercase;
   letter-spacing: 0.1em;
+}
+
+.participation-tooltip__row--qualified td {
+  color: $color-success;
+}
+
+.participation-tooltip__row--active-insufficient td {
+  color: #f0829e;
+}
+
+.participation-tooltip__row--missed {
+  opacity: 0.75;
+
+  td {
+    color: $color-text-muted;
+  }
+}
+
+.average-mmr-tooltip__fallback {
+  opacity: 0.85;
+
+  td {
+    color: #f0829e;
+  }
+}
+
+.season-games-tooltip__value {
+  margin-bottom: 0;
+  color: #f0829e;
+  font-weight: $font-weight-bold;
+  font-variant-numeric: tabular-nums;
+}
+
+.season-games-tooltip__value--prejoin {
+  color: $color-text-muted;
 }
 
 .mult-tooltip {

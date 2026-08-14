@@ -164,6 +164,11 @@
             <input v-model.number="form.playerRating.provisionalGames" type="number" step="1" min="1" class="form-input" />
           </label>
           <label class="form-field">
+            <span class="form-label">Games For Maximum Activity</span>
+            <input v-model.number="form.playerRating.activityGamesForMax" type="number" step="1" min="1" class="form-input" />
+            <span class="form-help">Counting games needed for maximum Activity. The maximum is reduced for completed seasons in which a player had fewer than 10 games. Future seasons and an ongoing season below 10 games do not affect it.</span>
+          </label>
+          <label class="form-field">
             <span class="form-label">Top Commanders Counted For Avg MMR</span>
             <input v-model.number="form.playerRating.topCommandersForAverageMmr" type="number" step="1" min="1" class="form-input" />
             <span class="form-help">Only the best N eligible commander MMRs count for the Average Commander MMR factor.</span>
@@ -430,6 +435,7 @@ type EditableSettingsState = {
   playerRankingSystem: PlayerRankingSystem
   playerRating: {
     provisionalGames: number
+    activityGamesForMax: number
     topCommandersForAverageMmr: number
     minimumGamesForAverageCommanderMmr: number
     missingCommanderMmr: number
@@ -490,7 +496,7 @@ const playerRatingWeightFields: Array<{
   { key: 'winRate', label: 'Win Rate', hint: 'How often a player turns games into wins.' },
   { key: 'commanderMMRContext', label: 'Finishes vs Stronger Opponents', hint: 'How often a player beats MMR-based placement expectations.' },
   { key: 'averageCommanderMMR', label: 'Average Commander MMR', hint: 'Average commander strength across the player pool.' },
-  { key: 'commanderPoints', label: 'Activity', hint: 'A small reward for total points earned through play.' },
+  { key: 'commanderPoints', label: 'Activity', hint: 'A participation reward in which every played game counts toward the configured maximum.' },
   { key: 'achievements', label: 'Achievements', hint: 'Achievement-based rating value.' },
   { key: 'clutch', label: 'Clutch', hint: 'Big wins and overperforming into tough pods.' },
   { key: 'commanderDiversity', label: 'Commander Diversity', hint: 'Maintaining results across more commanders.' },
@@ -625,6 +631,7 @@ function createEditableSettings(source: ReturnType<typeof getResolvedLeagueSetti
     playerRankingSystem: source.playerRankingSystem,
     playerRating: {
       provisionalGames: source.playerRating.provisionalGames,
+      activityGamesForMax: source.playerRating.activityGamesForMax,
       topCommandersForAverageMmr: source.playerRating.topCommandersForAverageMmr,
       minimumGamesForAverageCommanderMmr: source.playerRating.minimumGamesForAverageCommanderMmr,
       missingCommanderMmr: source.playerRating.missingCommanderMmr,
@@ -697,6 +704,7 @@ function applyEditableSettings(target: EditableSettingsState, source: ReturnType
   )
   target.playerRankingSystem = source.playerRankingSystem
   target.playerRating.provisionalGames = source.playerRating.provisionalGames
+  target.playerRating.activityGamesForMax = source.playerRating.activityGamesForMax
   target.playerRating.topCommandersForAverageMmr = source.playerRating.topCommandersForAverageMmr
   target.playerRating.minimumGamesForAverageCommanderMmr = source.playerRating.minimumGamesForAverageCommanderMmr
   target.playerRating.missingCommanderMmr = source.playerRating.missingCommanderMmr
@@ -757,6 +765,7 @@ function toDocument(source: EditableSettingsState): LeagueSettingsDocument {
     playerRankingSystem: source.playerRankingSystem,
     playerRating: {
       provisionalGames: sanitizeInteger(source.playerRating.provisionalGames),
+      activityGamesForMax: Math.max(1, sanitizeInteger(source.playerRating.activityGamesForMax)),
       topCommandersForAverageMmr: sanitizeInteger(source.playerRating.topCommandersForAverageMmr),
       minimumGamesForAverageCommanderMmr: sanitizeInteger(source.playerRating.minimumGamesForAverageCommanderMmr),
       missingCommanderMmr: sanitizeNumber(source.playerRating.missingCommanderMmr),

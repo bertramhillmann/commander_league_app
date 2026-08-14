@@ -169,11 +169,29 @@ const ACHIEVEMENT_RARITY_MULTIPLIER = {
 
 const SIMPLE_PLAYER_MMR_INITIAL_RATING = 1500
 const SIMPLE_PLAYER_MMR_K_FACTOR = 32
+const ACTIVITY_MIN_GAMES_FOR_SEASON = 10
+const AVERAGE_COMMANDER_MMR_MIN = 0
+const AVERAGE_COMMANDER_MMR_MAX = 3000
+const AVERAGE_COMMANDER_MMR_LOGISTIC_STEEPNESS = 6
 
 export function normalizeScore(value: number, min: number, max: number) {
   if (!Number.isFinite(value)) return 0
   if (max <= min) return value >= max ? 100 : 0
   return clamp(((value - min) / (max - min)) * 100, 0, 100)
+}
+
+export function normalizeLogisticScore(value: number, min: number, max: number, steepness = 6) {
+  if (!Number.isFinite(value)) return 0
+  if (max <= min) return value >= max ? 100 : 0
+  if (value <= min) return 0
+  if (value >= max) return 100
+
+  const midpoint = (min + max) / 2
+  const scale = steepness / (max - min)
+  const sigmoid = (input: number) => 1 / (1 + Math.exp(-scale * (input - midpoint)))
+  const lowerBound = sigmoid(min)
+  const upperBound = sigmoid(max)
+  return clamp(((sigmoid(value) - lowerBound) / (upperBound - lowerBound)) * 100, 0, 100)
 }
 
 export function applyDiminishingReturns(value: number, factor: number) {
@@ -259,8 +277,9 @@ function buildPlayerRatingComputation(input: CalculatePlayerRatingInput): Rating
     config.minimumGamesForAverageCommanderMmr,
     config.missingCommanderMmr,
     config.usePeakCommanderMmrForAverage,
+    calculateCommanderSlotReduction(records, input.games, settings),
   )
-  const activityPoints = calculateActivityPointsScore(input.player, records)
+  const activityPoints = calculateActivityPointsScore(records, input.games, settings)
   const achievements = calculateAchievementScore(input.player, settings.achievements)
   const clutch = calculateClutchScore(gameContexts)
   const commanderDiversity = calculateCommanderDiversityScore(records)
@@ -284,7 +303,7 @@ function buildPlayerRatingComputation(input: CalculatePlayerRatingInput): Rating
     Object.values(breakdown).reduce((sum, entry) => sum + entry.weightedContribution, 0) / totalWeight,
   )
   const activityConfidence = clamp(input.player.gamesPlayed / 12, 0.45, 1)
-  const weightedWithConfidence = round3(weightedScore * activityConfidence + (weightedScore * 0.2))
+  const weightedWithConfidence = round3(weightedScore * activityConfidence)
   const ratingSpan = Math.max(0, config.maxRating - config.minRating)
   const rating = round3(config.minRating + (clamp(weightedWithConfidence, 0, 100) / 100) * ratingSpan)
   const factors = buildFactorDetails(
@@ -442,7 +461,7 @@ export function calculateSeasonPointsScore(
 
     return {
       rawValue,
-      normalizedScore: normalizeScore(rawValue, 0, 1.8),
+      normalizedScore: normalizeScore(rawValue, 0, 1),
       seasonAverage: round3(rawValue),
       playedSeasons: seasonAverages.length,
       configuredSeasons: configuredSeasons.length,
@@ -498,6 +517,7 @@ export function calculateAverageCommanderMMRScore(
   minimumGamesPerCommander = 1,
   missingCommanderMmr = 0,
   usePeakCommanderMmr = false,
+  commanderSlotReduction = 0,
 ) {
   const commanderStats = new Map<string, { gamesPlayed: number; latestMmr: number; peakMmr: number }>()
 
@@ -511,7 +531,9 @@ export function calculateAverageCommanderMMRScore(
     })
   }
 
-  const sanitizedTopCommanderCount = Math.max(1, topCommanderCount)
+  const configuredTopCommanderCount = Math.max(1, topCommanderCount)
+  const sanitizedSlotReduction = Math.max(0, Math.floor(commanderSlotReduction))
+  const sanitizedTopCommanderCount = Math.max(1, configuredTopCommanderCount - sanitizedSlotReduction)
   const sanitizedMinimumGames = Math.max(1, minimumGamesPerCommander)
   const sanitizedMissingCommanderMmr = Number.isFinite(missingCommanderMmr) ? missingCommanderMmr : 0
   const eligibleCommanders = [...commanderStats.values()]
@@ -521,9 +543,8 @@ export function calculateAverageCommanderMMRScore(
     .map((commander) => usePeakCommanderMmr ? commander.peakMmr : commander.latestMmr)
     .sort((left, right) => right - left)
     .slice(0, sanitizedTopCommanderCount)
-    // A counted commander below the configured fallback cannot lower this factor
-    // below the value of an otherwise missing commander slot.
-    .map((mmr) => Math.max(mmr, sanitizedMissingCommanderMmr))
+  const eligibleCommanderSlots = bestCommanderMmrs.length
+  const fallbackSlots = sanitizedTopCommanderCount - eligibleCommanderSlots
 
   while (bestCommanderMmrs.length < sanitizedTopCommanderCount) {
     bestCommanderMmrs.push(sanitizedMissingCommanderMmr)
@@ -532,15 +553,44 @@ export function calculateAverageCommanderMMRScore(
   const rawValue = average(bestCommanderMmrs)
   return {
     rawValue,
-    normalizedScore: normalizeScore(rawValue, 1000, 2600),
+    // Logistic option kept for easy reactivation:
+    // normalizedScore: normalizeLogisticScore(
+    //   rawValue,
+    //   AVERAGE_COMMANDER_MMR_MIN,
+    //   AVERAGE_COMMANDER_MMR_MAX,
+    //   AVERAGE_COMMANDER_MMR_LOGISTIC_STEEPNESS,
+    // ),
+    normalizedScore: normalizeScore(rawValue, AVERAGE_COMMANDER_MMR_MIN, AVERAGE_COMMANDER_MMR_MAX),
     averageCommanderMMR: round3(rawValue),
-    countedCommanders: sanitizedTopCommanderCount,
+    countedCommanders: eligibleCommanderSlots,
+    fallbackSlots,
+    configuredCommanderSlots: configuredTopCommanderCount,
+    commanderSlotReduction: configuredTopCommanderCount - sanitizedTopCommanderCount,
     availableCommanders: commanderStats.size,
     eligibleCommanders: eligibleCommanders.length,
     minimumGamesPerCommander: sanitizedMinimumGames,
     missingCommanderMmr: round3(sanitizedMissingCommanderMmr),
     usePeakCommanderMmr: usePeakCommanderMmr ? 1 : 0,
   }
+}
+
+export function calculateCommanderSlotReduction(
+  records: PlayerRatingRecord[],
+  games: PlayerRatingGame[],
+  settings: ReturnType<typeof getResolvedLeagueSettings>,
+) {
+  if (records.length === 0 || !hasActiveSeasonalRanking(settings.standings.seasonalRanking)) return 0
+
+  const timestamps = new Map(games.map((game) => [game.gameId, new Date(game.date).getTime()]))
+  const firstGameTimestamp = records.reduce((earliest, record) => {
+    const timestamp = timestamps.get(record.gameId)
+    return timestamp !== undefined && Number.isFinite(timestamp) ? Math.min(earliest, timestamp) : earliest
+  }, Number.POSITIVE_INFINITY)
+  if (!Number.isFinite(firstGameTimestamp)) return 0
+
+  return buildLeagueSeasonRanges(settings.standings.seasonalRanking)
+    .filter((season) => season.endMs < firstGameTimestamp)
+    .length
 }
 
 export function calculateCommanderDiversityScore(records: PlayerRatingRecord[]) {
@@ -572,20 +622,64 @@ export function calculateCommanderDiversityScore(records: PlayerRatingRecord[]) 
 }
 
 export function calculateActivityPointsScore(
-  player: PlayerRatingPlayerState,
   records: PlayerRatingRecord[],
+  games: PlayerRatingGame[],
+  settings: ReturnType<typeof getResolvedLeagueSettings>,
 ) {
-  if (records.length === 0 || player.gamesPlayed === 0) {
-    return { rawValue: 0, normalizedScore: 0, totalBasePoints: 0, activityBonus: 0 }
+  const configuredSeasons = hasActiveSeasonalRanking(settings.standings.seasonalRanking)
+    ? buildLeagueSeasonRanges(settings.standings.seasonalRanking)
+    : []
+  const now = Date.now()
+
+  if (records.length === 0) {
+    const completedSeasons = configuredSeasons.filter((season) => season.endMs < now).length
+    return {
+      rawValue: 0,
+      normalizedScore: 0,
+      countingGames: 0,
+      gamesForMax: completedSeasons > 0 ? 0 : settings.playerRating.activityGamesForMax,
+      qualifyingSeasons: 0,
+      totalSeasons: completedSeasons,
+    }
   }
-  const totalBasePoints = records.reduce((sum, record) => sum + Math.max(0, record.basePoints), 0)
-  const activityBonus = Math.min(1, player.gamesPlayed / 40)
-  const rawValue = totalBasePoints * (0.6 + activityBonus * 0.4)
+
+  const gameDates = new Map(games.map((game) => [game.gameId, new Date(game.date)]))
+  const gamesBySeason = new Map<string, number>()
+
+  for (const record of records) {
+    const date = gameDates.get(record.gameId)
+    const timestamp = date?.getTime()
+    const configuredSeason = timestamp === undefined || Number.isNaN(timestamp)
+      ? undefined
+      : configuredSeasons.find((season) => timestamp >= season.startMs && timestamp <= season.endMs)
+    const seasonKey = configuredSeason
+      ? `configured-${configuredSeason.index}`
+      : date && !Number.isNaN(date.getTime())
+        ? `calendar-${date.getUTCFullYear()}`
+        : 'unknown'
+    gamesBySeason.set(seasonKey, (gamesBySeason.get(seasonKey) ?? 0) + 1)
+  }
+
+  const countingGames = records.length
+  const qualifyingConfiguredSeasons = configuredSeasons.filter((season) =>
+    (gamesBySeason.get(`configured-${season.index}`) ?? 0) >= ACTIVITY_MIN_GAMES_FOR_SEASON,
+  )
+  const relevantSeasons = configuredSeasons.filter((season) =>
+    season.endMs < now || qualifyingConfiguredSeasons.includes(season),
+  )
+  const qualifyingSeasons = configuredSeasons.length > 0
+    ? qualifyingConfiguredSeasons.length
+    : gamesBySeason.size
+  const gamesForMax = relevantSeasons.length > 0
+    ? settings.playerRating.activityGamesForMax * (qualifyingSeasons / relevantSeasons.length)
+    : settings.playerRating.activityGamesForMax
   return {
-    rawValue,
-    normalizedScore: normalizeScore(rawValue, 0, 80),
-    totalBasePoints: round3(totalBasePoints),
-    activityBonus: round3(activityBonus),
+    rawValue: countingGames,
+    normalizedScore: gamesForMax > 0 ? normalizeScore(countingGames, 0, gamesForMax) : 0,
+    countingGames,
+    gamesForMax,
+    qualifyingSeasons,
+    totalSeasons: relevantSeasons.length,
   }
 }
 
@@ -703,6 +797,7 @@ function buildFactorDetails(
         `best commanders counted: ${Math.round(factors.averageCommanderMMR.countedCommanders ?? 0)}`,
         `minimum games per commander: ${Math.round(factors.averageCommanderMMR.minimumGamesPerCommander ?? 0)}`,
         `fallback MMR for missing or lower-rated slots: ${round3(factors.averageCommanderMMR.missingCommanderMmr ?? 0)}`,
+        `fallback slots used: ${Math.round(factors.averageCommanderMMR.fallbackSlots ?? 0)}`,
         `MMR source: ${(factors.averageCommanderMMR.usePeakCommanderMmr ?? 0) > 0 ? 'peak ever' : 'current'}`,
         `eligible commanders: ${Math.round(factors.averageCommanderMMR.eligibleCommanders ?? 0)}`,
         `commanders available: ${Math.round(factors.averageCommanderMMR.availableCommanders ?? 0)}`,
@@ -713,9 +808,9 @@ function buildFactorDetails(
       'activityPoints',
       breakdown.activityPoints,
       [
-        `earned base points: ${round3(factors.activityPoints.totalBasePoints ?? 0)}`,
-        `activity bonus: ${Math.round((factors.activityPoints.activityBonus ?? 0) * 100)}%`,
-        'raw = base points * (0.6 + activityBonus*0.4)',
+        `counting games: ${Math.round(factors.activityPoints.countingGames ?? 0)}`,
+        `qualifying seasons: ${Math.round(factors.activityPoints.qualifyingSeasons ?? 0)}/${Math.round(factors.activityPoints.totalSeasons ?? 0)}`,
+        `maximum at: ${Math.round(factors.activityPoints.gamesForMax ?? 0)} counting games`,
       ],
     ),
     achievements: buildFactorDetail(
@@ -959,13 +1054,13 @@ const FACTOR_META: Record<PlayerRatingBreakdownKey, { label: string, description
   },
   averageCommanderMMR: {
     label: 'Average Commander MMR',
-    description: 'Rewards maintaining a stronger commander pool on average across your games.',
+    description: 'Rewards maintaining a stronger commander pool using linear normalization across the configured MMR range.',
     formula: 'Normalize(avg commander MMR) × weight',
   },
   activityPoints: {
     label: 'Activity',
-    description: 'A small reward for sustained play volume using earned base points plus a modest participation bonus.',
-    formula: 'Normalize(base points * (0.6 + activity bonus*0.4)) × weight',
+    description: 'Rewards games played regardless of performance. Every game counts toward the configured maximum.',
+    formula: 'Normalize(counting games / games for maximum) × weight',
   },
   achievements: {
     label: 'Achievements',
