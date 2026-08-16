@@ -495,7 +495,7 @@ export function calculateWinRateScore(player: PlayerRatingPlayerState) {
   const rawValue = player.gamesPlayed > 0 ? player.baseWins / player.gamesPlayed : 0
   return {
     rawValue,
-    normalizedScore: normalizeScore(rawValue, -1, 0.45),
+    normalizedScore: normalizeScore(rawValue, 0, 1),
     wins: player.baseWins,
     gamesPlayed: player.gamesPlayed,
   }
