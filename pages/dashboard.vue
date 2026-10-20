@@ -320,8 +320,13 @@
 
     <section class="dashboard__looster-section">
       <header class="dashboard__looster-header">
-        <h2 class="dashboard__looster-title">Looster Points</h2>
-        <p class="dashboard__looster-subtitle">Availability, spending, and set trends per player.</p>
+        <div>
+          <h2 class="dashboard__looster-title">Looster Points</h2>
+          <p class="dashboard__looster-subtitle">Availability, spending, and set trends per player.</p>
+        </div>
+        <button v-if="isAdmin" type="button" class="dashboard__simulation-button" @click="openPrizePoolModal">
+          Add prize-pool item
+        </button>
       </header>
 
       <div class="dashboard__looster-wrap">
@@ -337,6 +342,7 @@
               <th v-if="showLoosterDetailColumns" class="looster-table__th looster-table__th--num">LP Over Games</th>
               <th v-if="showLoosterDetailColumns" class="looster-table__th looster-table__th--num">LP Over Missed</th>
               <th v-if="showLoosterDetailColumns" class="looster-table__th looster-table__th--num">Looster Points Total</th>
+              <th class="looster-table__th looster-table__th--num">Prize Pool Balance</th>
             </tr>
           </thead>
           <tbody>
@@ -395,6 +401,9 @@
                 {{ fmtLooster(row.missedGameLoosterPoints) }}
               </td>
               <td v-if="showLoosterDetailColumns" class="looster-table__td looster-table__td--num">{{ fmtLooster(row.totalLoosterPoints) }}</td>
+              <td class="looster-table__td looster-table__td--num" :class="row.prizePoolBalance < 0 ? 'looster-table__td--balance-negative' : 'looster-table__td--balance-positive'">
+                {{ fmtEuro(row.prizePoolBalance) }}
+              </td>
             </tr>
           </tbody>
         </table>
@@ -402,8 +411,11 @@
     </section>
 
     <div class="dashboard__prize-pool">
-      <span class="dashboard__prize-pool-label">Prize Pool</span>
-      <strong class="dashboard__prize-pool-value">{{ fmtEuro(totalPrizePool) }}</strong>
+      <button type="button" class="dashboard__prize-pool-link" @click="prizePoolSidebarOpen = true">Prize Pool</button>
+      <strong class="dashboard__prize-pool-value">{{ fmtEuro(currentPrizePool) }}</strong>
+      <span class="dashboard__prize-pool-divider" aria-hidden="true" />
+      <span class="dashboard__prize-pool-label">Projected final</span>
+      <strong class="dashboard__prize-pool-value">{{ fmtEuro(projectedPrizePool) }}</strong>
     </div>
 
     <section
@@ -1093,6 +1105,86 @@
     />
 
     <GamesGameModal :game-id="openGameModalId" @close="closeGameModal" />
+
+    <Teleport to="body">
+      <div v-if="prizePoolModalOpen" class="prize-pool-modal-overlay" @click.self="closePrizePoolModal">
+        <section class="prize-pool-modal" role="dialog" aria-modal="true" aria-labelledby="prize-pool-modal-title">
+          <button type="button" class="prize-pool-modal__close" aria-label="Close" @click="closePrizePoolModal">×</button>
+          <p class="prize-pool-modal__eyebrow">Prize Pool</p>
+          <h2 id="prize-pool-modal-title" class="prize-pool-modal__title">Add contributed item</h2>
+          <p class="prize-pool-modal__subtitle">Record an item a player contributed to the prize pool.</p>
+
+          <form class="prize-pool-form" @submit.prevent="submitPrizePoolItem">
+            <p v-if="prizePoolError" class="prize-pool-form__error">{{ prizePoolError }}</p>
+            <label class="form-field">
+              <span class="form-label">Player</span>
+              <select v-model="prizePoolForm.playerName" class="form-input" required>
+                <option value="" disabled>Select a player</option>
+                <option v-for="name in prizePoolPlayerOptions" :key="name" :value="name">{{ name }}</option>
+              </select>
+            </label>
+            <label class="form-field">
+              <span class="form-label">Description</span>
+              <input v-model="prizePoolForm.description" type="text" class="form-input" maxlength="200" placeholder="e.g. Collector booster" required>
+            </label>
+            <label class="form-field">
+              <span class="form-label">Date</span>
+              <input v-model="prizePoolForm.date" type="date" class="form-input" required>
+            </label>
+            <label class="form-field">
+              <span class="form-label">Value in euro</span>
+              <input v-model.number="prizePoolForm.priceEuro" type="number" class="form-input" min="0.01" step="0.01" placeholder="0.00" required>
+            </label>
+            <div class="prize-pool-form__actions">
+              <button type="button" class="btn btn--ghost btn--sm" @click="closePrizePoolModal">Cancel</button>
+              <button type="submit" class="btn btn--muted btn--sm" :disabled="savingPrizePoolItem">
+                {{ savingPrizePoolItem ? 'Saving…' : 'Add item' }}
+              </button>
+            </div>
+          </form>
+
+          <div v-if="prizePoolItems.length" class="prize-pool-items">
+            <h3>Recorded items</h3>
+            <div v-for="item in prizePoolItems" :key="item.id" class="prize-pool-items__row">
+              <div><strong>{{ item.playerName }}</strong><span>{{ formatSeasonDate(item.date) }} · {{ item.description }}</span></div>
+              <strong>{{ fmtEuro(item.priceEuro) }}</strong>
+              <button type="button" class="prize-pool-items__delete" :disabled="deletingPrizePoolItemId === item.id" aria-label="Delete item" @click="deletePrizePoolItem(item)">×</button>
+            </div>
+          </div>
+        </section>
+      </div>
+    </Teleport>
+
+    <Teleport to="body">
+      <div v-if="prizePoolSidebarOpen" class="prize-pool-sidebar">
+        <button type="button" class="prize-pool-sidebar__scrim" aria-label="Close prize pool" @click="prizePoolSidebarOpen = false" />
+        <aside class="prize-pool-sidebar__panel" aria-labelledby="prize-pool-sidebar-title">
+          <header class="prize-pool-sidebar__header">
+            <div>
+              <p class="prize-pool-sidebar__eyebrow">Current inventory</p>
+              <h2 id="prize-pool-sidebar-title">Prize Pool</h2>
+              <p>{{ prizePoolItems.length }} items · {{ fmtEuro(currentPrizePool) }}</p>
+            </div>
+            <button type="button" class="prize-pool-sidebar__close" @click="prizePoolSidebarOpen = false">Close</button>
+          </header>
+
+          <div class="prize-pool-sidebar__table-wrap">
+            <table class="prize-pool-sidebar__table">
+              <thead><tr><th>Date</th><th>Player</th><th>Description</th><th>Price</th></tr></thead>
+              <tbody>
+                <tr v-for="item in prizePoolItems" :key="item.id">
+                  <td>{{ formatSeasonDate(item.date) }}</td>
+                  <td>{{ item.playerName }}</td>
+                  <td>{{ item.description }}</td>
+                  <td>{{ fmtEuro(item.priceEuro) }}</td>
+                </tr>
+                <tr v-if="prizePoolItems.length === 0"><td colspan="4" class="prize-pool-sidebar__empty">No prize-pool items recorded.</td></tr>
+              </tbody>
+            </table>
+          </div>
+        </aside>
+      </div>
+    </Teleport>
   </div>
 </template>
 
@@ -1129,6 +1221,7 @@ import {
   PERF_MULT_MIN,
 } from '~/utils/placements'
 import type { LoosterPurchaseRecord } from '~/utils/loosterPurchases'
+import type { PrizePoolItemRecord } from '~/utils/prizePoolItems'
 
 const { gameRecords, games, leagueSnapshots, players, standings, loading, loaded, progress, checkNewGames } = useLeagueState()
 const { settings } = useLeagueSettings()
@@ -1186,6 +1279,7 @@ type LoosterTableRow = {
   missedGameLoosterPoints: number
   missedGameLoosterPointsEntries: LoosterTooltipEntry[]
   totalLoosterPoints: number
+  prizePoolBalance: number
 }
 
 type LoosterTooltipEntry = {
@@ -1204,6 +1298,18 @@ const sortDirection = ref<'desc' | 'asc'>('desc')
 const hasMounted = ref(false)
 const showLoosterDetailColumns = false
 const purchases = ref<LoosterPurchaseRecord[]>([])
+const prizePoolItems = ref<PrizePoolItemRecord[]>([])
+const prizePoolModalOpen = ref(false)
+const prizePoolSidebarOpen = ref(false)
+const savingPrizePoolItem = ref(false)
+const deletingPrizePoolItemId = ref('')
+const prizePoolError = ref('')
+const prizePoolForm = reactive({
+  playerName: '',
+  description: '',
+  priceEuro: null as number | null,
+  date: new Date().toISOString().slice(0, 10),
+})
 const loosterSetMeta = ref<Record<string, DashboardSetMeta>>({})
 const pageLoading = computed(() => !hasMounted.value || loading.value || !loaded.value)
 const progressPercent = computed(() => {
@@ -1214,9 +1320,16 @@ const progressLabel = computed(() => {
   if (progress.value.total <= 0) return 'Preparing league data...'
   return `${progress.value.current}/${progress.value.total} games computed`
 })
-const totalPrizePool = computed(() =>
-  purchases.value.reduce((sum, purchase) => sum + Number(purchase.priceEuro ?? 0), 0),
+const currentPrizePool = computed(() =>
+  prizePoolItems.value.reduce((sum, item) => sum + item.priceEuro, 0),
 )
+const projectedPrizePool = computed(() =>
+  Math.abs(
+    currentPrizePool.value
+      - purchases.value.reduce((sum, purchase) => sum + Number(purchase.priceEuro ?? 0), 0),
+  ),
+)
+const prizePoolPlayerOptions = computed(() => table.value.map((row) => row.name).sort((a, b) => a.localeCompare(b)))
 const loosterCost = computed(() => Number(settings.value.shop.loosterCost ?? 0))
 const chronologicalGames = computed(() => [...games.value].sort(compareGamesChronological))
 const playerPortraitModules = import.meta.glob('../assets/img/*.png', { eager: true, import: 'default' })
@@ -1419,6 +1532,14 @@ const purchasesByPlayer = computed(() => {
   return grouped
 })
 
+const prizePoolValueByPlayer = computed(() => {
+  const grouped = new Map<string, number>()
+  for (const item of prizePoolItems.value) {
+    grouped.set(item.playerName, (grouped.get(item.playerName) ?? 0) + Number(item.priceEuro ?? 0))
+  }
+  return grouped
+})
+
 const missedLoosterBreakdownByPlayer = computed(() => {
   const grouped = new Map<string, { counts: Record<3 | 4 | 5, number>, total: number }>()
 
@@ -1466,6 +1587,9 @@ const loosterTable = computed<LoosterTableRow[]>(() =>
       Math.max(0, totalLoosterPoints - gameLoosterPoints),
     )
     const currentLoosterPoints = roundLoosterPoints(totalLoosterPoints - spentLoosterPoints)
+    const purchasedEuro = playerPurchases.reduce((sum, purchase) => sum + Number(purchase.priceEuro ?? 0), 0)
+    const contributedEuro = prizePoolValueByPlayer.value.get(playerName) ?? 0
+    const prizePoolBalance = Math.round((contributedEuro - purchasedEuro) * 100) / 100
     const availableLoosters = loosterCost.value > 0
       ? Math.max(0, Math.floor(currentLoosterPoints / loosterCost.value))
       : 0
@@ -1531,6 +1655,7 @@ const loosterTable = computed<LoosterTableRow[]>(() =>
       missedGameLoosterPoints,
       missedGameLoosterPointsEntries,
       totalLoosterPoints,
+      prizePoolBalance,
     }
   }),
 )
@@ -1558,12 +1683,58 @@ async function checkForNewGames() {
 
 async function loadPrizePool() {
   try {
-    const response = await $fetch<{ purchases: LoosterPurchaseRecord[] }>('/api/purchases')
-    purchases.value = response.purchases ?? []
+    const [purchaseResponse, itemResponse] = await Promise.all([
+      $fetch<{ purchases: LoosterPurchaseRecord[] }>('/api/purchases'),
+      $fetch<{ items: PrizePoolItemRecord[] }>('/api/prize-pool-items'),
+    ])
+    purchases.value = purchaseResponse.purchases ?? []
+    prizePoolItems.value = itemResponse.items ?? []
     await loadLoosterSetMeta()
   } catch {
     purchases.value = []
+    prizePoolItems.value = []
     loosterSetMeta.value = {}
+  }
+}
+
+function openPrizePoolModal() {
+  prizePoolError.value = ''
+  if (!prizePoolForm.playerName) prizePoolForm.playerName = prizePoolPlayerOptions.value[0] ?? ''
+  prizePoolModalOpen.value = true
+}
+
+function closePrizePoolModal() {
+  if (savingPrizePoolItem.value) return
+  prizePoolModalOpen.value = false
+  prizePoolError.value = ''
+}
+
+async function submitPrizePoolItem() {
+  prizePoolError.value = ''
+  savingPrizePoolItem.value = true
+  try {
+    await $fetch('/api/prize-pool-items', { method: 'POST', body: prizePoolForm })
+    prizePoolForm.description = ''
+    prizePoolForm.priceEuro = null
+    const response = await $fetch<{ items: PrizePoolItemRecord[] }>('/api/prize-pool-items')
+    prizePoolItems.value = response.items ?? []
+  } catch (error: any) {
+    prizePoolError.value = error?.data?.statusMessage ?? 'Could not save the prize-pool item.'
+  } finally {
+    savingPrizePoolItem.value = false
+  }
+}
+
+async function deletePrizePoolItem(item: PrizePoolItemRecord) {
+  deletingPrizePoolItemId.value = item.id
+  prizePoolError.value = ''
+  try {
+    await $fetch(`/api/prize-pool-items/${encodeURIComponent(item.id)}`, { method: 'DELETE' })
+    prizePoolItems.value = prizePoolItems.value.filter((entry) => entry.id !== item.id)
+  } catch (error: any) {
+    prizePoolError.value = error?.data?.statusMessage ?? 'Could not delete the prize-pool item.'
+  } finally {
+    deletingPrizePoolItemId.value = ''
   }
 }
 
@@ -3694,6 +3865,29 @@ $table-row-height: 47.8px;
     font-weight: $font-weight-semibold;
   }
 
+  &-link {
+    padding: 0;
+    border: 0;
+    background: transparent;
+    color: $color-primary-light;
+    font: inherit;
+    font-size: $font-size-xs;
+    font-weight: $font-weight-semibold;
+    letter-spacing: 0.08em;
+    text-decoration: underline;
+    text-underline-offset: 0.22em;
+    text-transform: uppercase;
+    cursor: pointer;
+
+    &:hover { color: $color-secondary; }
+  }
+
+  &-divider {
+    align-self: stretch;
+    width: 1px;
+    background: rgba($color-primary-light, 0.2);
+  }
+
   &-value {
     color: $color-secondary;
     font-size: $font-size-lg;
@@ -3711,6 +3905,10 @@ $table-row-height: 47.8px;
   justify-content: space-between;
   gap: $spacing-3;
   margin-bottom: $spacing-3;
+}
+
+.dashboard__looster-header > div {
+  min-width: 0;
 }
 
 .dashboard__looster-title {
@@ -3782,6 +3980,16 @@ $table-row-height: 47.8px;
     cursor: default;
     text-decoration: underline dotted rgba($color-primary-light, 0.45);
     text-underline-offset: 0.16em;
+  }
+
+  &__td--balance-positive {
+    color: $color-secondary;
+    font-weight: $font-weight-semibold;
+  }
+
+  &__td--balance-negative {
+    color: $color-danger;
+    font-weight: $font-weight-semibold;
   }
 
   &__th--num,
@@ -4716,6 +4924,190 @@ $table-row-height: 47.8px;
       aspect-ratio: auto;
       min-height: 150px;
     }
+  }
+}
+.prize-pool-modal-overlay {
+  position: fixed;
+  inset: 0;
+  z-index: 250;
+  display: grid;
+  place-items: center;
+  padding: $spacing-4;
+  background: rgba(0, 0, 0, 0.78);
+  backdrop-filter: blur(8px);
+}
+
+.prize-pool-sidebar {
+  position: fixed;
+  inset: 0;
+  z-index: 1200;
+
+  &__scrim {
+    position: absolute;
+    inset: 0;
+    border: 0;
+    background: rgba(6, 8, 14, 0.7);
+    backdrop-filter: blur(3px);
+  }
+
+  &__panel {
+    position: absolute;
+    top: 0;
+    right: 0;
+    width: min(820px, 100%);
+    height: 100%;
+    overflow-y: auto;
+    border-left: 1px solid rgba($border-color, 0.85);
+    background: linear-gradient(180deg, rgba(20, 24, 38, 0.99), rgba(12, 16, 28, 0.99));
+    box-shadow: -22px 0 50px rgba(0, 0, 0, 0.38);
+  }
+
+  &__header {
+    position: sticky;
+    top: 0;
+    z-index: 2;
+    display: flex;
+    align-items: flex-start;
+    justify-content: space-between;
+    gap: $spacing-4;
+    padding: $spacing-4 $spacing-6;
+    border-bottom: 1px solid rgba($border-color, 0.8);
+    background: rgba(12, 16, 28, 0.96);
+    backdrop-filter: blur(10px);
+
+    h2 { margin: $spacing-1 0; color: $color-text; font-size: $font-size-2xl; }
+    p { margin: 0; color: $color-text-muted; font-size: $font-size-sm; }
+  }
+
+  &__eyebrow {
+    color: rgba($color-primary-light, 0.8) !important;
+    font-size: 11px !important;
+    letter-spacing: 0.12em;
+    text-transform: uppercase;
+  }
+
+  &__close {
+    border: 1px solid rgba($border-color, 0.9);
+    border-radius: $border-radius-md;
+    padding: $spacing-2 $spacing-3;
+    background: rgba($color-primary-light, 0.08);
+    color: $color-text;
+    cursor: pointer;
+  }
+
+  &__table-wrap { padding: $spacing-4 $spacing-6; overflow-x: auto; }
+
+  &__table {
+    width: 100%;
+    border-collapse: collapse;
+
+    th, td { padding: $spacing-3; border-bottom: 1px solid rgba($border-color, 0.55); text-align: left; }
+    th { color: $color-text-muted; font-size: $font-size-xs; letter-spacing: 0.08em; text-transform: uppercase; }
+    td { color: $color-text; font-size: $font-size-sm; }
+    th:last-child, td:last-child { text-align: right; white-space: nowrap; }
+    td:nth-child(1), td:nth-child(2) { white-space: nowrap; }
+  }
+
+  &__empty { padding: $spacing-6 !important; color: $color-text-muted !important; text-align: center !important; }
+}
+
+.prize-pool-modal {
+  position: relative;
+  width: min(560px, 100%);
+  max-height: 90vh;
+  overflow-y: auto;
+  padding: $spacing-6;
+  border: 1px solid rgba($color-primary-light, 0.32);
+  border-radius: $border-radius-xl;
+  background: linear-gradient(180deg, rgba(20, 10, 42, 0.99), rgba(8, 4, 18, 0.99));
+  box-shadow: 0 32px 80px rgba(0, 0, 0, 0.75);
+
+  &__close {
+    position: absolute;
+    top: $spacing-4;
+    right: $spacing-4;
+    width: 28px;
+    height: 28px;
+    border: 1px solid rgba($color-primary-light, 0.2);
+    border-radius: 50%;
+    background: rgba($color-primary-light, 0.1);
+    color: $color-text-muted;
+    cursor: pointer;
+  }
+
+  &__eyebrow {
+    margin: 0 0 $spacing-2;
+    color: $color-accent;
+    font-size: 10px;
+    font-weight: $font-weight-semibold;
+    letter-spacing: 0.14em;
+    text-transform: uppercase;
+  }
+
+  &__title {
+    margin: 0 0 $spacing-2;
+    color: $color-text;
+    font-size: $font-size-2xl;
+  }
+
+  &__subtitle {
+    margin: 0 0 $spacing-4;
+    color: $color-text-muted;
+    font-size: $font-size-sm;
+  }
+}
+
+.prize-pool-form {
+  display: grid;
+  gap: $spacing-4;
+
+  &__error {
+    margin: 0;
+    color: $color-danger;
+    font-size: $font-size-sm;
+  }
+
+  &__actions {
+    display: flex;
+    justify-content: flex-end;
+    gap: $spacing-3;
+  }
+}
+
+.prize-pool-items {
+  display: grid;
+  gap: $spacing-2;
+  margin-top: $spacing-6;
+  padding-top: $spacing-4;
+  border-top: 1px solid rgba($color-primary-light, 0.14);
+
+  h3 {
+    margin: 0 0 $spacing-2;
+    color: $color-text;
+    font-size: $font-size-sm;
+  }
+
+  &__row {
+    display: grid;
+    grid-template-columns: minmax(0, 1fr) auto auto;
+    align-items: center;
+    gap: $spacing-3;
+    padding: $spacing-2 $spacing-3;
+    border-radius: $border-radius-md;
+    background: rgba($color-primary-light, 0.06);
+    color: $color-text;
+    font-size: $font-size-sm;
+
+    div { display: grid; min-width: 0; }
+    span { overflow: hidden; color: $color-text-muted; text-overflow: ellipsis; white-space: nowrap; }
+  }
+
+  &__delete {
+    border: 0;
+    background: transparent;
+    color: $color-danger;
+    font-size: $font-size-lg;
+    cursor: pointer;
   }
 }
 </style>
