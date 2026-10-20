@@ -1,7 +1,17 @@
 const BASE_URL = 'https://api.scryfall.com'
 const COLLECTION_CHUNK_SIZE = 75
-const CARD_STORAGE_KEY = 'scryfall-card-cache:v2'
-const SET_STORAGE_KEY = 'scryfall-set-cache:v1'
+const CARD_STORAGE_KEY = 'scryfall-card-cache:v3'
+const LEGACY_CARD_STORAGE_KEYS = ['scryfall-card-cache:v2']
+const SET_STORAGE_KEY = 'scryfall-set-cache:v2'
+const LEGACY_SET_STORAGE_KEYS = ['scryfall-set-cache:v1']
+
+// Persisted caches are written in one batch shortly after the last change instead
+// of re-serializing the whole cache after every fetched card.
+const PERSIST_DELAY_MS = 1500
+// Keeps localStorage well below its ~5 MB quota; the oldest entries are dropped first.
+const MAX_PERSISTED_CARDS = 3000
+// Cards Scryfall definitively reported as unknown are not asked for again for a while.
+const NOT_FOUND_TTL_MS = 12 * 60 * 60 * 1000
 
 // Scryfall asks for 50-100 ms of delay between requests sent in a single-threaded
 // manner (~10 req/s). All outbound requests share one queue so bursts from unrelated
@@ -74,8 +84,21 @@ export interface ScryfallSet {
   icon_svg_uri?: string
 }
 
+/** Persisted marker for a card Scryfall reported as not found. */
+interface NotFoundEntry {
+  notFoundAt: number
+}
+
+type CardCacheEntry = ScryfallCard | NotFoundEntry
+
+/** The outcome of a lookup: `definitive` is false for network / rate-limit failures. */
+interface CardLookup {
+  card: ScryfallCard | null
+  definitive: boolean
+}
+
 // Module-level cache persists for the lifetime of the page.
-const cache = new Map<string, ScryfallCard | null>()
+const cache = new Map<string, CardCacheEntry>()
 const setCache = new Map<string, ScryfallSet | null>()
 const pendingCardRequests = new Map<string, Promise<ScryfallCard | null>>()
 const pendingSetRequests = new Map<string, Promise<ScryfallSet | null>>()
@@ -99,49 +122,168 @@ function escapeScryfallQueryValue(value: string) {
   return value.replace(/\\/g, '\\\\').replace(/"/g, '\\"')
 }
 
+/**
+ * Keeps only the fields this app reads. Full Scryfall objects (prices, legalities,
+ * related URIs, ...) are several KB each and quickly filled the localStorage quota,
+ * after which nothing new could be cached at all.
+ */
+function toCachedCard(card: ScryfallCard): ScryfallCard {
+  return {
+    id: card.id,
+    name: card.name,
+    cmc: card.cmc,
+    mana_cost: card.mana_cost,
+    image_uris: card.image_uris,
+    card_faces: card.card_faces?.map((face) => ({ name: face.name, image_uris: face.image_uris })),
+    type_line: card.type_line,
+    oracle_text: card.oracle_text,
+    colors: card.colors,
+    color_identity: card.color_identity,
+    set: card.set,
+    set_name: card.set_name,
+    rarity: card.rarity,
+    scryfall_uri: card.scryfall_uri,
+  }
+}
+
+function toCachedSet(set: ScryfallSet): ScryfallSet {
+  return {
+    code: set.code,
+    name: set.name,
+    scryfall_uri: set.scryfall_uri,
+    search_uri: set.search_uri,
+    icon_svg_uri: set.icon_svg_uri,
+  }
+}
+
+function isNotFoundEntry(entry: CardCacheEntry | undefined): entry is NotFoundEntry {
+  return Boolean(entry && 'notFoundAt' in entry)
+}
+
+function readStorage(key: string) {
+  try {
+    return localStorage.getItem(key)
+  } catch {
+    return null
+  }
+}
+
+function removeStorage(key: string) {
+  try {
+    localStorage.removeItem(key)
+  } catch {
+    // Storage may be unavailable (private mode, blocked site data).
+  }
+}
+
 function loadBrowserCache() {
   if (browserCacheHydrated || !import.meta.client) return
 
   browserCacheHydrated = true
+  let migrated = false
 
   try {
-    const storedCards = localStorage.getItem(CARD_STORAGE_KEY)
+    const storedCards = readStorage(CARD_STORAGE_KEY)
     if (storedCards) {
-      const parsedCards = JSON.parse(storedCards) as Record<string, ScryfallCard | null>
-      for (const [name, card] of Object.entries(parsedCards)) {
-        if (card) cache.set(name, card)
+      const parsedCards = JSON.parse(storedCards) as Record<string, CardCacheEntry>
+      for (const [key, entry] of Object.entries(parsedCards)) {
+        if (entry) cache.set(key, entry)
+      }
+    } else {
+      // One-time migration: keep previously cached cards, slimmed down.
+      for (const legacyKey of LEGACY_CARD_STORAGE_KEYS) {
+        const legacyCards = readStorage(legacyKey)
+        if (!legacyCards) continue
+        const parsedCards = JSON.parse(legacyCards) as Record<string, ScryfallCard | null>
+        for (const [key, card] of Object.entries(parsedCards)) {
+          if (card) cache.set(key, toCachedCard(card))
+        }
+        migrated = true
       }
     }
   } catch {
-    localStorage.removeItem(CARD_STORAGE_KEY)
+    cache.clear()
+    removeStorage(CARD_STORAGE_KEY)
   }
+  for (const legacyKey of LEGACY_CARD_STORAGE_KEYS) removeStorage(legacyKey)
 
   try {
-    const storedSets = localStorage.getItem(SET_STORAGE_KEY)
+    const storedSets = readStorage(SET_STORAGE_KEY)
     if (storedSets) {
       const parsedSets = JSON.parse(storedSets) as Record<string, ScryfallSet | null>
       for (const [code, set] of Object.entries(parsedSets)) {
         setCache.set(code, set)
       }
+    } else {
+      for (const legacyKey of LEGACY_SET_STORAGE_KEYS) {
+        const legacySets = readStorage(legacyKey)
+        if (!legacySets) continue
+        // Legacy entries cached `null` after any failure (including network errors),
+        // so only real sets are carried over.
+        const parsedSets = JSON.parse(legacySets) as Record<string, ScryfallSet | null>
+        for (const [code, set] of Object.entries(parsedSets)) {
+          if (set) setCache.set(code, toCachedSet(set))
+        }
+        migrated = true
+      }
     }
   } catch {
-    localStorage.removeItem(SET_STORAGE_KEY)
+    setCache.clear()
+    removeStorage(SET_STORAGE_KEY)
   }
+  for (const legacyKey of LEGACY_SET_STORAGE_KEYS) removeStorage(legacyKey)
+
+  if (migrated) schedulePersist()
 }
 
-function persistBrowserCardCache() {
+let persistTimer: ReturnType<typeof setTimeout> | null = null
+let persistListenerRegistered = false
+
+function schedulePersist() {
   if (!import.meta.client) return
+
+  if (!persistListenerRegistered) {
+    persistListenerRegistered = true
+    // Don't lose a pending batch when the tab is closed or hidden.
+    window.addEventListener('pagehide', flushPersist)
+    document.addEventListener('visibilitychange', () => {
+      if (document.visibilityState === 'hidden') flushPersist()
+    })
+  }
+
+  if (persistTimer) clearTimeout(persistTimer)
+  persistTimer = setTimeout(flushPersist, PERSIST_DELAY_MS)
+}
+
+function flushPersist() {
+  if (persistTimer) {
+    clearTimeout(persistTimer)
+    persistTimer = null
+  }
+  persistCardCache()
+  persistSetCache()
+}
+
+function persistCardCache() {
+  const now = Date.now()
+  // Map order is insertion order, so the newest entries are kept.
+  const entries = [...cache.entries()]
+    .filter(([, entry]) => !isNotFoundEntry(entry) || now - entry.notFoundAt < NOT_FOUND_TTL_MS)
+    .slice(-MAX_PERSISTED_CARDS)
 
   try {
-    localStorage.setItem(CARD_STORAGE_KEY, JSON.stringify(Object.fromEntries(cache.entries())))
+    localStorage.setItem(CARD_STORAGE_KEY, JSON.stringify(Object.fromEntries(entries)))
   } catch {
-    // Ignore storage quota issues and continue with the in-memory cache.
+    // Quota exceeded: keep the newer half and try once more.
+    try {
+      localStorage.setItem(CARD_STORAGE_KEY, JSON.stringify(Object.fromEntries(entries.slice(-Math.floor(entries.length / 2)))))
+    } catch {
+      // Continue with the in-memory cache only.
+    }
   }
 }
 
-function persistBrowserSetCache() {
-  if (!import.meta.client) return
-
+function persistSetCache() {
   try {
     localStorage.setItem(SET_STORAGE_KEY, JSON.stringify(Object.fromEntries(setCache.entries())))
   } catch {
@@ -149,31 +291,41 @@ function persistBrowserSetCache() {
   }
 }
 
-function setCardCache(cacheKey: string, card: ScryfallCard | null, persist = true) {
+function setCardCache(cacheKey: string, lookup: CardLookup) {
   loadBrowserCache()
-  if (card === null) {
-    cache.delete(cacheKey)
-    if (persist) persistBrowserCardCache()
+  // Re-inserting moves the entry to the end, so eviction drops the least recently fetched.
+  cache.delete(cacheKey)
+  if (lookup.card) {
+    cache.set(cacheKey, toCachedCard(lookup.card))
+  } else if (lookup.definitive) {
+    cache.set(cacheKey, { notFoundAt: Date.now() })
+  } else {
+    // Transient failure (network, rate limit): retry on the next request.
     return
   }
-  cache.set(cacheKey, card)
-  if (persist) persistBrowserCardCache()
+  schedulePersist()
 }
 
-function getCachedCard(name: string) {
+/**
+ * `undefined` = unknown (needs a request), `null` = known to not exist.
+ */
+function getCachedCardBySet(name: string, setCode?: string): ScryfallCard | null | undefined {
   loadBrowserCache()
-  return cache.get(getCardCacheKey(name))
+  const key = getCardCacheKey(name, setCode)
+  const entry = cache.get(key)
+  if (!entry) return undefined
+  if (isNotFoundEntry(entry)) {
+    if (Date.now() - entry.notFoundAt < NOT_FOUND_TTL_MS) return null
+    cache.delete(key)
+    return undefined
+  }
+  return entry
 }
 
-function getCachedCardBySet(name: string, setCode?: string) {
+function setSetCacheEntry(code: string, set: ScryfallSet | null) {
   loadBrowserCache()
-  return cache.get(getCardCacheKey(name, setCode))
-}
-
-function setSetCacheEntry(code: string, set: ScryfallSet | null, persist = true) {
-  loadBrowserCache()
-  setCache.set(normalizeSetCode(code), set)
-  if (persist) persistBrowserSetCache()
+  setCache.set(normalizeSetCode(code), set ? toCachedSet(set) : null)
+  schedulePersist()
 }
 
 function getCachedSet(code: string) {
@@ -212,8 +364,12 @@ function scheduleSlot(): Promise<void> {
   return slot
 }
 
-function getRateLimitStatus(error: unknown): number | undefined {
+function getResponseStatus(error: unknown): number | undefined {
   return (error as { response?: { status?: number } } | undefined)?.response?.status
+}
+
+function isNotFoundError(error: unknown) {
+  return getResponseStatus(error) === 404
 }
 
 function getRetryAfterMs(error: unknown): number | null {
@@ -234,7 +390,7 @@ async function scryfallFetch<T>(request: () => Promise<T>, attempt = 0): Promise
   try {
     return await request()
   } catch (error) {
-    if (attempt < MAX_RATE_LIMIT_RETRIES && getRateLimitStatus(error) === 429) {
+    if (attempt < MAX_RATE_LIMIT_RETRIES && getResponseStatus(error) === 429) {
       const backoffMs = getRetryAfterMs(error) ?? MIN_REQUEST_INTERVAL_MS * 2 ** (attempt + 2)
       await sleep(backoffMs)
       return scryfallFetch(request, attempt + 1)
@@ -243,7 +399,19 @@ async function scryfallFetch<T>(request: () => Promise<T>, attempt = 0): Promise
   }
 }
 
-async function requestCardByName(name: string, setCode?: string) {
+/**
+ * Whether a collection result is the requested card. Double-faced cards are
+ * returned as "Front // Back", but are usually requested by their front face.
+ */
+function matchesRequestedName(card: ScryfallCard, name: string) {
+  const requested = normalizeCardName(name)
+  const cardName = normalizeCardName(card.name)
+  return cardName === requested
+    || cardName.startsWith(`${requested} // `)
+    || Boolean(card.card_faces?.some((face) => normalizeCardName(face.name) === requested))
+}
+
+async function requestCardByName(name: string, setCode?: string): Promise<CardLookup> {
   if (setCode) {
     const normalizedSetCode = normalizeSetCode(setCode)
 
@@ -261,7 +429,7 @@ async function requestCardByName(name: string, setCode?: string) {
         && normalizeSetCode(card.set) === normalizedSetCode
       )) ?? null
 
-      if (match) return match
+      if (match) return { card: match, definitive: true }
     } catch {
       // Fall back to a set-scoped search below.
     }
@@ -279,19 +447,20 @@ async function requestCardByName(name: string, setCode?: string) {
         && normalizeSetCode(card.set) === normalizedSetCode
       )) ?? null
 
-      return match
-    } catch {
-      return null
+      return { card: match, definitive: true }
+    } catch (error) {
+      return { card: null, definitive: isNotFoundError(error) }
     }
   }
 
   try {
-    return await scryfallFetch(() => $fetch<ScryfallCard>(`${BASE_URL}/cards/named`, {
+    const card = await scryfallFetch(() => $fetch<ScryfallCard>(`${BASE_URL}/cards/named`, {
       headers: SCRYFALL_HEADERS,
       params: { fuzzy: name },
     }))
-  } catch {
-    return null
+    return { card, definitive: true }
+  } catch (error) {
+    return { card: null, definitive: isNotFoundError(error) }
   }
 }
 
@@ -308,9 +477,9 @@ export async function fetchCardByName(name: string, setCode?: string): Promise<S
   if (existingRequest) return existingRequest
 
   const request = requestCardByName(name, setCode)
-    .then((data) => {
-      setCardCache(cacheKey, data)
-      return data
+    .then((lookup) => {
+      setCardCache(cacheKey, lookup)
+      return lookup.card ? getCachedCardBySet(name, setCode) ?? null : null
     })
     .finally(() => {
       pendingCardRequests.delete(cacheKey)
@@ -372,33 +541,33 @@ export async function fetchCardsByIdentifiers(
         },
       }))
 
+      const unmatched: ScryfallCardIdentifier[] = []
       for (const identifier of identifiersChunk) {
         const match = response.data.find((card) => (
-          normalizeCardName(card.name) === normalizeCardName(identifier.name)
+          matchesRequestedName(card, identifier.name)
           && (!identifier.setCode || normalizeSetCode(card.set) === identifier.setCode)
         )) ?? null
         const cacheKey = getCardCacheKey(identifier.name, identifier.setCode)
 
         if (match) {
-          setCardCache(cacheKey, match, false)
-          results.set(cacheKey, match)
+          setCardCache(cacheKey, { card: match, definitive: true })
+          results.set(cacheKey, getCachedCardBySet(identifier.name, identifier.setCode) ?? null)
           loaded += 1
           continue
         }
 
-        if (pendingCardRequests.has(cacheKey)) {
-          const card = await pendingCardRequests.get(cacheKey)!
-          results.set(cacheKey, card)
-          loaded += 1
-          continue
-        }
-
-        const card = await fetchCardByName(identifier.name, identifier.setCode)
-        results.set(cacheKey, card)
-        loaded += 1
+        unmatched.push(identifier)
       }
 
-      persistBrowserCardCache()
+      // Names the collection endpoint could not resolve exactly get a fuzzy lookup
+      // (still throttled through the shared queue).
+      const fallbackResults = await Promise.all(unmatched.map(async (identifier) => {
+        const card = await fetchCardByName(identifier.name, identifier.setCode)
+        loaded += 1
+        return [getCardCacheKey(identifier.name, identifier.setCode), card] as const
+      }))
+      for (const [cacheKey, card] of fallbackResults) results.set(cacheKey, card)
+
       reportProgress()
     } catch {
       const chunkResults = await Promise.all(identifiersChunk.map(async (identifier) => {
@@ -473,16 +642,37 @@ export async function fetchCardPrintingsByName(name: string): Promise<ScryfallCa
         headers: SCRYFALL_HEADERS,
         params,
       }))
-      printings.push(...response.data)
+      printings.push(...response.data.map(toCachedCard))
       pageUrl = response.has_more && response.next_page ? response.next_page : null
       params = undefined
     }
 
     return printings
-  })().catch(() => [])
+  })().catch(() => {
+    // Allow a retry after a failed (e.g. offline) request.
+    printingCache.delete(normalizedName)
+    return []
+  })
 
   printingCache.set(normalizedName, request)
   return request
+}
+
+let allSetsRequest: Promise<Map<string, ScryfallSet> | null> | null = null
+
+/**
+ * The complete set list in one request (~70 KB gzipped). Views like the dashboard
+ * look up dozens of set codes at once; one list request replaces that many
+ * throttled single-set requests. Kept in memory; only used codes are persisted.
+ */
+function loadAllSets() {
+  allSetsRequest ??= scryfallFetch(() => $fetch<{ data: ScryfallSet[] }>(`${BASE_URL}/sets`, { headers: SCRYFALL_HEADERS }))
+    .then((response) => new Map(response.data.map((set) => [normalizeSetCode(set.code), toCachedSet(set)])))
+    .catch(() => {
+      allSetsRequest = null
+      return null
+    })
+  return allSetsRequest
 }
 
 /**
@@ -499,14 +689,12 @@ export async function fetchSetByCode(code: string): Promise<ScryfallSet | null> 
   const existingRequest = pendingSetRequests.get(normalizedCode)
   if (existingRequest) return existingRequest
 
-  const request = scryfallFetch(() => $fetch<ScryfallSet>(`${BASE_URL}/sets/${normalizedCode}`, { headers: SCRYFALL_HEADERS }))
-    .then((data) => {
-      setSetCacheEntry(normalizedCode, data)
-      return data
-    })
-    .catch(() => {
-      setSetCacheEntry(normalizedCode, null)
-      return null
+  const request = loadAllSets()
+    .then((allSets) => {
+      if (!allSets) return fetchSingleSet(normalizedCode)
+      const set = allSets.get(normalizedCode) ?? null
+      setSetCacheEntry(normalizedCode, set)
+      return set
     })
     .finally(() => {
       pendingSetRequests.delete(normalizedCode)
@@ -514,6 +702,19 @@ export async function fetchSetByCode(code: string): Promise<ScryfallSet | null> 
 
   pendingSetRequests.set(normalizedCode, request)
   return request
+}
+
+function fetchSingleSet(normalizedCode: string): Promise<ScryfallSet | null> {
+  return scryfallFetch(() => $fetch<ScryfallSet>(`${BASE_URL}/sets/${normalizedCode}`, { headers: SCRYFALL_HEADERS }))
+    .then((data) => {
+      setSetCacheEntry(normalizedCode, data)
+      return data
+    })
+    .catch((error) => {
+      // Only remember a missing set when Scryfall says so; network errors retry later.
+      if (isNotFoundError(error)) setSetCacheEntry(normalizedCode, null)
+      return null
+    })
 }
 
 /**

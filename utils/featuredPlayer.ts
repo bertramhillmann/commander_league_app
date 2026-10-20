@@ -29,6 +29,8 @@ type FeaturedPlayerOptions = {
 export interface FeaturedPlayerBuildContext {
   allRecordsByPlayer: Record<string, Record<string, FeaturedPlayerRecord>>
   gameOrderMap: Map<string, number>
+  /** Each player's records already sorted by game order (avoids re-sorting per signal). */
+  sortedRecordsByPlayer?: Map<string, FeaturedPlayerRecord[]>
 }
 
 export function buildFeaturedPlayerCandidate(
@@ -81,17 +83,17 @@ export function getFeaturedPlayers(
   options: FeaturedPlayerOptions = {},
   limit = Number.POSITIVE_INFINITY,
 ): FeaturedPlayerCandidate[] {
-  const context: FeaturedPlayerBuildContext = { allRecordsByPlayer: recordsByPlayer, gameOrderMap }
+  const sortedRecordsByPlayer = new Map(Object.entries(recordsByPlayer).map(([playerName, playerRecords]) => [
+    playerName,
+    Object.values(playerRecords).sort(
+      (a, b) => (gameOrderMap.get(a.gameId) ?? Number.MAX_SAFE_INTEGER)
+        - (gameOrderMap.get(b.gameId) ?? Number.MAX_SAFE_INTEGER),
+    ),
+  ]))
+  const context: FeaturedPlayerBuildContext = { allRecordsByPlayer: recordsByPlayer, gameOrderMap, sortedRecordsByPlayer }
 
-  const candidates = Object.entries(recordsByPlayer)
-    .map(([playerName, playerRecords]) => {
-      const records = Object.values(playerRecords).sort(
-        (a, b) => (gameOrderMap.get(a.gameId) ?? Number.MAX_SAFE_INTEGER)
-          - (gameOrderMap.get(b.gameId) ?? Number.MAX_SAFE_INTEGER),
-      )
-
-      return buildFeaturedPlayerCandidate(playerName, records, options, context)
-    })
+  const candidates = [...sortedRecordsByPlayer.entries()]
+    .map(([playerName, records]) => buildFeaturedPlayerCandidate(playerName, records, options, context))
     .filter((candidate): candidate is FeaturedPlayerCandidate => Boolean(candidate))
     .sort((a, b) => b.score - a.score || a.name.localeCompare(b.name))
 
@@ -297,12 +299,17 @@ function buildStreakBreakerSignal(
       if (otherName === playerName) continue
       if (!otherRecords[winRecord.gameId]) continue
 
-      const theirPriorRecords = Object.values(otherRecords)
-        .filter((r) => (context.gameOrderMap.get(r.gameId) ?? Number.MAX_SAFE_INTEGER) < winGameOrder)
-        .sort(
-          (a, b) =>
-            (context.gameOrderMap.get(a.gameId) ?? 0) - (context.gameOrderMap.get(b.gameId) ?? 0),
-        )
+      // Pre-sorted records keep the same relative order after filtering: every kept
+      // record has a known game order below the win, so it matches sorting afterwards.
+      const sortedOtherRecords = context.sortedRecordsByPlayer?.get(otherName)
+      const theirPriorRecords = sortedOtherRecords
+        ? sortedOtherRecords.filter((r) => (context.gameOrderMap.get(r.gameId) ?? Number.MAX_SAFE_INTEGER) < winGameOrder)
+        : Object.values(otherRecords)
+          .filter((r) => (context.gameOrderMap.get(r.gameId) ?? Number.MAX_SAFE_INTEGER) < winGameOrder)
+          .sort(
+            (a, b) =>
+              (context.gameOrderMap.get(a.gameId) ?? 0) - (context.gameOrderMap.get(b.gameId) ?? 0),
+          )
 
       const streak = countTrailing(theirPriorRecords, (r) => r.placement === 1)
 

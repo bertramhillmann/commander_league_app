@@ -27,50 +27,37 @@
 </template>
 
 <script setup lang="ts">
-import { computed, ref, watch } from 'vue'
+import { computed, watch } from 'vue'
 
 const route = useRoute()
 const { user } = useAuth()
-const { init, loaded, loading } = useLeagueState()
-const bootPending = ref(false)
+const { init, loaded, error } = useLeagueState()
 
 function isProtectedPath(path: string) {
   return !path.startsWith('/admin') && path !== '/login'
 }
 
 const showTopMenu = computed(() => isProtectedPath(route.path))
+// League data is computed in the browser, so protected pages start behind this
+// overlay. It is part of the server render too, which avoids a flash of empty pages
+// and keeps server and client markup identical during hydration.
 const showBootOverlay = computed(() =>
-  process.client &&
   showTopMenu.value &&
   Boolean(user.value) &&
   !loaded.value &&
-  (loading.value || bootPending.value),
+  !error.value,
 )
 
-async function bootstrapRoute(path: string) {
-  if (!process.client || !isProtectedPath(path)) {
-    bootPending.value = false
-    return
-  }
-
-  bootPending.value = true
-
-  try {
-    await init()
-  } finally {
-    bootPending.value = false
-  }
-}
-
-if (process.server && isProtectedPath(route.path)) {
+// On the server this only loads the league settings (see useLeagueState().init).
+if (import.meta.server && isProtectedPath(route.path)) {
   await init()
 }
 
-if (process.client) {
+if (import.meta.client) {
   watch(
     () => route.path,
-    async (path) => {
-      await bootstrapRoute(path)
+    (path) => {
+      if (isProtectedPath(path)) void init()
     },
     { immediate: true },
   )
@@ -89,10 +76,11 @@ if (process.client) {
   display: grid;
   place-items: center;
   overflow: hidden;
+  // Opaque instead of a full-screen backdrop blur: the overlay is up while the
+  // league is computed, exactly when slow machines can least afford blur repaints.
   background:
-    radial-gradient(circle at top, rgba(32, 20, 52, 0.62), rgba(8, 6, 14, 0.94)),
-    rgba(6, 5, 10, 0.82);
-  backdrop-filter: blur(20px) saturate(1.15);
+    radial-gradient(circle at top, rgba(32, 20, 52, 0.62), rgba(8, 6, 14, 0.96)),
+    rgb(6, 5, 10);
 
   &__backdrop {
     position: absolute;
@@ -104,7 +92,7 @@ if (process.client) {
   &__orb {
     position: absolute;
     border-radius: 50%;
-    filter: blur(90px);
+    // Soft-edged gradients instead of filter: blur(90px) on animated layers.
     opacity: 0.3;
 
     &--primary {
@@ -112,7 +100,7 @@ if (process.client) {
       left: -8%;
       width: 28rem;
       height: 28rem;
-      background: radial-gradient(circle, rgba($color-primary-light, 0.78), rgba($color-primary-dark, 0.12));
+      background: radial-gradient(circle, rgba($color-primary-light, 0.78), rgba($color-primary-dark, 0.12) 45%, transparent 70%);
       animation: boot-drift 13s ease-in-out infinite;
     }
 
@@ -121,7 +109,7 @@ if (process.client) {
       bottom: -12%;
       width: 24rem;
       height: 24rem;
-      background: radial-gradient(circle, rgba($color-secondary, 0.6), rgba($color-secondary, 0.08));
+      background: radial-gradient(circle, rgba($color-secondary, 0.6), rgba($color-secondary, 0.08) 45%, transparent 70%);
       animation: boot-drift-alt 16s ease-in-out infinite;
     }
 
@@ -130,7 +118,7 @@ if (process.client) {
       right: 20%;
       width: 14rem;
       height: 14rem;
-      background: radial-gradient(circle, rgba($color-accent, 0.48), rgba($color-accent, 0.04));
+      background: radial-gradient(circle, rgba($color-accent, 0.48), rgba($color-accent, 0.04) 45%, transparent 70%);
       animation: boot-pulse 7s ease-in-out infinite;
     }
   }
@@ -248,6 +236,16 @@ if (process.client) {
 @keyframes boot-meter {
   0% { transform: translateX(-120%); }
   100% { transform: translateX(340%); }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .app-boot__orb,
+  .app-boot__ring--outer,
+  .app-boot__ring--inner,
+  .app-boot__core,
+  .app-boot__meter-fill {
+    animation: none;
+  }
 }
 
 @media (max-width: $breakpoint-sm) {

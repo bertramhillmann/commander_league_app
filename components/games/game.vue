@@ -7,6 +7,8 @@
           :src="artUrls.get(winnerCommander)"
           :alt="winnerCommander"
           class="game-card__art-img"
+          loading="lazy"
+          decoding="async"
         />
         <div v-else class="game-card__art-placeholder" />
       </div>
@@ -22,6 +24,8 @@
             :src="artUrls.get(cmd)"
             :alt="cmd"
             class="game-card__art-img game-card__art-img--gray"
+            loading="lazy"
+            decoding="async"
           />
           <div v-else class="game-card__art-placeholder" />
         </div>
@@ -263,7 +267,7 @@
 
 <script setup lang="ts">
 import { computed, reactive, ref, watch } from 'vue'
-import { getFreeGameAwardsForGame, type ProcessedGame, type ProcessedGamePlayer } from '~/composables/useLeagueState'
+import type { ProcessedGame, ProcessedGamePlayer } from '~/composables/useLeagueState'
 import type { EditableGamePlayer, GameDocument } from '~/utils/gameTypes'
 import { TIER_META, type Tier } from '~/utils/tiers'
 import { getAchievementDefinition } from '~/utils/achievements'
@@ -291,7 +295,7 @@ const emit = defineEmits<{
 }>()
 
 const { preloadCommanderImages, getCachedCommanderImage } = useImageCache()
-const { games, gameRecords, players } = useLeagueState()
+const { gameRecords, freeGameAwardsByGame } = useLeagueState()
 const { settings } = useLeagueSettings()
 const { isAdmin } = useAuth()
 
@@ -385,19 +389,8 @@ const otherCommanders = computed(() => {
 
 const artUrls = ref(new Map<string, string>())
 
-const freeGameAwards = computed(() => {
-  const playerNames = Object.keys(players.value)
-    .map((playerName) => formatPlayerName(playerName))
-    .sort((a, b) => a.localeCompare(b))
-
-  return getFreeGameAwardsForGame(
-    props.game.gameId,
-    games.value,
-    gameRecords.value,
-    playerNames,
-    settings.value,
-  )
-})
+// Computed once for all games, and only when the ranking system uses free games.
+const freeGameAwards = computed(() => freeGameAwardsByGame.value.get(props.game.gameId) ?? [])
 
 const showFreeGameAwards = computed(() =>
   !isEditing.value
@@ -412,13 +405,14 @@ watch(
   () => [winnerCommander.value, ...otherCommanders.value],
   async (commanders) => {
     const names = commanders.filter(Boolean)
-    await preloadCommanderImages(names, ['art_crop'])
+    const readArtUrls = () => new Map(names.map((name) => [name, getCachedCommanderImage(name, 'art_crop') ?? '']))
 
-    const nextArtUrls = new Map<string, string>()
-    for (const name of names) {
-      nextArtUrls.set(name, getCachedCommanderImage(name, 'art_crop') ?? '')
-    }
-    artUrls.value = nextArtUrls
+    // Show already-known art immediately (no flicker when the list remounts).
+    artUrls.value = readArtUrls()
+    if (names.every((name) => artUrls.value.get(name))) return
+
+    await preloadCommanderImages(names, ['art_crop'])
+    artUrls.value = readArtUrls()
   },
   { immediate: true },
 )

@@ -1197,7 +1197,7 @@ import {
   type PlayerGameRecord,
   type StandingsAdjustmentResult,
 } from '~/composables/useLeagueState'
-import { calculateAverageCommanderMMRScore, calculateCommanderSlotReduction, calculatePlayerRating } from '~/composables/usePlayerRating'
+import { calculateAverageCommanderMMRScore, calculateCommanderSlotReduction, calculatePlayerRatingValues } from '~/composables/usePlayerRating'
 import { getCommanderTierFromMMR, getInitialCommanderMMR, type CommanderMMRTier } from '~/composables/useCommanderMMR'
 import type { PerformancePlayerSeries } from '~/components/charts/PerformanceTimeline.vue'
 import { fetchSetByCode } from '~/services/scryfallService'
@@ -2333,8 +2333,12 @@ function computeWeightedScore(records: PlayerGameRecord[]): number {
 
 const activeChart = ref<'performance' | 'total' | 'participation' | 'averageCommanderMmr'>('total')
 
+// Called for every chart point; one shared formatter avoids building a new one per call.
+const gameDateFormatter = new Intl.DateTimeFormat('de-DE', { day: '2-digit', month: '2-digit', year: '2-digit' })
+
 function fmtGameDate(date: string | Date) {
-  return new Date(date).toLocaleDateString('de-DE', { day: '2-digit', month: '2-digit', year: '2-digit' })
+  const timestamp = new Date(date).getTime()
+  return Number.isNaN(timestamp) ? 'Invalid Date' : gameDateFormatter.format(timestamp)
 }
 
 function startOfWeekKey(date: string | Date) {
@@ -2449,15 +2453,10 @@ const scoreChartData = computed<{ labels: string[], series: PerformancePlayerSer
         }),
       )
 
+      // One batched rating pass per game (shared lookups, rating value only).
+      const ratings = calculatePlayerRatingValues(partialPlayers, partialRecordMap, partialGames, settings.value)
       for (const playerName of playerNames) {
-        const rating = calculatePlayerRating({
-          player: partialPlayers[playerName],
-          players: partialPlayers,
-          gameRecords: partialRecordMap,
-          games: partialGames,
-          settings: settings.value,
-        }).rating
-        dataByPlayer[playerName].push(rating)
+        dataByPlayer[playerName].push(ratings[playerName] ?? 0)
       }
     }
 

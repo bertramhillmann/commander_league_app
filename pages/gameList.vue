@@ -1,5 +1,6 @@
 <script setup lang="ts">
 import { computeGamePoints } from '~/utils/placements'
+import type { NuxtApp } from '#app'
 import type { GameDocument } from '~/utils/gameTypes'
 import { compareGamesForDisplay, type ProcessedGame, type ProcessedGamePlayer } from '~/composables/useLeagueState'
 import { formatPlayerName } from '~/utils/playerNames'
@@ -11,7 +12,6 @@ const route = useRoute()
 const highlightGameId = computed(() => (route.query.highlight as string) || null)
 
 const { games, loading, loaded, error, init, refresh: refreshLeagueState, progress } = useLeagueState()
-const hasMounted = ref(false)
 
 const selectedPlayer = ref<string | null>(null)
 const selectedCommander = ref<string | null>(null)
@@ -22,42 +22,60 @@ const testActionBusy = ref(false)
 const actionError = ref('')
 const actionSuccess = ref('')
 
+// Admin-only data. Stable keys + getCachedData reuse the last response when the
+// page is revisited instead of downloading it again; edits call refresh explicitly.
+const reuseCachedData = (key: string, nuxtApp: NuxtApp) => nuxtApp.payload.data[key] ?? nuxtApp.static.data[key]
+
+// League games already hold every visible game; admins additionally see hidden ones.
 const {
-  data: adminGames,
-  pending: adminGamesLoading,
-  error: adminGamesError,
-  refresh: refreshAdminGames,
+  data: hiddenGames,
+  error: hiddenGamesError,
+  refresh: refreshHiddenGames,
 } = useFetch<GameDocument[]>('/api/games', {
-  query: { includeHidden: '1' },
+  key: 'game-list:hidden-games',
+  query: { hiddenOnly: '1' },
   default: () => [],
   immediate: isAdmin.value,
   lazy: true,
+  getCachedData: reuseCachedData,
 })
 
 const {
   data: allPlayers,
 } = useFetch<string[]>('/api/players', {
+  key: 'game-list:all-players',
   default: () => [],
   immediate: isAdmin.value,
   lazy: true,
+  getCachedData: reuseCachedData,
 })
 
 const {
   data: allCommanders,
 } = useFetch<string[]>('/api/commanders', {
+  key: 'game-list:all-commanders',
   default: () => [],
   immediate: isAdmin.value,
   lazy: true,
+  getCachedData: reuseCachedData,
 })
 
 const displayGames = computed(() => {
-  if (!isAdmin.value) {
-    return [...games.value].sort(compareGamesForDisplay)
-  }
+  // League games are already sorted for display.
+  if (!isAdmin.value || (hiddenGames.value ?? []).length === 0) return games.value
 
-  return [...(adminGames.value ?? [])]
-    .map(toProcessedGame)
+  return [...games.value, ...(hiddenGames.value ?? []).map(toProcessedGame)]
     .sort(compareGamesForDisplay)
+})
+
+// Editable source documents for the admin editor, looked up per card in O(1).
+const adminRawGameById = computed(() => {
+  const byId = new Map<string, GameDocument>()
+  if (!isAdmin.value) return byId
+
+  for (const game of games.value) byId.set(game.gameId, toGameDocument(game))
+  for (const game of hiddenGames.value ?? []) byId.set(game.gameId, game)
+  return byId
 })
 
 const playerNames = computed(() =>
@@ -91,6 +109,39 @@ const filteredGames = computed(() => {
   )
 })
 
+// Game cards are rendered in batches as the list scrolls, instead of mounting
+// every card (with its images, tooltips and lookups) at once.
+const RENDER_BATCH_SIZE = 30
+const renderLimit = ref(RENDER_BATCH_SIZE)
+const renderedGames = computed(() => filteredGames.value.slice(0, renderLimit.value))
+const hasMoreGames = computed(() => renderLimit.value < filteredGames.value.length)
+const loadMoreSentinel = ref<HTMLElement | null>(null)
+
+function renderMoreGames() {
+  renderLimit.value += RENDER_BATCH_SIZE
+}
+
+watch([selectedPlayer, selectedCommander], () => {
+  renderLimit.value = RENDER_BATCH_SIZE
+})
+
+// A linked game (?highlight=) must be rendered so it can be scrolled to.
+watch([highlightGameId, filteredGames], () => {
+  const index = filteredGames.value.findIndex((game) => game.gameId === highlightGameId.value)
+  if (index >= renderLimit.value) renderLimit.value = index + RENDER_BATCH_SIZE
+}, { immediate: true })
+
+// The sentinel is re-created per batch, so a fresh observer reports it again
+// when it is still on screen after the previous batch rendered.
+watch(loadMoreSentinel, (element, _previous, onCleanup) => {
+  if (!element || typeof IntersectionObserver === 'undefined') return
+  const observer = new IntersectionObserver((entries) => {
+    if (entries.some((entry) => entry.isIntersecting)) renderMoreGames()
+  }, { rootMargin: '1200px 0px' })
+  observer.observe(element)
+  onCleanup(() => observer.disconnect())
+})
+
 const selectedGame = computed(() =>
   filteredGames.value.find((game) => game.gameId === selectedGameId.value) ?? filteredGames.value[0] ?? null,
 )
@@ -102,12 +153,12 @@ watch(filteredGames, (gamesForView) => {
 }, { immediate: true })
 
 const pageError = computed(() =>
-  error.value || (isAdmin.value ? adminGamesError.value?.message ?? null : null),
+  error.value || (isAdmin.value ? hiddenGamesError.value?.message ?? null : null),
 )
 
-const pageLoading = computed(() =>
-  !pageError.value && (!hasMounted.value || loading.value || !loaded.value || (isAdmin.value && adminGamesLoading.value)),
-)
+// Only the first league load shows the loader; revisiting the page renders
+// straight from the already computed league state.
+const pageLoading = computed(() => !pageError.value && (loading.value || !loaded.value))
 
 const progressPercent = computed(() => {
   if (progress.value.total <= 0) return 8
@@ -119,11 +170,9 @@ const progressLabel = computed(() => {
   return `${progress.value.current}/${progress.value.total} games computed`
 })
 
-const adminRawGames = computed(() => adminGames.value ?? [])
 const isTestEnvironment = computed(() => String(runtimeConfig.public.environment ?? '').toLowerCase() === 'test')
 
 onMounted(() => {
-  hasMounted.value = true
   if (!loaded.value) {
     void init()
   }
@@ -141,14 +190,26 @@ watch(pageLoading, (isLoading) => {
 async function onGameUpdated() {
   await Promise.all([
     refreshLeagueState(),
-    isAdmin.value ? refreshAdminGames() : Promise.resolve(),
+    isAdmin.value ? refreshHiddenGames() : Promise.resolve(),
   ])
 }
 
-function exportGamesJson(mode: 'all' | 'random') {
-  if (!isAdmin.value) return
+async function exportGamesJson(mode: 'all' | 'random') {
+  if (!isAdmin.value || exportBusy.value) return
 
-  const sourceGames = adminRawGames.value
+  let sourceGames: GameDocument[]
+  try {
+    exportBusy.value = true
+    // Full documents (including decklists) are only downloaded for the export.
+    sourceGames = await $fetch<GameDocument[]>('/api/games', { query: { includeHidden: '1', includeDecklists: '1' } })
+  } catch {
+    actionError.value = 'Failed to load games for export.'
+    actionSuccess.value = ''
+    return
+  } finally {
+    exportBusy.value = false
+  }
+
   if (sourceGames.length === 0) {
     actionError.value = 'No games available to export.'
     actionSuccess.value = ''
@@ -237,6 +298,23 @@ function toProcessedGame(game: GameDocument): ProcessedGame {
   }
 }
 
+function toGameDocument(game: ProcessedGame): GameDocument {
+  return {
+    gameId: game.gameId,
+    date: game.date,
+    hidden: Boolean(game.hidden),
+    players: game.players.map((player) => ({
+      name: player.name,
+      commander: player.commander,
+      placement: player.placement,
+      points: null,
+      eliminations: player.eliminations ?? null,
+      commanderCasts: player.commanderCasts ?? null,
+      decklist: null,
+    })),
+  }
+}
+
 function isoWeek(date: Date) {
   const d = new Date(Date.UTC(date.getFullYear(), date.getMonth(), date.getDate()))
   d.setUTCDate(d.getUTCDate() + 4 - (d.getUTCDay() || 7))
@@ -305,14 +383,14 @@ function sampleGames<T>(items: T[], count: number) {
 
           <div v-if="isAdmin" class="game-list__admin-tools">
             <div class="game-list__tool-group">
-              <button type="button" class="btn btn--muted btn--sm" :disabled="exportBusy || adminRawGames.length === 0" @click="exportGamesJson('all')">
+              <button type="button" class="btn btn--muted btn--sm" :disabled="exportBusy || displayGames.length === 0" @click="exportGamesJson('all')">
                 Export All JSON
               </button>
               <label class="game-list__random-export">
                 <span>Random export</span>
-                <input v-model.number="randomExportCount" type="number" min="1" :max="adminRawGames.length || 1" class="game-list__random-input" />
+                <input v-model.number="randomExportCount" type="number" min="1" :max="displayGames.length || 1" class="game-list__random-input" />
               </label>
-              <button type="button" class="btn btn--ghost btn--sm" :disabled="exportBusy || adminRawGames.length === 0" @click="exportGamesJson('random')">
+              <button type="button" class="btn btn--ghost btn--sm" :disabled="exportBusy || displayGames.length === 0" @click="exportGamesJson('random')">
                 Export Random JSON
               </button>
             </div>
@@ -335,7 +413,7 @@ function sampleGames<T>(items: T[], count: number) {
           </div>
 
           <div
-            v-for="game in filteredGames"
+            v-for="game in renderedGames"
             :key="game.gameId"
             :id="`game-${game.gameId}`"
             class="game-list__game-entry"
@@ -346,11 +424,17 @@ function sampleGames<T>(items: T[], count: number) {
               :game="game"
               :highlight-player="selectedPlayer"
               :highlight="highlightGameId === game.gameId"
-              :admin-raw-game="isAdmin ? (adminGames ?? []).find((entry) => entry.gameId === game.gameId) ?? null : null"
+              :admin-raw-game="isAdmin ? adminRawGameById.get(game.gameId) ?? null : null"
               :all-player-options="isAdmin ? (allPlayers ?? []) : []"
               :all-commander-options="isAdmin ? (allCommanders ?? []) : []"
               @updated="onGameUpdated"
             />
+          </div>
+
+          <div v-if="hasMoreGames" :key="renderLimit" ref="loadMoreSentinel" class="game-list__more">
+            <button type="button" class="btn btn--ghost btn--sm" @click="renderMoreGames">
+              Show more games ({{ filteredGames.length - renderedGames.length }} left)
+            </button>
           </div>
         </div>
 
@@ -529,6 +613,12 @@ function sampleGames<T>(items: T[], count: number) {
     &--selected {
       box-shadow: 0 0 0 2px rgba($color-primary-light, .6);
     }
+  }
+
+  &__more {
+    display: flex;
+    justify-content: center;
+    padding: $spacing-4 0;
   }
 }
 

@@ -1,4 +1,4 @@
-import { getResolvedLeagueSettings } from '~/utils/leagueSettings'
+import { getCachedResolvedLeagueSettings } from '~/utils/leagueSettings'
 import { DEFAULT_BASE_RATINGS, type PlacementRating } from '~/utils/scoringDefaults'
 import { roundLoosterPoints } from '~/utils/loosterPoints'
 
@@ -40,7 +40,7 @@ export function computeGamePoints<T extends { placement: number }>(
   players: T[],
 ): (T & PlacementResult)[] {
   const n = players.length
-  const ratings = getResolvedLeagueSettings().points[n]
+  const ratings = getCachedResolvedLeagueSettings().points[n]
 
   if (!ratings) {
     return players.map((player) => ({ ...player, points: 0, lPoints: 0 }))

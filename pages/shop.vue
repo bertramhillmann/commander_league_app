@@ -189,6 +189,7 @@
                     :aria-label="`Open ${purchase.set_name} on Scryfall`"
                   >
                     <img
+                      decoding="async"
                       :src="purchaseSetImages[purchase.set].iconUrl"
                       :alt="`${purchase.set_name} set symbol`"
                       class="purchase-card__set-cover-image"
@@ -246,6 +247,7 @@
                    :rel="getPurchaseCardScryfallUrl(purchase, card) ? 'noopener noreferrer' : undefined"
                 >
                   <img
+                    decoding="async"
                     v-if="purchaseCardImages[getPurchaseCardLookupKey(purchase, card)]?.smallUrl"
                     :src="purchaseCardImages[getPurchaseCardLookupKey(purchase, card)].smallUrl"
                     :alt="card"
@@ -255,6 +257,7 @@
                   <span v-else class="purchase-card__chip-fallback">{{ card }}</span>
                   <span class="purchase-card__chip-preview">
                     <img
+                      decoding="async"
                       v-if="purchaseCardImages[getPurchaseCardLookupKey(purchase, card)]?.hoverUrl"
                       :src="purchaseCardImages[getPurchaseCardLookupKey(purchase, card)].hoverUrl"
                       :alt="card"
@@ -386,7 +389,7 @@
                       :disabled="entry.loading || entry.printingsLoading"
                       @click="openPrintingPicker(index)"
                     >
-                      <img v-if="entry.card" :src="getCardImageUrl(entry.card, 'small') || undefined" :alt="entry.card.name" />
+                      <img loading="lazy" decoding="async" v-if="entry.card" :src="getCardImageUrl(entry.card, 'small') || undefined" :alt="entry.card.name" />
                       <span v-else>{{ entry.loading ? 'Checking…' : 'Card or printing not found — choose printing' }}</span>
                     </button>
                   </div>
@@ -438,7 +441,7 @@
                     class="printing-picker__card"
                     @click="selectPrinting(card)"
                   >
-                    <img :src="getCardImageUrl(card, 'normal') || undefined" :alt="`${card.name} — ${card.set_name}`" />
+                    <img loading="lazy" decoding="async" :src="getCardImageUrl(card, 'normal') || undefined" :alt="`${card.name} — ${card.set_name}`" />
                     <span>{{ card.set.toUpperCase() }} · {{ card.set_name }}</span>
                   </button>
                 </div>

@@ -312,6 +312,8 @@
                 </div>
                 <template v-if="artUrls.get(cmd.name)">
                   <img
+                    loading="lazy"
+                    decoding="async"
                     :src="artUrls.get(cmd.name)"
                     alt=""
                     aria-hidden="true"
@@ -319,6 +321,8 @@
                   />
                   <div class="cmd-row__card-img-frame">
                     <img
+                      loading="lazy"
+                      decoding="async"
                       :src="artUrls.get(cmd.name)"
                       :alt="cmd.name"
                       class="cmd-row__card-img"
@@ -956,6 +960,8 @@
                 class="deck-drawer__card"
               >
                 <img
+                  loading="lazy"
+                  decoding="async"
                   v-if="card.imageUrl"
                   :src="card.imageUrl"
                   :alt="card.name"
@@ -1047,6 +1053,8 @@
           @click="openCommanderSlotPrintingChoices(index)"
         >
           <img
+            loading="lazy"
+            decoding="async"
             v-if="getCommanderSlotManualPreview(cardName, index)"
             :src="getCommanderSlotManualPreview(cardName, index)?.imageUrl"
             :alt="getCommanderSlotManualPreview(cardName, index)?.name"
@@ -1076,6 +1084,8 @@
           rel="noreferrer"
         >
           <img
+            loading="lazy"
+            decoding="async"
             :src="card.imageUrl"
             :alt="card.name"
             class="cmd-row__slot-card-image"
@@ -1101,6 +1111,8 @@
           @click="selectCommanderSlotPrinting(card)"
         >
           <img
+            loading="lazy"
+            decoding="async"
             v-if="getCardImageUrl(card, 'small') || getCardImageUrl(card, 'normal')"
             :src="getCardImageUrl(card, 'small') || getCardImageUrl(card, 'normal')"
             :alt="card.name"

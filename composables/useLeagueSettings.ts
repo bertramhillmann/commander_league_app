@@ -13,12 +13,20 @@ const useLeagueSettingsLoadingState = () => useState<boolean>('league:settings:l
 const useLeagueSettingsErrorState = () => useState<string | null>('league:settings:error', () => null)
 
 let pendingLeagueSettingsInit: Promise<void> | null = null
+let hydratedRuntimeSettings: LeagueSettingsDocument | null | undefined
 
 export function useLeagueSettings() {
   const rawSettings = useRawLeagueSettingsState()
   const loaded = useLeagueSettingsLoadedState()
   const loading = useLeagueSettingsLoadingState()
   const error = useLeagueSettingsErrorState()
+
+  // Settings loaded during SSR arrive in the payload; apply them to the runtime
+  // settings right away so helpers that read them render like the server did.
+  if (import.meta.client && loaded.value && hydratedRuntimeSettings === undefined) {
+    hydratedRuntimeSettings = rawSettings.value
+    setRuntimeLeagueSettings(rawSettings.value)
+  }
 
   const settings = computed(() => getResolvedLeagueSettings(rawSettings.value))
   const achievementDefs = computed(() => getResolvedAchievementDefinitions(rawSettings.value))

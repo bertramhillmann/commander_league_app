@@ -232,6 +232,8 @@ const SEASON_CHAMPION_TITLE_IDS = new Set<CommanderTitleId>([
 function getEligibleCommanderTitles(
   context: CommanderTitleContext,
   includeSeasonChampionTitles = true,
+  /** Best win rate among all other pairings, when the caller tracks it incrementally. */
+  precomputedBestOtherWinRate?: number,
 ): CommanderTitleResult[] {
   const {
     playerName,
@@ -291,12 +293,8 @@ function getEligibleCommanderTitles(
     ? 0
     : 1 - (average(placementSpread) / expectedPerPlacement)
 
-  const pairWinRates = buildPairWinRates(allRecords)
-  const thisPairKey = `${playerName}::${commanderName}`
-  const otherPairWinRates = [...pairWinRates.entries()]
-    .filter(([key]) => key !== thisPairKey)
-    .map(([, value]) => value)
-  const bestOtherWinRate = otherPairWinRates.length ? Math.max(...otherPairWinRates) : 0
+  const bestOtherWinRate = precomputedBestOtherWinRate
+    ?? getBestOtherWinRate(buildPairWinRates(allRecords), `${playerName}::${commanderName}`)
 
   const placementRateMap = new Map<number, number>()
   for (const [placement, count] of placementCounts.entries()) {
@@ -374,8 +372,16 @@ export function getCommanderPerformanceTitle(context: CommanderTitleContext): Co
 }
 
 export function getCommanderTitleHistory(context: CommanderTitleContext): CommanderTitleResult[] {
-  const currentTitle = getCommanderPerformanceTitle(context)
-  if (context.commanderRecords.length === 0) return [currentTitle]
+  return buildCommanderTitleHistory(context, getEligibleCommanderTitles(context))
+}
+
+function buildCommanderTitleHistory(
+  context: CommanderTitleContext,
+  currentEligibleTitles: CommanderTitleResult[],
+): CommanderTitleResult[] {
+  if (context.commanderRecords.length === 0) {
+    return [currentEligibleTitles.at(-1) ?? withReason('wild_card', 'No games recorded with this pairing yet.')]
+  }
 
   const gameOrder = new Map(context.games.map((game, index) => [game.gameId, index]))
   const orderedGames = [...context.games]
@@ -390,24 +396,54 @@ export function getCommanderTitleHistory(context: CommanderTitleContext): Comman
   )
 
   const earnedById = new Map<CommanderTitleId, CommanderTitleResult>()
+  const thisPairKey = `${context.playerName}::${context.commanderName}`
+  // Records are sorted by game order, so each snapshot's records are a growing prefix.
+  // Pair win-rate counts advance along that prefix instead of being rebuilt from
+  // every league record for every snapshot.
+  const pairCounts = new Map<string, { plays: number; wins: number }>()
+  let allRecordsIncluded = 0
+  let playerRecordsIncluded = 0
+  const isIncluded = (record: PlayerGameRecord, lastGameIndex: number) =>
+    (gameOrder.get(record.gameId) ?? 0) <= lastGameIndex
 
   for (let index = 0; index < orderedCommanderRecords.length; index++) {
     const latestCommanderRecord = orderedCommanderRecords[index]
     const lastGameIndex = gameOrder.get(latestCommanderRecord.gameId) ?? index
+    while (allRecordsIncluded < orderedAllRecords.length && isIncluded(orderedAllRecords[allRecordsIncluded], lastGameIndex)) {
+      const record = orderedAllRecords[allRecordsIncluded++]
+      const key = `${record.playerName}::${record.commander}`
+      const counts = pairCounts.get(key) ?? { plays: 0, wins: 0 }
+      counts.plays += 1
+      if (record.placement === 1) counts.wins += 1
+      pairCounts.set(key, counts)
+    }
+    while (playerRecordsIncluded < orderedPlayerRecords.length && isIncluded(orderedPlayerRecords[playerRecordsIncluded], lastGameIndex)) {
+      playerRecordsIncluded++
+    }
+
     const snapshotContext = {
       ...context,
       commanderRecords: orderedCommanderRecords.slice(0, index + 1),
-      playerRecords: orderedPlayerRecords.filter((record) => (gameOrder.get(record.gameId) ?? 0) <= lastGameIndex),
-      allRecords: orderedAllRecords.filter((record) => (gameOrder.get(record.gameId) ?? 0) <= lastGameIndex),
+      playerRecords: orderedPlayerRecords.slice(0, playerRecordsIncluded),
+      allRecords: orderedAllRecords.slice(0, allRecordsIncluded),
       games: orderedGames.slice(0, lastGameIndex + 1),
     }
+    let bestOtherWinRate = Number.NEGATIVE_INFINITY
+    for (const [key, counts] of pairCounts) {
+      if (key !== thisPairKey) bestOtherWinRate = Math.max(bestOtherWinRate, counts.plays > 0 ? counts.wins / counts.plays : 0)
+    }
 
-    for (const title of getEligibleCommanderTitles(snapshotContext, false)) {
+    const titles = getEligibleCommanderTitles(
+      snapshotContext,
+      false,
+      bestOtherWinRate === Number.NEGATIVE_INFINITY ? 0 : bestOtherWinRate,
+    )
+    for (const title of titles) {
       earnedById.set(title.id, title)
     }
   }
 
-  for (const title of getEligibleCommanderTitles(context)) {
+  for (const title of currentEligibleTitles) {
     earnedById.set(title.id, title)
   }
 
@@ -418,8 +454,12 @@ export function getCommanderTitleSummary(
   context: CommanderTitleContext,
   selectedTitleId?: CommanderTitleId | null,
 ): CommanderTitleSummary {
-  const currentTitle = getCommanderPerformanceTitle(context)
-  const earnedTitles = getCommanderTitleHistory(context)
+  // One full-context evaluation (including season champions) is shared by the
+  // current title and the history instead of being repeated three times.
+  const currentEligibleTitles = getEligibleCommanderTitles(context)
+  const currentTitle = currentEligibleTitles.at(-1)
+    ?? withReason('wild_card', 'No games recorded with this pairing yet.')
+  const earnedTitles = buildCommanderTitleHistory(context, currentEligibleTitles)
   const displayTitle = selectedTitleId
     ? earnedTitles.find((title) => title.id === selectedTitleId) ?? currentTitle
     : currentTitle
@@ -882,6 +922,13 @@ function buildPairWinRates(records: PlayerGameRecord[]) {
   return new Map(
     [...byPair.entries()].map(([key, value]) => [key, value.plays > 0 ? value.wins / value.plays : 0]),
   )
+}
+
+function getBestOtherWinRate(pairWinRates: Map<string, number>, thisPairKey: string) {
+  const otherPairWinRates = [...pairWinRates.entries()]
+    .filter(([key]) => key !== thisPairKey)
+    .map(([, value]) => value)
+  return otherPairWinRates.length ? Math.max(...otherPairWinRates) : 0
 }
 
 function countGamesSinceLastUse(records: PlayerGameRecord[], commanderName: string) {

@@ -114,6 +114,8 @@
               <div class="standings__pairing-name">
                 <IconsTierIcon v-if="row.commanderTier" :tier="row.commanderTier" :size="12" />
                 <img
+                  loading="lazy"
+                  decoding="async"
                   v-if="commanderArtUrls.get(row.commanderName)"
                   :src="commanderArtUrls.get(row.commanderName)"
                   :alt="row.commanderName"

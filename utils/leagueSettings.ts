@@ -196,6 +196,24 @@ export function getRuntimeLeagueSettings() {
   return runtimeLeagueSettings
 }
 
+let cachedRuntimeResolution: { source: LeagueSettingsDocument | null; resolved: ResolvedLeagueSettings } | null = null
+
+/**
+ * Resolved runtime settings, shared between calls until the runtime settings change.
+ * Hot read-only paths (point tables, achievement definitions, XP thresholds) call this
+ * thousands of times per league computation. The result must be treated as read-only;
+ * use `getResolvedLeagueSettings()` to get a fresh object you may mutate.
+ */
+export function getCachedResolvedLeagueSettings(): ResolvedLeagueSettings {
+  if (!cachedRuntimeResolution || cachedRuntimeResolution.source !== runtimeLeagueSettings) {
+    cachedRuntimeResolution = {
+      source: runtimeLeagueSettings,
+      resolved: getResolvedLeagueSettings(runtimeLeagueSettings),
+    }
+  }
+  return cachedRuntimeResolution.resolved
+}
+
 export function getResolvedLeagueSettings(settings?: LeagueSettingsDocument | null): ResolvedLeagueSettings {
   const source = settings ?? runtimeLeagueSettings ?? null
   const points = resolvePoints(source?.points)

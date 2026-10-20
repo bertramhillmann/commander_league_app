@@ -1,4 +1,4 @@
-import { getResolvedLeagueSettings } from '~/utils/leagueSettings'
+import { getCachedResolvedLeagueSettings } from '~/utils/leagueSettings'
 import {
   DEFAULT_LEVEL_THRESHOLDS,
   DEFAULT_MAX_LEVEL,
@@ -25,7 +25,7 @@ export const LEVEL_THRESHOLDS: number[] = DEFAULT_LEVEL_THRESHOLDS
  * Base = player count. Winner gets an additional WIN_BONUS_XP.
  */
 export function calculateXPGained(playerCount: number, isWinner: boolean, rested = 0): number {
-  const { level } = getResolvedLeagueSettings()
+  const { level } = getCachedResolvedLeagueSettings()
   const base = level.xpPerGame[playerCount] ?? playerCount
   const bonus = isWinner ? (level.winBonusXp[playerCount] ?? 0) : 0
   return roundCommanderXp((base + bonus) * getRestedXpMultiplier(rested))
@@ -50,7 +50,7 @@ export function consumeCommanderRest(rested: number): number {
  * Returns the current level (1-20) for a given total XP amount.
  */
 export function xpToLevel(xp: number): number {
-  const thresholds = getResolvedLeagueSettings().level.thresholds
+  const thresholds = getCachedResolvedLeagueSettings().level.thresholds
   let level = 1
   for (let index = 1; index < thresholds.length; index++) {
     if (xp >= thresholds[index]) level = index + 1
@@ -65,12 +65,12 @@ export function xpToLevel(xp: number): number {
 export function xpForNextLevel(xp: number): number {
   const currentLevel = xpToLevel(xp)
   if (currentLevel >= MAX_LEVEL) return 0
-  const thresholds = getResolvedLeagueSettings().level.thresholds
+  const thresholds = getCachedResolvedLeagueSettings().level.thresholds
   return (thresholds[currentLevel] ?? 0) - xp
 }
 
 export function getCommanderLevelProgress(xp: number) {
-  const thresholds = getResolvedLeagueSettings().level.thresholds
+  const thresholds = getCachedResolvedLeagueSettings().level.thresholds
   const level = xpToLevel(xp)
   const isMaxLevel = level >= MAX_LEVEL
   const maxXP = thresholds[thresholds.length - 1] ?? 0

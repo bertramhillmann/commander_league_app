@@ -1,26 +1,41 @@
-import { fetchCardByName, fetchCardsByIdentifiers, getCardImageUrl, type ScryfallCard } from '~/services/scryfallService'
+import { fetchCardsByIdentifiers, getCardImageUrl, type ScryfallCard } from '~/services/scryfallService'
 
 type ImageSize = keyof NonNullable<ScryfallCard['image_uris']>
 
 type ImageCacheRecord = Partial<Record<ImageSize, string>>
 
-const pendingCards = new Map<string, Promise<ScryfallCard | null>>()
+const ALL_IMAGE_SIZES: ImageSize[] = ['small', 'normal', 'large', 'png', 'art_crop', 'border_crop']
+
+// Components ask for their own few commanders (every game card, list row, ...).
+// Requests made within one short window are merged into a single collection
+// request instead of one Scryfall round trip per component.
+const BATCH_WINDOW_MS = 16
+
+let pendingBatch: {
+  names: Set<string>
+  promise: Promise<Map<string, ScryfallCard | null>>
+} | null = null
 
 function normalizeCommanderName(name: string) {
   return name.trim().toLowerCase()
 }
 
-async function getOrFetchCard(name: string) {
-  const key = normalizeCommanderName(name)
-  const existing = pendingCards.get(key)
-  if (existing) return existing
+function requestCardsBatched(names: string[]) {
+  if (!pendingBatch) {
+    const batchNames = new Set<string>()
+    const promise = new Promise<Map<string, ScryfallCard | null>>((resolve) => {
+      setTimeout(() => {
+        pendingBatch = null
+        fetchCardsByIdentifiers([...batchNames].map((name) => ({ name })))
+          .then(resolve)
+          .catch(() => resolve(new Map()))
+      }, BATCH_WINDOW_MS)
+    })
+    pendingBatch = { names: batchNames, promise }
+  }
 
-  const request = fetchCardByName(name).finally(() => {
-    pendingCards.delete(key)
-  })
-
-  pendingCards.set(key, request)
-  return request
+  for (const name of names) pendingBatch.names.add(name)
+  return pendingBatch.promise
 }
 
 export function useImageCache() {
@@ -31,27 +46,26 @@ export function useImageCache() {
     return imageCache.value[key]?.[size] ?? null
   }
 
+  function storeCardImages(name: string, card: ScryfallCard) {
+    const key = normalizeCommanderName(name)
+    const record: ImageCacheRecord = { ...imageCache.value[key] }
+    for (const size of ALL_IMAGE_SIZES) {
+      const url = getCardImageUrl(card, size)
+      if (url) record[size] = url
+    }
+    // Per-key update: only components reading this commander re-render.
+    imageCache.value[key] = record
+  }
+
   async function getCommanderImage(name: string, size: ImageSize = 'art_crop') {
     const cached = getCachedCommanderImage(name, size)
     if (cached) return cached
 
-    const card = await getOrFetchCard(name)
+    const card = (await requestCardsBatched([name.trim()])).get(normalizeCommanderName(name))
     if (!card) return null
 
-    const nextRecord: ImageCacheRecord = { ...(imageCache.value[normalizeCommanderName(name)] ?? {}) }
-    const sizes: ImageSize[] = ['small', 'normal', 'large', 'png', 'art_crop', 'border_crop']
-
-    for (const currentSize of sizes) {
-      const url = getCardImageUrl(card, currentSize)
-      if (url) nextRecord[currentSize] = url
-    }
-
-    imageCache.value = {
-      ...imageCache.value,
-      [normalizeCommanderName(name)]: nextRecord,
-    }
-
-    return nextRecord[size] ?? null
+    storeCardImages(name, card)
+    return getCachedCommanderImage(name, size)
   }
 
   async function preloadCommanderImages(names: string[], sizes: ImageSize[] = ['art_crop']) {
@@ -64,27 +78,12 @@ export function useImageCache() {
 
     if (namesToFetch.length === 0) return
 
-    // Preloads happen for potentially dozens of cards at once (sidebar, dashboard,
-    // commander lists, ...). Fetch them through Scryfall's batched collection
-    // endpoint instead of one request per card to avoid tripping its rate limit.
-    const cardsByKey = await fetchCardsByIdentifiers(namesToFetch.map((name) => ({ name })))
-
-    const nextCache = { ...imageCache.value }
+    const cardsByKey = await requestCardsBatched(namesToFetch)
 
     for (const name of namesToFetch) {
-      const key = normalizeCommanderName(name)
-      const card = cardsByKey.get(key)
-      if (!card) continue
-
-      const record: ImageCacheRecord = { ...nextCache[key] }
-      for (const size of sizes) {
-        const url = getCardImageUrl(card, size)
-        if (url) record[size] = url
-      }
-      nextCache[key] = record
+      const card = cardsByKey.get(normalizeCommanderName(name))
+      if (card) storeCardImages(name, card)
     }
-
-    imageCache.value = nextCache
   }
 
   return {

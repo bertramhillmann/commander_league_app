@@ -9,7 +9,7 @@
 
     <div v-for="row in visibleRows" :key="row.commander" class="xp-list__row">
       <div class="xp-list__art">
-        <img v-if="artUrls.get(row.commander)" :src="artUrls.get(row.commander)" :alt="row.commander" class="xp-list__art-img" />
+        <img loading="lazy" decoding="async" v-if="artUrls.get(row.commander)" :src="artUrls.get(row.commander)" :alt="row.commander" class="xp-list__art-img" />
         <div v-else class="xp-list__art-placeholder" />
       </div>
       <div class="xp-list__info">

@@ -1,4 +1,4 @@
-import { getResolvedAchievementDefinition, getResolvedAchievementDefinitions } from '~/utils/leagueSettings'
+import { getCachedResolvedLeagueSettings } from '~/utils/leagueSettings'
 import {
   DEFAULT_ACHIEVEMENTS,
   type AchievementDef,
@@ -15,9 +15,9 @@ export interface EarnedAchievement {
 export const ACHIEVEMENTS: Record<string, AchievementDef> = DEFAULT_ACHIEVEMENTS
 
 export function getAchievementDefinitions() {
-  return getResolvedAchievementDefinitions()
+  return getCachedResolvedLeagueSettings().achievements
 }
 
 export function getAchievementDefinition(id: string) {
-  return getResolvedAchievementDefinition(id)
+  return getCachedResolvedLeagueSettings().achievements[id]
 }

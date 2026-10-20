@@ -390,18 +390,24 @@ watch(
         >
           <div class="mm__art">
             <img
+              loading="lazy"
+              decoding="async"
               v-if="artUrls.get(adjacentCommander(suggestion.selectedCommander, suggestion.availableCommanders, -1))"
               :src="artUrls.get(adjacentCommander(suggestion.selectedCommander, suggestion.availableCommanders, -1))"
               :alt="`Previous commander: ${adjacentCommander(suggestion.selectedCommander, suggestion.availableCommanders, -1)}`"
               class="mm__art-preview mm__art-preview--previous"
             />
             <img
+              loading="lazy"
+              decoding="async"
               v-if="artUrls.get(adjacentCommander(suggestion.selectedCommander, suggestion.availableCommanders, 1))"
               :src="artUrls.get(adjacentCommander(suggestion.selectedCommander, suggestion.availableCommanders, 1))"
               :alt="`Next commander: ${adjacentCommander(suggestion.selectedCommander, suggestion.availableCommanders, 1)}`"
               class="mm__art-preview mm__art-preview--next"
             />
             <img
+              loading="lazy"
+              decoding="async"
               v-if="artUrls.get(suggestion.selectedCommander)"
               :src="artUrls.get(suggestion.selectedCommander)"
               :alt="suggestion.selectedCommander"

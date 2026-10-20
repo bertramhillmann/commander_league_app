@@ -44,6 +44,8 @@
           @mouseleave="onCardPreviewLeave"
         >
           <img
+            loading="lazy"
+            decoding="async"
             v-if="artUrls.get(row.name)"
             :src="artUrls.get(row.name)"
             :alt="row.name"

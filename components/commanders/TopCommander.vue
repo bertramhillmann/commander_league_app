@@ -137,6 +137,8 @@
           @mouseleave="onPreviewLeave"
         >
           <img
+            loading="lazy"
+            decoding="async"
             v-if="artUrls[entry.commander]"
             :src="artUrls[entry.commander]"
             :alt="entry.commander"

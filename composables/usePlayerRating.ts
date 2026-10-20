@@ -2,7 +2,9 @@ import type { EarnedAchievement } from '~/utils/achievements'
 import {
   buildLeagueSeasonRanges,
   getResolvedLeagueSettings,
+  getRuntimeLeagueSettings,
   hasActiveSeasonalRanking,
+  type LeagueSeasonRange,
   type LeagueSettingsDocument,
   type PlayerRatingConfig,
 } from '~/utils/leagueSettings'
@@ -200,28 +202,174 @@ export function applyDiminishingReturns(value: number, factor: number) {
   return value / (1 + factor * value)
 }
 
+/**
+ * Lookup tables derived from one games list. Every rating factor used to rebuild
+ * these per player (and `games.find` per record), which made standings O(games²).
+ * Each map mirrors the construction it replaces so duplicate ids resolve the same way.
+ */
+type RatingGameIndex = {
+  /** `new Map(games.map(...))` semantics: last occurrence wins. */
+  gamesById: Map<string, PlayerRatingGame>
+  /** `games.find(...)` semantics: first occurrence wins. */
+  firstGameById: Map<string, PlayerRatingGame>
+  orderById: Map<string, number>
+  timeById: Map<string, number | null>
+  rawTimeById: Map<string, number>
+  dateById: Map<string, Date>
+}
+
+type RatingComputationOptions = {
+  resolved?: ReturnType<typeof getResolvedLeagueSettings>
+  index?: RatingGameIndex
+  seasons?: LeagueSeasonRange[]
+  /** Only compute the final rating: skips zero-weight factors and factor detail text. */
+  scoreOnly?: boolean
+  /** Point in time used for "completed season" / "current season" decisions. */
+  now?: number
+}
+
+const DAY_MS = 86_400_000
+
+function buildRatingGameIndex(games: PlayerRatingGame[]): RatingGameIndex {
+  const gamesById = new Map<string, PlayerRatingGame>()
+  const firstGameById = new Map<string, PlayerRatingGame>()
+  const orderById = new Map<string, number>()
+  const timeById = new Map<string, number | null>()
+  const rawTimeById = new Map<string, number>()
+  const dateById = new Map<string, Date>()
+
+  games.forEach((game, index) => {
+    const date = new Date(game.date)
+    const timestamp = date.getTime()
+    gamesById.set(game.gameId, game)
+    if (!firstGameById.has(game.gameId)) firstGameById.set(game.gameId, game)
+    orderById.set(game.gameId, index)
+    timeById.set(game.gameId, Number.isNaN(timestamp) ? null : timestamp)
+    rawTimeById.set(game.gameId, timestamp)
+    dateById.set(game.gameId, date)
+  })
+
+  return { gamesById, firstGameById, orderById, timeById, rawTimeById, dateById }
+}
+
+function getActiveSeasons(settings: ReturnType<typeof getResolvedLeagueSettings>) {
+  return hasActiveSeasonalRanking(settings.standings.seasonalRanking)
+    ? buildLeagueSeasonRanges(settings.standings.seasonalRanking)
+    : []
+}
+
 export function calculatePlayerRating(input: CalculatePlayerRatingInput): PlayerRatingResult {
   return buildPlayerRatingComputation(input).result
 }
 
+/**
+ * Ratings for every player against one shared games list. Equivalent to
+ * `calculatePlayerRatings(...)[name].rating`, but shares lookup tables between players.
+ */
+export function calculatePlayerRatingValues(
+  players: Record<string, PlayerRatingPlayerState>,
+  gameRecords: Record<string, Record<string, PlayerRatingRecord>>,
+  games: PlayerRatingGame[],
+  settings?: LeagueSettingsDocument | null,
+): Record<string, number> {
+  const resolved = getResolvedLeagueSettings(settings)
+
+  if (resolved.playerRating.simpleMmr.enabled) {
+    const ratings = calculateSimplePlayerMmrRatings(gameRecords, games)
+    return Object.fromEntries(Object.values(players).map((player) => {
+      const hasRecords = Object.keys(gameRecords[player.name] ?? {}).length > 0
+      return [player.name, hasRecords ? round3(ratings[player.name] ?? SIMPLE_PLAYER_MMR_INITIAL_RATING) : 0]
+    }))
+  }
+
+  const options: RatingComputationOptions = {
+    resolved,
+    index: buildRatingGameIndex(games),
+    seasons: getActiveSeasons(resolved),
+    scoreOnly: true,
+  }
+
+  return Object.fromEntries(Object.values(players).map((player) => [
+    player.name,
+    buildPlayerRatingComputation({ player, players, gameRecords, games, settings }, options).result.rating,
+  ]))
+}
+
+// Rating details are requested by several components for the same player and state
+// (sidebar, profile, game analysis). League state objects are replaced on every
+// recompute, so caching by their identity never serves stale data.
+const ratingDetailCache = new WeakMap<object, WeakMap<object, Map<string, PlayerRatingDetail>>>()
+const NO_SETTINGS_KEY = {}
+
+function getRatingDetailCacheBucket(input: CalculatePlayerRatingInput) {
+  const settingsKey = (input.settings ?? getRuntimeLeagueSettings() ?? NO_SETTINGS_KEY) as object
+  let bySettings = ratingDetailCache.get(input.gameRecords)
+  if (!bySettings) {
+    bySettings = new WeakMap()
+    ratingDetailCache.set(input.gameRecords, bySettings)
+  }
+  let bucket = bySettings.get(settingsKey)
+  if (!bucket) {
+    bucket = new Map()
+    bySettings.set(settingsKey, bucket)
+  }
+  return bucket
+}
+
 export function buildPlayerRatingDetail(input: CalculatePlayerRatingInput): PlayerRatingDetail {
+  const bucket = getRatingDetailCacheBucket(input)
+  const cacheKey = [
+    input.player.name,
+    input.player.gamesPlayed,
+    input.player.baseWins,
+    input.player.earnedAchievements.length,
+    input.games.length,
+    input.games[0]?.gameId ?? '',
+    input.games.at(-1)?.gameId ?? '',
+    Math.floor(Date.now() / 3_600_000),
+  ].join('|')
+  const cached = bucket.get(cacheKey)
+  if (cached) return cached
+
+  const detail = computePlayerRatingDetail(input)
+  bucket.set(cacheKey, detail)
+  return detail
+}
+
+function computePlayerRatingDetail(input: CalculatePlayerRatingInput): PlayerRatingDetail {
   const settings = getResolvedLeagueSettings(input.settings)
-  const computation = buildPlayerRatingComputation(input)
-  const records = getOrderedPlayerRecords(input.player.name, input.gameRecords, input.games)
-  const gamesById = new Map(input.games.map((game) => [game.gameId, game]))
+  const seasons = getActiveSeasons(settings)
+  const now = Date.now()
+  const fullIndex = buildRatingGameIndex(input.games)
+  const computation = buildPlayerRatingComputation(input, { resolved: settings, index: fullIndex, seasons, now })
+  const records = getOrderedPlayerRecords(input.player.name, input.gameRecords, input.games, fullIndex.orderById)
+  const gamesById = fullIndex.gamesById
+  const includedGameIds = new Set<string>()
+  const partialOwnRecords: Record<string, PlayerRatingRecord> = {}
   const history = records.map((record, index) => {
     const includedRecords = records.slice(0, index + 1)
-    const includedGameIds = new Set(includedRecords.map((entry) => entry.gameId))
-    const partialGameRecords = filterGameRecords(input.gameRecords, includedGameIds)
+    includedGameIds.add(record.gameId)
+    partialOwnRecords[record.gameId] = record
+    // Only the player's own records need trimming: every other record the rating
+    // reads belongs to a pod of an included game, so it is present either way.
+    const partialGameRecords = { ...input.gameRecords, [input.player.name]: { ...partialOwnRecords } }
     const partialGames = input.games.filter((game) => includedGameIds.has(game.gameId))
     const partialPlayer = buildPartialPlayer(input.player, includedRecords)
+    const gameDate = gamesById.get(record.gameId)?.date
+    const isLatest = index === records.length - 1
     const partialComputation = buildPlayerRatingComputation({
       ...input,
       player: partialPlayer,
       gameRecords: partialGameRecords,
       games: partialGames,
+    }, {
+      resolved: settings,
+      seasons,
+      // Each snapshot is evaluated as of its own game day, so seasons that only ended
+      // later do not retroactively change older points. The latest snapshot is the
+      // current rating and keeps using the present.
+      now: isLatest ? now : getSnapshotReferenceTime(gameDate, now),
     })
-    const gameDate = gamesById.get(record.gameId)?.date
     const date = formatSnapshotDate(gameDate)
 
     return {
@@ -256,19 +404,55 @@ export function buildPlayerRatingDetail(input: CalculatePlayerRatingInput): Play
   }
 }
 
-function buildPlayerRatingComputation(input: CalculatePlayerRatingInput): RatingComputation {
-  const settings = getResolvedLeagueSettings(input.settings)
+function buildPlayerRatingComputation(
+  input: CalculatePlayerRatingInput,
+  options: RatingComputationOptions = {},
+): RatingComputation {
+  const settings = options.resolved ?? getResolvedLeagueSettings(input.settings)
   const config = settings.playerRating
   if (config.simpleMmr.enabled) {
     return buildSimplePlayerMmrComputation(input, settings)
   }
-  const records = getOrderedPlayerRecords(input.player.name, input.gameRecords, input.games)
-  const gamesById = new Map(input.games.map((game) => [game.gameId, game]))
-  const gameContexts = buildGameContexts(input.player.name, input.gameRecords, input.games, config)
+  const index = options.index ?? buildRatingGameIndex(input.games)
+  const seasons = options.seasons ?? getActiveSeasons(settings)
+  const now = options.now ?? Date.now()
+  const records = getOrderedPlayerRecords(input.player.name, input.gameRecords, input.games, index.orderById)
+  const gamesById = index.gamesById
+  const weights = config.weights
+  const needs = (weight: number) => !options.scoreOnly || weight !== 0
+  const needsContexts = needs(weights.recentPerformance)
+    || needs(weights.allTimePerformance)
+    || needs(weights.commanderMMRContext)
+    || needs(weights.clutch)
+  const gameContexts = needsContexts
+    ? buildGameContexts(input.player.name, input.gameRecords, input.games, config, index, records)
+    : []
 
-  const recentPerformance = calculateRecentPerformanceScore(records, gameContexts, settings, gamesById)
+  if (options.scoreOnly) {
+    return buildScoreOnlyComputation(input, settings, weights, [
+      [weights.recentPerformance, () => calculateRecentPerformanceScore(records, gameContexts, settings, gamesById, now, seasons)],
+      [weights.allTimePerformance, () => calculateAllTimePerformanceScore(records, gameContexts)],
+      [weights.seasonPoints, () => calculateSeasonPointsScore(records, input.games, settings, { index, seasons, now })],
+      [weights.winRate, () => calculateWinRateScore(input.player)],
+      [weights.commanderMMRContext, () => calculateCommanderMMRContextScore(gameContexts)],
+      [weights.averageCommanderMMR, () => calculateAverageCommanderMMRScore(
+        records,
+        config.topCommandersForAverageMmr,
+        config.minimumGamesForAverageCommanderMmr,
+        config.missingCommanderMmr,
+        config.usePeakCommanderMmrForAverage,
+        calculateCommanderSlotReduction(records, input.games, settings, { index, seasons }),
+      )],
+      [weights.commanderPoints, () => calculateActivityPointsScore(records, input.games, settings, { index, seasons, now })],
+      [weights.achievements, () => calculateAchievementScore(input.player, settings.achievements)],
+      [weights.clutch, () => calculateClutchScore(gameContexts)],
+      [weights.commanderDiversity, () => calculateCommanderDiversityScore(records)],
+    ])
+  }
+
+  const recentPerformance = calculateRecentPerformanceScore(records, gameContexts, settings, gamesById, now, seasons)
   const allTimePerformance = calculateAllTimePerformanceScore(records, gameContexts)
-  const seasonPoints = calculateSeasonPointsScore(records, input.games, settings)
+  const seasonPoints = calculateSeasonPointsScore(records, input.games, settings, { index, seasons, now })
   const winRate = calculateWinRateScore(input.player)
   const commanderMMRContext = calculateCommanderMMRContextScore(gameContexts)
   const averageCommanderMMR = calculateAverageCommanderMMRScore(
@@ -277,14 +461,13 @@ function buildPlayerRatingComputation(input: CalculatePlayerRatingInput): Rating
     config.minimumGamesForAverageCommanderMmr,
     config.missingCommanderMmr,
     config.usePeakCommanderMmrForAverage,
-    calculateCommanderSlotReduction(records, input.games, settings),
+    calculateCommanderSlotReduction(records, input.games, settings, { index, seasons }),
   )
-  const activityPoints = calculateActivityPointsScore(records, input.games, settings)
+  const activityPoints = calculateActivityPointsScore(records, input.games, settings, { index, seasons, now })
   const achievements = calculateAchievementScore(input.player, settings.achievements)
   const clutch = calculateClutchScore(gameContexts)
   const commanderDiversity = calculateCommanderDiversityScore(records)
 
-  const weights = config.weights
   const breakdown = {
     recentPerformance: buildBreakdownEntry(recentPerformance.rawValue, recentPerformance.normalizedScore, weights.recentPerformance),
     allTimePerformance: buildBreakdownEntry(allTimePerformance.rawValue, allTimePerformance.normalizedScore, weights.allTimePerformance),
@@ -339,6 +522,59 @@ function buildPlayerRatingComputation(input: CalculatePlayerRatingInput): Rating
   }
 }
 
+/**
+ * Mirrors the rating arithmetic of the full computation. Factors with weight 0
+ * contribute exactly 0 to the weighted sum, so they are skipped entirely.
+ */
+function buildScoreOnlyComputation(
+  input: CalculatePlayerRatingInput,
+  settings: ReturnType<typeof getResolvedLeagueSettings>,
+  weights: PlayerRatingConfig['weights'],
+  factors: Array<[number, () => ScoreResult]>,
+): RatingComputation {
+  const config = settings.playerRating
+  let weightedSum = 0
+  for (const [weight, calculate] of factors) {
+    if (weight === 0) continue
+    const factor = calculate()
+    weightedSum += buildBreakdownEntry(factor.rawValue, factor.normalizedScore, weight).weightedContribution
+  }
+
+  const totalWeight = Object.values(weights).reduce((sum, weight) => sum + weight, 0) || 1
+  const weightedScore = round3(weightedSum / totalWeight)
+  const activityConfidence = clamp(input.player.gamesPlayed / 12, 0.45, 1)
+  const weightedWithConfidence = round3(weightedScore * activityConfidence)
+  const ratingSpan = Math.max(0, config.maxRating - config.minRating)
+  const rating = round3(config.minRating + (clamp(weightedWithConfidence, 0, 100) / 100) * ratingSpan)
+
+  return {
+    result: {
+      playerId: input.player.name,
+      playerName: input.player.name,
+      system: 'composite',
+      rating,
+      provisional: input.player.gamesPlayed < config.provisionalGames,
+      weightedScore: clamp(weightedWithConfidence, 0, 100),
+      // Score-only callers read the rating alone; share one placeholder breakdown.
+      breakdown: (scoreOnlyPlaceholders ??= { breakdown: createZeroBreakdown(), factors: createZeroFactorDetails() }).breakdown,
+    },
+    confidenceMultiplier: activityConfidence,
+    factors: scoreOnlyPlaceholders.factors,
+  }
+}
+
+let scoreOnlyPlaceholders: {
+  breakdown: Record<PlayerRatingBreakdownKey, RatingBreakdownEntry>
+  factors: Record<PlayerRatingBreakdownKey, PlayerRatingFactorDetail>
+} | null = null
+
+function getSnapshotReferenceTime(gameDate: string | Date | undefined, fallback: number) {
+  if (!gameDate) return fallback
+  const timestamp = new Date(gameDate).getTime()
+  // End of the game's day, so a season that ends that day still counts as running.
+  return Number.isNaN(timestamp) ? fallback : timestamp + DAY_MS - 1
+}
+
 function buildSimplePlayerMmrComputation(
   input: CalculatePlayerRatingInput,
   settings: ReturnType<typeof getResolvedLeagueSettings>,
@@ -367,10 +603,17 @@ export function calculatePlayerRatings(
   games: PlayerRatingGame[],
   settings?: LeagueSettingsDocument | null,
 ) {
+  const resolved = getResolvedLeagueSettings(settings)
+  const options: RatingComputationOptions = {
+    resolved,
+    index: buildRatingGameIndex(games),
+    seasons: getActiveSeasons(resolved),
+  }
+
   return Object.fromEntries(
     Object.values(players).map((player) => [
       player.name,
-      calculatePlayerRating({ player, players, gameRecords, games, settings }),
+      buildPlayerRatingComputation({ player, players, gameRecords, games, settings }, options).result,
     ]),
   ) as Record<string, PlayerRatingResult>
 }
@@ -380,11 +623,18 @@ export function calculateRecentPerformanceScore(
   gameContexts: RatingGameContext[],
   settings: ReturnType<typeof getResolvedLeagueSettings>,
   gamesById: Map<string, PlayerRatingGame>,
+  now = Date.now(),
+  seasons?: LeagueSeasonRange[],
 ) {
   const adjustedPoints = gameContexts.map((context) => context.adjustedBaselinePoints)
   const last10Average = average(adjustedPoints.slice(-10))
   const last25Average = average(adjustedPoints.slice(-25))
-  const currentSeason = getCurrentSeasonRange(settings)
+  const currentSeason = getCurrentSeasonRange(settings, now, seasons)
+  const currentSeasonYear = currentSeason ? null : getCurrentSeasonYear(gamesById)
+  const contextByGameId = new Map<string, RatingGameContext>()
+  for (const context of gameContexts) {
+    if (!contextByGameId.has(context.ownRecord.gameId)) contextByGameId.set(context.ownRecord.gameId, context)
+  }
   const seasonAverage = average(
     records
       .filter((record) => {
@@ -396,11 +646,10 @@ export function calculateRecentPerformanceScore(
           return timestamp >= currentSeason.startMs && timestamp <= currentSeason.endMs
         }
         const date = new Date(timestamp)
-        const currentSeasonYear = getCurrentSeasonYear(gamesById)
         return currentSeasonYear !== null && date.getUTCFullYear() === currentSeasonYear
       })
       .map((record) => {
-        const context = gameContexts.find((entry) => entry.ownRecord.gameId === record.gameId)
+        const context = contextByGameId.get(record.gameId)
         return context?.adjustedBaselinePoints ?? record.basePoints
       }),
   )
@@ -429,23 +678,24 @@ export function calculateAllTimePerformanceScore(
   }
 }
 
+type RatingFactorCache = {
+  index?: RatingGameIndex
+  seasons?: LeagueSeasonRange[]
+  now?: number
+}
+
 export function calculateSeasonPointsScore(
   records: PlayerRatingRecord[],
   games: PlayerRatingGame[],
   settings: ReturnType<typeof getResolvedLeagueSettings>,
+  cache: RatingFactorCache = {},
 ) {
-  const gameTimeById = new Map(
-    games.map((game) => {
-      const timestamp = new Date(game.date).getTime()
-      return [game.gameId, Number.isNaN(timestamp) ? null : timestamp] as const
-    }),
-  )
-  const configuredSeasons = hasActiveSeasonalRanking(settings.standings.seasonalRanking)
-    ? buildLeagueSeasonRanges(settings.standings.seasonalRanking)
-    : []
+  const index = cache.index ?? buildRatingGameIndex(games)
+  const gameTimeById = index.timeById
+  const configuredSeasons = cache.seasons ?? getActiveSeasons(settings)
 
   if (configuredSeasons.length > 0) {
-    const now = Date.now()
+    const now = cache.now ?? Date.now()
     const startedSeasons = configuredSeasons.filter((season) => season.startMs <= now)
     const seasonAverages = startedSeasons.flatMap((season) => {
       const seasonRecords = records.filter((record) => {
@@ -469,8 +719,7 @@ export function calculateSeasonPointsScore(
     }
   }
 
-  const gamesById = new Map(games.map((game) => [game.gameId, game]))
-  const currentSeasonYear = getCurrentSeasonYear(gamesById)
+  const currentSeasonYear = getCurrentSeasonYear(index.gamesById)
   const currentSeasonRecords = records.filter((record) => {
     if (currentSeasonYear === null) return false
     const timestamp = gameTimeById.get(record.gameId)
@@ -578,17 +827,19 @@ export function calculateCommanderSlotReduction(
   records: PlayerRatingRecord[],
   games: PlayerRatingGame[],
   settings: ReturnType<typeof getResolvedLeagueSettings>,
+  cache: Omit<RatingFactorCache, 'now'> = {},
 ) {
-  if (records.length === 0 || !hasActiveSeasonalRanking(settings.standings.seasonalRanking)) return 0
+  const seasons = cache.seasons ?? getActiveSeasons(settings)
+  if (records.length === 0 || seasons.length === 0) return 0
 
-  const timestamps = new Map(games.map((game) => [game.gameId, new Date(game.date).getTime()]))
+  const timestamps = (cache.index ?? buildRatingGameIndex(games)).rawTimeById
   const firstGameTimestamp = records.reduce((earliest, record) => {
     const timestamp = timestamps.get(record.gameId)
     return timestamp !== undefined && Number.isFinite(timestamp) ? Math.min(earliest, timestamp) : earliest
   }, Number.POSITIVE_INFINITY)
   if (!Number.isFinite(firstGameTimestamp)) return 0
 
-  return buildLeagueSeasonRanges(settings.standings.seasonalRanking)
+  return seasons
     .filter((season) => season.endMs < firstGameTimestamp)
     .length
 }
@@ -625,11 +876,10 @@ export function calculateActivityPointsScore(
   records: PlayerRatingRecord[],
   games: PlayerRatingGame[],
   settings: ReturnType<typeof getResolvedLeagueSettings>,
+  cache: RatingFactorCache = {},
 ) {
-  const configuredSeasons = hasActiveSeasonalRanking(settings.standings.seasonalRanking)
-    ? buildLeagueSeasonRanges(settings.standings.seasonalRanking)
-    : []
-  const now = Date.now()
+  const configuredSeasons = cache.seasons ?? getActiveSeasons(settings)
+  const now = cache.now ?? Date.now()
 
   if (records.length === 0) {
     const completedSeasons = configuredSeasons.filter((season) => season.endMs < now).length
@@ -643,7 +893,7 @@ export function calculateActivityPointsScore(
     }
   }
 
-  const gameDates = new Map(games.map((game) => [game.gameId, new Date(game.date)]))
+  const gameDates = (cache.index ?? buildRatingGameIndex(games)).dateById
   const gamesBySeason = new Map<string, number>()
 
   for (const record of records) {
@@ -879,20 +1129,6 @@ function buildPartialPlayer(
   }
 }
 
-function filterGameRecords(
-  gameRecords: Record<string, Record<string, PlayerRatingRecord>>,
-  includedGameIds: Set<string>,
-) {
-  return Object.fromEntries(
-    Object.entries(gameRecords).map(([playerName, records]) => [
-      playerName,
-      Object.fromEntries(
-        Object.entries(records).filter(([gameId]) => includedGameIds.has(gameId)),
-      ),
-    ]),
-  ) as Record<string, Record<string, PlayerRatingRecord>>
-}
-
 function buildFallbackSnapshot(computation: RatingComputation) {
   return {
     gameId: '',
@@ -1015,15 +1251,25 @@ function createZeroFactorDetails(): Record<PlayerRatingBreakdownKey, PlayerRatin
   }
 }
 
+// `toLocaleDateString` builds a new formatter on every call; reuse one instead.
+let snapshotDateFormatter: Intl.DateTimeFormat | null = null
+const snapshotDateLabels = new Map<number, string>()
+
 function formatSnapshotDate(value: string | Date | undefined) {
   if (!value) return 'Unknown'
-  const date = new Date(value)
-  if (Number.isNaN(date.getTime())) return 'Unknown'
-  return date.toLocaleDateString('en-US', {
-    month: 'short',
-    day: 'numeric',
-    year: 'numeric',
-  })
+  const timestamp = new Date(value).getTime()
+  if (Number.isNaN(timestamp)) return 'Unknown'
+  let label = snapshotDateLabels.get(timestamp)
+  if (label === undefined) {
+    snapshotDateFormatter ??= new Intl.DateTimeFormat('en-US', {
+      month: 'short',
+      day: 'numeric',
+      year: 'numeric',
+    })
+    label = snapshotDateFormatter.format(timestamp)
+    snapshotDateLabels.set(timestamp, label)
+  }
+  return label
 }
 
 const FACTOR_META: Record<PlayerRatingBreakdownKey, { label: string, description: string, formula: string }> = {
@@ -1093,15 +1339,31 @@ function buildGameContexts(
   gameRecords: Record<string, Record<string, PlayerRatingRecord>>,
   games: PlayerRatingGame[],
   config: PlayerRatingConfig,
+  index: RatingGameIndex = buildRatingGameIndex(games),
+  orderedRecords?: PlayerRatingRecord[],
 ) {
-  return getOrderedPlayerRecords(playerName, gameRecords, games)
+  const contextKey = `${playerName}|${config.commanderMMRPointModifier.enabled}|${config.commanderMMRPointModifier.maxModifierPercent}`
+
+  return (orderedRecords ?? getOrderedPlayerRecords(playerName, gameRecords, games, index.orderById))
     .map((record) => {
-      const game = games.find((entry) => entry.gameId === record.gameId)
+      const game = index.firstGameById.get(record.gameId)
       if (!game) return null
 
       const podRecords = game.players
         .map((player) => gameRecords[player.name]?.[game.gameId])
         .filter((entry): entry is PlayerRatingRecord => Boolean(entry))
+
+      const cached = gameContextCache.get(record)
+      if (
+        cached
+        && cached.game === game
+        && cached.key === contextKey
+        && cached.podRecords.length === podRecords.length
+        && cached.podRecords.every((entry, podIndex) => entry === podRecords[podIndex])
+      ) {
+        return cached.context
+      }
+
       const opponents = podRecords.filter((entry) => entry.playerName !== playerName)
       const averageOpponentCommanderMMR = average(opponents.map((entry) => entry.commanderMMRBefore))
       const mmrGap = averageOpponentCommanderMMR - record.commanderMMRBefore
@@ -1118,7 +1380,7 @@ function buildGameContexts(
       const expectedPlayerPlacement = getExpectedPlacementFromPlayerRating(record, podRecords)
       const playerPerformanceDelta = expectedPlayerPlacement - record.placement
 
-      return {
+      const context = {
         ownRecord: record,
         opponents,
         adjustedBaselinePoints,
@@ -1131,16 +1393,28 @@ function buildGameContexts(
         playerRatingGap,
         averageOpponentPlayerRating,
       } satisfies RatingGameContext
+      gameContextCache.set(record, { game, key: contextKey, podRecords, context })
+      return context
     })
     .filter((entry): entry is RatingGameContext => entry !== null)
 }
+
+// A game context only depends on the record, its game's pod records and the modifier
+// config. Those record fields never change once a game is processed, so the replay,
+// standings and history snapshots reuse contexts while the pod records are the same objects.
+const gameContextCache = new WeakMap<PlayerRatingRecord, {
+  game: PlayerRatingGame
+  key: string
+  podRecords: PlayerRatingRecord[]
+  context: RatingGameContext
+}>()
 
 function getOrderedPlayerRecords(
   playerName: string,
   gameRecords: Record<string, Record<string, PlayerRatingRecord>>,
   games: PlayerRatingGame[],
+  order: Map<string, number> = new Map(games.map((game, index) => [game.gameId, index])),
 ) {
-  const order = new Map(games.map((game, index) => [game.gameId, index]))
   return Object.values(gameRecords[playerName] ?? {})
     .sort((a, b) => (order.get(a.gameId) ?? Number.MAX_SAFE_INTEGER) - (order.get(b.gameId) ?? Number.MAX_SAFE_INTEGER))
 }
@@ -1180,10 +1454,13 @@ function getCurrentSeasonYear(gamesById: Map<string, PlayerRatingGame>) {
   return Number.isNaN(date.getTime()) ? null : date.getUTCFullYear()
 }
 
-function getCurrentSeasonRange(settings: ReturnType<typeof getResolvedLeagueSettings>) {
-  if (!hasActiveSeasonalRanking(settings.standings.seasonalRanking)) return null
-  const seasons = buildLeagueSeasonRanges(settings.standings.seasonalRanking)
-  const now = Date.now()
+function getCurrentSeasonRange(
+  settings: ReturnType<typeof getResolvedLeagueSettings>,
+  now = Date.now(),
+  activeSeasons?: LeagueSeasonRange[],
+) {
+  const seasons = activeSeasons ?? getActiveSeasons(settings)
+  if (seasons.length === 0) return null
   return seasons.find((season) => now >= season.startMs && now <= season.endMs)
     ?? seasons.filter((season) => season.startMs <= now).at(-1)
     ?? null
